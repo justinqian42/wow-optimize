@@ -378,6 +378,7 @@ namespace Config {
         // predicts the client's whole output and compares before trusting itself.
         bool OptCollisionOutcode = false;
         bool OptCollisionRayOutcode = false;
+        bool OptRayTriangleSse2 = false;
         // The bone matrix upload loop inside sub_829BA0, 3.35% of executing
         // time and the largest entry in the corrected profile with nothing
         // shipped against it. Twelve x87 load/store pairs a bone transpose a

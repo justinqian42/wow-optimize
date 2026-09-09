@@ -47,6 +47,7 @@
 #include "collision_ray_outcode_sse2.h"
 #include "high_tables.h"
 #include "x87_precision_check.h"
+#include "ray_triangle_sse2.h"
 #include "bone_matrix_upload_sse2.h"
 #include "m2_matrix_slot_sse2.h"
 #include "m2_anim_stride.h"
@@ -5495,6 +5496,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
     STAT_TIME("HighTables::LogStats", HighTables::LogStats());
     STAT_TIME("X87Precision::LogStats", X87Precision::LogStats());
+    STAT_TIME("RayTriangle::LogStats", RayTriangle::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
@@ -8212,6 +8214,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     CollisionOutcode::Init();
     X87Precision::Sample("at DLL init");
     CollisionRayOutcode::Init();
+    RayTriangle::Init();
     BoneMatrixUpload::Init();
 
     Log("--- M2 Matrix Slot Copy (SSE2) ---");
@@ -11223,6 +11226,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             ClientWriteBatch::FlushAll("process detach");
             BoneMatrixUpload::Shutdown();
             CollisionRayOutcode::Shutdown();
+            RayTriangle::Shutdown();
             M2MatrixSlot::Shutdown();
             M2AnimStride::Shutdown();
             M2AnimReuse::Shutdown();

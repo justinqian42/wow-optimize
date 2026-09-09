@@ -135,6 +135,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "AnimLod", &Settings::OptAnimLod },
     { "Graphics_Sound", "CollisionOutcode", &Settings::OptCollisionOutcode },
     { "Graphics_Sound", "CollisionRayOutcode", &Settings::OptCollisionRayOutcode },
+    { "Graphics_Sound", "RayTriangleSse2", &Settings::OptRayTriangleSse2 },
     { "Graphics_Sound", "BoneMatrixUpload", &Settings::OptBoneMatrixUpload },
     { "General", "MimallocHighArena", &Settings::OptMimallocHighArena },
     { "General", "ClientWriteBatch", &Settings::OptClientWriteBatch },
@@ -655,6 +656,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptAnimLod             = GetPrivateProfileIntA("Graphics_Sound", "AnimLod", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionOutcode    = GetPrivateProfileIntA("Graphics_Sound", "CollisionOutcode", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionRayOutcode = GetPrivateProfileIntA("Graphics_Sound", "CollisionRayOutcode", 0, iniPath.c_str()) != 0;
+        g_settings.OptRayTriangleSse2     = GetPrivateProfileIntA("Graphics_Sound", "RayTriangleSse2", 0, iniPath.c_str()) != 0;
         g_settings.OptBoneMatrixUpload    = GetPrivateProfileIntA("Graphics_Sound", "BoneMatrixUpload", 0, iniPath.c_str()) != 0;
         g_settings.OptMimallocHighArena   = GetPrivateProfileIntA("General", "MimallocHighArena", 0, iniPath.c_str()) != 0;
         g_settings.OptClientWriteBatch    = GetPrivateProfileIntA("General", "ClientWriteBatch", 1, iniPath.c_str()) != 0;
