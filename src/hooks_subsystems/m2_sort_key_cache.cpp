@@ -197,13 +197,21 @@ int __stdcall Hooked_CompareBody(void* a, void* b) {
         int theirs = orig_Compare(a, b);
         g_verified++;
 
-        // The client's comparator is a bool-returning predicate, so it defines
-        // AL and leaves the rest of EAX as whatever it last held. Reading all
-        // thirty-two bits reads that leftover, and the leftover here is the
-        // derived key: two field sessions retired this module on its very first
-        // comparison against 0x33C60000 and 0x32A00000, which are 13254 and
-        // 12970 shifted into the high half with AL clear. Both were the client
-        // answering false while this answered false.
+        // The client's comparator is a bool-returning predicate. Both of its
+        // exits write one byte and neither clears the rest:
+        //
+        //     0x00824C26  pop edi ; pop esi ; mov al, 1  ; pop ebx ; pop ebp
+        //     0x00824C56  pop edi ; pop esi ; xor al, al ; pop ebx ; pop ebp
+        //
+        // so the upper three bytes of EAX are whatever the compare chain last
+        // put there. On the false exit that is a pointer - the paths into it
+        // arrive from mov eax,[edi+2D0h] and mov eax,[edi+2Ch] - with its low
+        // byte cleared by the xor.
+        //
+        // Reading all thirty-two bits reads that. Two field sessions retired
+        // this module on its very first comparison, against 0x33C60000 and
+        // 0x32A00000; the low byte of each is zero, so the client answered
+        // false both times and so did this.
         if (mine != theirs && ((mine & 0xFF) != 0) == ((theirs & 0xFF) != 0))
             ++g_highBitsDiffered;
 
