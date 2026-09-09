@@ -110,6 +110,12 @@ bool g_dead      = false;
 // Plain 32-bit on a comparator's path. Lower bounds, and the report says so.
 unsigned long g_calls    = 0;
 unsigned long g_verified = 0;
+// Comparisons where the two answers agree in AL and differ above it. That is
+// the shape of a bool-returning client leaving its scratch in the register, and
+// counting it is what keeps "only the low byte is the answer" a measurement
+// rather than an assumption: if this stays at zero over a session, the high
+// bits were never garbage and the reading is wrong.
+unsigned long g_highBitsDiffered = 0;
 unsigned long g_hits     = 0;
 unsigned long g_misses   = 0;
 
@@ -191,15 +197,27 @@ int __stdcall Hooked_CompareBody(void* a, void* b) {
         int theirs = orig_Compare(a, b);
         g_verified++;
 
-        if ((mine != 0) != (theirs != 0)) {
+        // The client's comparator is a bool-returning predicate, so it defines
+        // AL and leaves the rest of EAX as whatever it last held. Reading all
+        // thirty-two bits reads that leftover, and the leftover here is the
+        // derived key: two field sessions retired this module on its very first
+        // comparison against 0x33C60000 and 0x32A00000, which are 13254 and
+        // 12970 shifted into the high half with AL clear. Both were the client
+        // answering false while this answered false.
+        if (mine != theirs && ((mine & 0xFF) != 0) == ((theirs & 0xFF) != 0))
+            ++g_highBitsDiffered;
+
+        if (((mine & 0xFF) != 0) != ((theirs & 0xFF) != 0)) {
             g_dead = true;
             Verdict::Add(Verdict::Bad,
                          "M2SortKey disagreed with the client and retired itself for "
                          "this session");
             Log("[M2SortKey] DISAGREED with the client after %lu comparisons - "
                 "retired for this session, every comparison now goes to the "
-                "client's own code. It answered %d and this answered %d.",
-                g_verified, theirs, mine);
+                "client's own code. It answered 0x%08X and this answered "
+                "0x%08X; only the low byte of each is the answer, the rest is "
+                "whatever the client left in the register.",
+                g_verified, (unsigned)theirs, (unsigned)mine);
             return theirs;
         }
         if (!g_armed && g_verified >= kVerifyFirst) {
@@ -306,6 +324,20 @@ void LogStats() {
         g_verified, g_hits,
         looked ? 100.0 * (double)g_hits / (double)looked : 0.0,
         g_misses);
+
+    if (g_verified > 0) {
+        if (g_highBitsDiffered > 0)
+            Log("[M2SortKey]   %lu of those %lu agreed in the low byte and "
+                "differed above it. That is the client leaving its scratch in "
+                "the register above a one-byte answer, and reading the whole "
+                "register is what retired this module in the field.",
+                g_highBitsDiffered, g_verified);
+        else
+            Log("[Wrong] [M2SortKey] %lu comparisons and not one had garbage "
+                "above the low byte. This module only compares the low byte "
+                "because the client's answer was read as one; if that never "
+                "happens the reading needs checking again.", g_verified);
+    }
 }
 
 void Shutdown() {
