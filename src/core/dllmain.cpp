@@ -46,6 +46,7 @@
 #include "collision_outcode_sse2.h"
 #include "collision_ray_outcode_sse2.h"
 #include "high_tables.h"
+#include "x87_precision_check.h"
 #include "bone_matrix_upload_sse2.h"
 #include "m2_matrix_slot_sse2.h"
 #include "m2_anim_stride.h"
@@ -2121,6 +2122,7 @@ static void MainThreadPump() {
 #endif
 
         // Enable D3D9 State Manager frame update
+        X87Precision::Sample("with frames running");
         M2AnimStride::OnFrame();
         M2AnimReuse::OnFrame();
         OnFrameD3D9StateManager(g_mainThreadId);
@@ -5492,6 +5494,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionOutcode::LogStats", CollisionOutcode::LogStats());
     STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
     STAT_TIME("HighTables::LogStats", HighTables::LogStats());
+    STAT_TIME("X87Precision::LogStats", X87Precision::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
@@ -8207,6 +8210,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     LuaBytecodeStore::Init();
     AnimLod::Init();
     CollisionOutcode::Init();
+    X87Precision::Sample("at DLL init");
     CollisionRayOutcode::Init();
     BoneMatrixUpload::Init();
 

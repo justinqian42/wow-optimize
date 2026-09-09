@@ -133,6 +133,7 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/anim_lod.cpp
     src/simd_math/collision_outcode_sse2.cpp
     src/simd_math/collision_ray_outcode_sse2.cpp
+    src/simd_math/x87_precision_check.cpp
     src/simd_math/aabb_overlap_sse2.cpp
     src/simd_math/anim_quat_unpack_sse2.cpp
     src/simd_math/anim_vec3_track_sse2.cpp
