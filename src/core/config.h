@@ -167,6 +167,7 @@ namespace Config {
         bool OptAsyncTexLoader = false;
         bool OptAsyncTerrainLoader = false;
         bool OptRcuObjMgr = false;
+        bool OptObjMgrEnumFast = false;
         bool OptMipBiasGovernor = false;
         
         // Combat & Network
