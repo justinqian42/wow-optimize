@@ -148,6 +148,7 @@ add_library(wow_optimize SHARED
     src/simd_math/bone_matrix_upload_sse2.cpp
     src/simd_math/m2_matrix_slot_sse2.cpp
     src/hooks_subsystems/m2_anim_stride.cpp
+    src/hooks_subsystems/m2_anim_reuse.cpp
     src/allocators/mimalloc_high_arena.cpp
     src/hooks_subsystems/client_write_batch.cpp
     src/hooks_subsystems/render_null_guard.cpp

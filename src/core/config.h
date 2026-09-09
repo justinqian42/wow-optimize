@@ -537,6 +537,7 @@ namespace Config {
         // client's own no-bones branch out of the bone loop. The tail still
         // runs, so materials and attachments keep animating.
         bool OptM2AnimStride = false;
+        bool OptM2AnimReuse = false;
         // Counts Lua VM allocations by size through G->frealloc. A measurement,
         // like the draw census - it decides whether a dedicated Lua arena is
         // worth building.
