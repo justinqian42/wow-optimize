@@ -108,6 +108,13 @@ The current public build is focused on real frametime stability, long-session sm
 
 ### Fixed
 
+* **The two animation throttles are marked as tried and failed.** Model Animation
+  Stride and Spread Model Animation both hold a model's skeleton and choose what
+  to hold by distance, and both were reported stuttering visibly on environment
+  animation: the lava in Ironforge for one, the Deeprun Tram tunnels for the
+  other. Distance is a poor stand-in for whether a held skeleton is seen, because
+  a large animation fills the screen at any range. Neither has produced a
+  measured frame gain to weigh against it.
 * **Three megabytes of address space came back.** The log ring reserved four
   megabytes for lines that are measured at about a hundred and fifty characters.
   It is sized to what is actually written now. That space sits in the low 2GB,
