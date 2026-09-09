@@ -13,6 +13,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "regex_cache.h"
+#include "high_tables.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -47,7 +48,11 @@ struct RegexCacheEntry {
     uint8_t   compiled[REGEX_MAX_COMPILED];
 };
 
-static RegexCacheEntry g_regexCache[REGEX_CACHE_SIZE];
+// Out of this DLL's image and into the top half of the address space; see
+// high_tables.cpp for why that half and not this one.
+static constexpr size_t REGEX_CACHE_BYTES =
+    sizeof(RegexCacheEntry) * REGEX_CACHE_SIZE;
+static RegexCacheEntry* g_regexCache = nullptr;
 static volatile LONG64 g_regexHits = 0;
 static volatile LONG64 g_regexMisses = 0;
 static volatile LONG64 g_regexEvictions = 0;
@@ -116,7 +121,7 @@ void RegexCache_Put(const char* pattern, int patternLen, unsigned int options, c
 }
 
 void RegexCache_Clear() {
-    memset(g_regexCache, 0, sizeof(g_regexCache));
+    if (g_regexCache) memset(g_regexCache, 0, REGEX_CACHE_BYTES);
 }
 
 // ================================================================
@@ -170,7 +175,13 @@ static void* __cdecl Hooked_pcre_compile(
 // Install / Shutdown
 // ================================================================
 bool InstallRegexCache() {
-    memset(g_regexCache, 0, sizeof(g_regexCache));
+    g_regexCache = (RegexCacheEntry*)HighTables::Reserve("regex_cache",
+                                                         REGEX_CACHE_BYTES);
+    if (!g_regexCache) {
+        Log("[RegexCache] NOT installed: the %u KB table could not be "
+            "allocated.", (unsigned)(REGEX_CACHE_BYTES / 1024));
+        return false;
+    }
 
     if (WineSafe_CreateHook((void*)0x008418F0, (void*)Hooked_pcre_compile, (void**)&orig_pcre_compile) == MH_OK) {
         if (MH_EnableHook((void*)0x008418F0) == MH_OK) {

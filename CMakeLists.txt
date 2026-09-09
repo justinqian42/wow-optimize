@@ -301,6 +301,7 @@ add_library(wow_optimize SHARED
     src/allocators/memory_pressure_governor.cpp
     src/allocators/memory_pressure_governor.h
     src/allocators/loading_defrag.cpp
+    src/allocators/high_tables.cpp
     src/allocators/loading_defrag.h
     src/hooks_subsystems/d3d9_state_cache.cpp
     src/hooks_subsystems/d3d9_state_cache.h

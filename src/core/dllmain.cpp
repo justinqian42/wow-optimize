@@ -45,6 +45,7 @@
 #include "anim_lod.h"
 #include "collision_outcode_sse2.h"
 #include "collision_ray_outcode_sse2.h"
+#include "high_tables.h"
 #include "bone_matrix_upload_sse2.h"
 #include "m2_matrix_slot_sse2.h"
 #include "m2_anim_stride.h"
@@ -5490,6 +5491,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("AnimLod::LogStats", AnimLod::LogStats());
     STAT_TIME("CollisionOutcode::LogStats", CollisionOutcode::LogStats());
     STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
+    STAT_TIME("HighTables::LogStats", HighTables::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());

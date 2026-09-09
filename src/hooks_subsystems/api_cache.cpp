@@ -45,6 +45,7 @@
 #include <cstdio>
 #include "MinHook.h"
 #include "version.h"
+#include "high_tables.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -183,7 +184,11 @@ struct ItemCacheEntry {
     ItemRetVal vals[ITEM_RETVALS];
 };
 
-static ItemCacheEntry g_itemCache[CACHE_SIZE] = {};
+// Out of this DLL's image and into the top half of the address space; see
+// high_tables.cpp for why that half and not this one. Indexed exactly as
+// the array was, and VirtualAlloc returns it zeroed.
+static constexpr size_t ITEM_CACHE_BYTES = sizeof(ItemCacheEntry) * CACHE_SIZE;
+static ItemCacheEntry* g_itemCache = nullptr;
 
 static long g_itemHits     = 0;
 static long g_itemMisses   = 0;
@@ -443,6 +448,14 @@ namespace ApiCache {
 bool Init() {
     g_active = true;
 
+    g_itemCache = (ItemCacheEntry*)HighTables::Reserve("api_cache",
+                                                       ITEM_CACHE_BYTES);
+    if (!g_itemCache) {
+        Log("[ApiCache] NOT installed: the %u KB table could not be "
+            "allocated.", (unsigned)(ITEM_CACHE_BYTES / 1024));
+        return false;
+    }
+
 #if !TEST_DISABLE_GETITEMINFO_CACHE
     bool hooked = HookFunc("GetItemInfo", ADDR_GetItemInfo,
                            (void*)Hooked_GetItemInfo, (void**)&orig_GetItemInfo);
@@ -453,7 +466,7 @@ bool Init() {
 
     Log("[ApiCache] Init complete: GetItemInfo %s, %d slots, %u KB",
         hooked ? "hooked" : "NOT hooked", CACHE_SIZE,
-        (unsigned)(sizeof(g_itemCache) / 1024));
+        (unsigned)(ITEM_CACHE_BYTES / 1024));
     return hooked;
 }
 
@@ -490,8 +503,13 @@ void Shutdown() {
 }
 
 void ClearCache() {
+    // The table is no longer part of this DLL's image, so it can be absent.
+    // This is called from the loading-screen path, which does not know whether
+    // the cache installed.
+    if (!g_itemCache) return;
+
     AcquireSRWLockExclusive(&g_itemCacheLock);
-    memset(g_itemCache, 0, sizeof(g_itemCache));
+    memset(g_itemCache, 0, ITEM_CACHE_BYTES);
     ReleaseSRWLockExclusive(&g_itemCacheLock);
 
     Log("[ApiCache] Cache cleared (%d item entries)", CACHE_SIZE);
