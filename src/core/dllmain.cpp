@@ -44,6 +44,7 @@
 #include "lua_undump.h"
 #include "anim_lod.h"
 #include "collision_outcode_sse2.h"
+#include "collision_ray_outcode_sse2.h"
 #include "bone_matrix_upload_sse2.h"
 #include "m2_matrix_slot_sse2.h"
 #include "m2_anim_stride.h"
@@ -5486,6 +5487,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     LuaBytecodeStore::SaveIfDirty();
     STAT_TIME("AnimLod::LogStats", AnimLod::LogStats());
     STAT_TIME("CollisionOutcode::LogStats", CollisionOutcode::LogStats());
+    STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
@@ -8200,6 +8202,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     LuaBytecodeStore::Init();
     AnimLod::Init();
     CollisionOutcode::Init();
+    CollisionRayOutcode::Init();
     BoneMatrixUpload::Init();
 
     Log("--- M2 Matrix Slot Copy (SSE2) ---");
@@ -11209,6 +11212,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             // first, which is why every other flush point exists.
             ClientWriteBatch::FlushAll("process detach");
             BoneMatrixUpload::Shutdown();
+            CollisionRayOutcode::Shutdown();
             M2MatrixSlot::Shutdown();
             M2AnimStride::Shutdown();
             SamplingProfiler::Shutdown();
