@@ -1249,12 +1249,29 @@ static int __cdecl Hooked_MathModf(lua_State* L) {
 
 static lua_CFunction_t orig_math_max = nullptr;
 
+// Lua 5.1's math_max takes the first argument and folds the rest in with
+// `if (d > dmax) dmax = d`, left to right. That fold is reproduced rather than
+// written as a pair of ternaries, because the two differ.
+//
+// The old two-argument form here was `a > b ? a : b`. With b a NaN, `a > b` is
+// false and it returned the NaN; Lua keeps a, because its test is the other way
+// round and also false. A NaN passes the LUA_TNUMBER check, so this was
+// reachable. Folding in the client's own direction fixes it and extends to the
+// three and four argument calls that addon layout code makes, which used to
+// fall through to the client entirely.
+static constexpr int kMathFoldMax = 4;
+
 static int __cdecl Hooked_MathMax(lua_State* L) {
     int n = lua_gettop_(L);
-    if (n == 2 && lua_type_(L, 1) == LUA_TNUMBER && lua_type_(L, 2) == LUA_TNUMBER) {
-        double a = lua_tonumber_(L, 1);
-        double b = lua_tonumber_(L, 2);
-        lua_pushnumber_(L, a > b ? a : b);
+    if (n >= 1 && n <= kMathFoldMax) {
+        for (int i = 1; i <= n; ++i)
+            if (lua_type_(L, i) != LUA_TNUMBER) { return orig_math_max(L); }
+        double m = lua_tonumber_(L, 1);
+        for (int i = 2; i <= n; ++i) {
+            double d = lua_tonumber_(L, i);
+            if (d > m) m = d;
+        }
+        lua_pushnumber_(L, m);
         g_mathHits++;
         return 1;
     }
@@ -1263,12 +1280,19 @@ static int __cdecl Hooked_MathMax(lua_State* L) {
 
 static lua_CFunction_t orig_math_min = nullptr;
 
+// The same fold as math.max, in the client's own direction, for the same
+// reason. See the note above Hooked_MathMax.
 static int __cdecl Hooked_MathMin(lua_State* L) {
     int n = lua_gettop_(L);
-    if (n == 2 && lua_type_(L, 1) == LUA_TNUMBER && lua_type_(L, 2) == LUA_TNUMBER) {
-        double a = lua_tonumber_(L, 1);
-        double b = lua_tonumber_(L, 2);
-        lua_pushnumber_(L, a < b ? a : b);
+    if (n >= 1 && n <= kMathFoldMax) {
+        for (int i = 1; i <= n; ++i)
+            if (lua_type_(L, i) != LUA_TNUMBER) { return orig_math_min(L); }
+        double m = lua_tonumber_(L, 1);
+        for (int i = 2; i <= n; ++i) {
+            double d = lua_tonumber_(L, i);
+            if (d < m) m = d;
+        }
+        lua_pushnumber_(L, m);
         g_mathHits++;
         return 1;
     }
