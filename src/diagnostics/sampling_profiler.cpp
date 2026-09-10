@@ -18,6 +18,7 @@
 #include "lua_addon_sampler.h"
 #include "frame_bench.h"
 #include "version.h"
+#include "high_tables.h"
 #pragma comment(lib, "psapi.lib")
 
 extern "C" void Log(const char* fmt, ...);
@@ -1203,9 +1204,27 @@ static void DumpResults() {
 
     // Buckets: one per named function, one "system_dll", plus one per non-empty
     // 4KB WoW page (so unlisted hot code is reported by address, not lumped into
-    // a single opaque blob). Static (not on the stack) because of the page slots.
+    // a single opaque blob). Too large for the stack because of the page slots.
+    //
+    // It used to be a function-local static, which put half a megabyte in this
+    // DLL's image - and the image is mapped into the low 2GB, the half the
+    // client allocates from and the half Sicsoo's sessions report down to a 5MB
+    // largest free block. The profiler is off in every field log to hand, so
+    // that half megabyte was being taken from the scarce half for a report
+    // nobody was running. It is reserved on the first report instead, out of
+    // the top of the address space, and kept for the ones after it.
     static constexpr int MAX_BUCKETS = MAX_KNOWN_FUNCS + NUM_PAGES + SELF_PAGES + 128 + 24 + 1;
-    static SampleBucket buckets[MAX_BUCKETS];
+    static SampleBucket* buckets = nullptr;
+    if (!buckets) {
+        buckets = (SampleBucket*)HighTables::Reserve(
+            "profiler_report", sizeof(SampleBucket) * MAX_BUCKETS);
+        if (!buckets) {
+            Log("[Profiler] no report this interval: the %u KB bucket table "
+                "could not be reserved.",
+                (unsigned)(sizeof(SampleBucket) * MAX_BUCKETS / 1024));
+            return;
+        }
+    }
     int bucketCount = 0;
 
     // Initialize buckets from known funcs. The array is static and this runs on
