@@ -29,6 +29,39 @@
 // cvtdq2pd converts two at a time in a register with no memory in the way.
 //
 // ---------------------------------------------------------------------------
+// What it is worth, end to end, with nothing estimated
+//
+// The expansion was compiled a second time with /arch:IA32 /fp:precise, which
+// makes MSVC emit the same store-then-reload the client does, because x86 has no
+// other way to get an integer onto the x87 stack. Twenty-six million
+// quaternions each way:
+//
+//     SSE2   1.015 ns/quaternion
+//     x87    7.440 ns/quaternion
+//     speedup     7.33x, so 6.425 ns saved each
+//
+// They agree over all 65536 possible uint16 values in the first component, with
+// no float differing by a bit.
+//
+// Sicsoo's session of 2026-09-10 then supplies the other two figures:
+// 1,500,543,068 quaternions unpacked over 490,589 presented frames, average
+// frame 16.01 ms. So:
+//
+//     9.64 s of CPU over the session
+//     19.7 microseconds a frame
+//     0.123% of an average frame
+//     3059 quaternions a frame
+//
+// That is the whole chain, and none of it is a guess: the per-call saving was
+// measured on this machine, the call count and the frame count were measured on
+// the player's. It is also small, which is worth saying plainly - a seven-times
+// speedup on something that runs three thousand times a frame still only comes
+// to a fifth of a percent, and the note in ab_test.cpp predicted exactly that.
+// The average also hides the shape: the animation census has seen 7800 bones in
+// one frame against 1054 typical, so the frames that cost the most save the
+// most.
+//
+// ---------------------------------------------------------------------------
 // The constant is not the one the decompiler prints
 //
 // Hex-Rays renders the scale as 0.000030518044. The instruction is
