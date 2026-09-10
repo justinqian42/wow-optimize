@@ -169,6 +169,7 @@ namespace Config {
         bool OptRcuObjMgr = false;
         bool OptObjMgrEnumFast = false;
         bool OptMpqOpenCensus = false;
+        bool OptMpqNegativeCache = false;
         bool OptMipBiasGovernor = false;
         
         // Combat & Network

@@ -54,9 +54,29 @@
 // this says roughly what it would save. If they are not, the idea is dead for
 // one log line and the forty-five seconds are somewhere else.
 //
-// Nothing is cached here and no call is skipped. Every call goes through to the
-// client, in order, and the only thing that changes is that afterwards there is
-// a number.
+// ---------------------------------------------------------------------------
+// And then removing it, under its own switch
+//
+// MpqNegativeCache turns the count into a saving: a name already searched for
+// and not found is answered without asking the client again. Three things keep
+// that from being a way to break a loading screen.
+//
+// It is only alive while a loading screen is up, and the table is cleared when
+// one begins. Archives are opened at startup and when a patch is mounted, not
+// in the middle of a load, so within one loading screen the set of files that
+// exist cannot change. Outside a loading screen nothing is served at all, so
+// ordinary play runs exactly as it does now.
+//
+// The key is the name, the archive handle and the search scope together, not
+// just the name. A file absent from one archive is not absent from the next
+// one, and a cache that forgot which archive was asked would answer for the
+// wrong one.
+//
+// And it proves itself before it saves anything. For the first kProve hits the
+// client is called anyway and its answer compared; only after that many
+// agreements does a hit skip the call, and one hit in kRecheck keeps asking
+// afterwards. A single disagreement retires the serving half for the session
+// and leaves the counting half running.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -121,10 +141,31 @@ struct Slot {
 };
 Slot* g_seen = nullptr;
 
+// The serving half. Off unless its own switch is on, and then still silent
+// until it has proved itself.
+constexpr long     kProve   = 2000;
+constexpr unsigned kRecheck = 255;    // one hit in this many, as a mask
+
+bool g_serveOn    = false;   // the switch
+bool g_serveArmed = false;   // proved, and now actually skipping calls
+bool g_serveDead  = false;
+
+unsigned long g_proved   = 0;   // hits where the client was asked anyway and agreed
+unsigned long g_served   = 0;   // calls answered without asking the client
+unsigned long g_rechecks = 0;
+
 // MPQ names are case-insensitive and mix separators, so both are folded before
 // hashing - otherwise the same file under two spellings looks like two names.
-uint32_t HashName(const char* s) {
+// The archive handle and the search scope are part of the key. A name absent
+// from one archive is not absent from another, and a cache that forgot which
+// one was asked would answer for the wrong archive.
+uint32_t HashName(const char* s, const void* archive, int scope) {
     uint32_t h = 2166136261u;
+    uint32_t tag = (uint32_t)(uintptr_t)archive ^ (uint32_t)scope;
+    for (int i = 0; i < 4; ++i) {
+        h ^= (tag >> (i * 8)) & 0xFFu;
+        h *= 16777619u;
+    }
     for (const char* p = s; *p; ++p) {
         char c = *p;
         if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
@@ -151,6 +192,28 @@ int __stdcall Hooked_Open(void* archive, const char* name, int scope, void** out
     }
 
     const bool loading = LoadingState::IsLoading();
+    const uint32_t h = HashName(name, archive, scope);
+    Slot& s = g_seen[h & kMask];
+    const bool knownMissing = (s.hash == h);
+
+    // Serving. Only inside a loading screen, only for a name this same archive
+    // and scope has already failed to find, and only once the client has agreed
+    // enough times. One hit in kRecheck asks anyway, for ever.
+    if (knownMissing && loading && g_serveOn && !g_serveDead) {
+        const bool ask = !g_serveArmed || ((g_proved & kRecheck) == 0);
+        if (!ask) {
+            ++s.misses;
+            ++g_missRepeat;
+            ++g_missRepeatLoad;
+            ++g_calls;
+            ++g_callsLoad;
+            ++g_served;
+            if (out) *out = nullptr;
+            return 0;
+        }
+        ++g_rechecks;
+    }
+
     const double t0 = NowMs();
     const int r = orig_Open(archive, name, scope, out);
     const double dt = NowMs() - t0;
@@ -159,11 +222,32 @@ int __stdcall Hooked_Open(void* archive, const char* name, int scope, void** out
     g_msTotal += dt;
     if (loading) { ++g_callsLoad; g_msLoad += dt; }
 
+    // The proof. A name this cache would have answered for, that the client has
+    // just found, means the cache is wrong about something and the serving half
+    // stops for the session. The counting half carries on.
+    if (knownMissing && loading && g_serveOn && !g_serveDead) {
+        if (r) {
+            g_serveDead = true;
+            Log("[MpqOpen] negative cache RETIRED: '%s' was remembered as not "
+                "found and the client has just found it. Nothing was skipped "
+                "on this call - the client answered it - so the load is "
+                "unaffected, but the assumption that the set of files cannot "
+                "change inside one loading screen does not hold here.", name);
+        } else {
+            ++g_proved;
+            if (!g_serveArmed && g_proved >= (unsigned long)kProve) {
+                g_serveArmed = true;
+                Log("[MpqOpen] negative cache armed after %lu agreements: a "
+                    "repeated miss inside a loading screen is answered without "
+                    "asking the client, and one hit in %u still asks.",
+                    g_proved, kRecheck + 1);
+            }
+        }
+    }
+
     if (r) { ++g_found; return r; }
 
-    const uint32_t h = HashName(name);
-    Slot& s = g_seen[h & kMask];
-    if (s.hash == h) {
+    if (knownMissing) {
         ++s.misses;
         ++g_missRepeat;
         if (loading) ++g_missRepeatLoad;
@@ -184,7 +268,9 @@ int __stdcall Hooked_Open(void* archive, const char* name, int scope, void** out
 }  // namespace
 
 bool Init() {
-    if (!Config::g_settings.OptMpqOpenCensus) return true;
+    // The cache is served through the same hook, so either switch installs it.
+    if (!Config::g_settings.OptMpqOpenCensus &&
+        !Config::g_settings.OptMpqNegativeCache) return true;
 
     LARGE_INTEGER f;
     QueryPerformanceFrequency(&f);
@@ -210,6 +296,7 @@ bool Init() {
         return false;
     }
     g_installed = true;
+    g_serveOn = Config::g_settings.OptMpqNegativeCache;
 
     Log("[MpqOpen] ACTIVE on sub_424B50, the archive open-by-name call - Storm "
         "is linked into wow.exe here rather than shipped as storm.dll, and this "
@@ -232,10 +319,14 @@ void OnLoadBegin() {
     g_callsLoad = 0;
     g_missRepeatLoad = 0;
     g_msLoad = 0.0;
+    // Cleared at the start of every load. What exists cannot change inside one
+    // loading screen, which is the whole basis for serving from this; across
+    // two of them a patch can be mounted, so nothing is carried over.
+    if (g_seen) memset(g_seen, 0, sizeof(Slot) * kSlots);
 }
 
 void ReportLoad(double loadMs) {
-    if (!g_installed || !Config::g_settings.OptMpqOpenCensus) return;
+    if (!g_installed) return;
     if (g_callsLoad == 0) {
         Log("[LoadingState]   measured and zero: the client opened no archive "
             "file by name inside this loading screen.");
@@ -249,7 +340,8 @@ void ReportLoad(double loadMs) {
 }
 
 void LogStats() {
-    if (!Config::g_settings.OptMpqOpenCensus) return;
+    if (!Config::g_settings.OptMpqOpenCensus &&
+        !Config::g_settings.OptMpqNegativeCache) return;
     if (!g_installed) {
         Log("[MpqOpen] switched on but not installed, so nothing here was "
             "measured.");
@@ -261,6 +353,12 @@ void LogStats() {
         return;
     }
 
+    if (g_serveOn)
+        Log("[MpqOpen] negative cache: %lu answered without asking the client, "
+            "%lu agreements proving it, %lu rechecks. %s",
+            g_served, g_proved, g_rechecks,
+            g_serveDead ? "RETIRED on a disagreement." :
+            g_serveArmed ? "Armed." : "Still proving; nothing skipped yet.");
     Log("[MpqOpen] %lu opens, %.0f ms. %lu found, %lu missed for the first "
         "time, %lu missed a name already missed (%.1f%% of all opens). Counts "
         "are lower bounds and the time includes this hook's own cost.",
