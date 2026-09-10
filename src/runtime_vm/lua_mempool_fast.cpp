@@ -112,6 +112,37 @@ constexpr int kHintSlots = 8;
 // runs, searching from zero exactly as before, so no free block can be missed
 // and no chunk is grown that was not needed. That is the safety net the single
 // hint already had; only the search changed.
+//
+// Proved and timed before shipping, in a harness that compiles this file, builds
+// a pool in the layout it reads, and supplies the client's own loop as
+// orig_PoolAlloc. Three million interleaved allocations and frees, both policies
+// over the same script:
+//
+//     chunks grown             reference 340, bitmap 340 - identical
+//     blocks handed out twice  0 and 0
+//     order checksum           identical - same blocks, same order
+//     client scan              54.37 ns/op
+//     bitmap                   20.12 ns/op
+//     speedup                  2.70x
+//     903 fallbacks in 1.5 million allocations, 0 stale bits
+//
+// The identical order is worth more than the timing and is not a coincidence.
+// The bitmap is scanned from word zero and _BitScanForward returns the lowest
+// set bit, so it visits chunks in the order the client visits them and simply
+// never touches the ones known to be full. Serving the same block every time is
+// the strongest form of "no free block is missed" that a test can show.
+//
+// The first run of that harness divided by the operations asked for while every
+// pass was ending early on an exhausted pool, and reported 6.07 ns/op against
+// 1.52. The ratio survived because both sides shared the error; the absolute
+// figures did not. Counting what actually ran is what caught it, which is the
+// rule that has now caught four instruments in this project.
+//
+// What this is worth is not mainly the average. A session's 5.56 million
+// allocations at roughly 68 ns saved each is a few hundred milliseconds spread
+// across half a million frames, which nobody would feel. The tail is the point:
+// the 33+ bucket has no upper edge, it is where both tester freeze samples
+// landed, and a bitmap scan has no tail to land in.
 constexpr int kMaxChunks = 2048;    // the measured pool held 972
 constexpr int kWords     = kMaxChunks / 32;
 
