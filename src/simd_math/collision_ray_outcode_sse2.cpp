@@ -93,6 +93,34 @@
 // vertices at a time, and packed down to four bytes with one store.
 //
 // ---------------------------------------------------------------------------
+// Measured, and the number is explained rather than just reported
+//
+// The same comparisons were compiled a second time with /arch:IA32 /fp:precise,
+// which makes MSVC emit fcom and fnstsw against the x87 stack - six of each per
+// vertex, exactly what the client's loop has. Forty-eight million vertices
+// classified each way:
+//
+//     packed double    1.922 ns/vertex
+//     x87             31.575 ns/vertex
+//     speedup             16.43x
+//
+// That is large enough to be worth checking against what it should be. At
+// 3.5 GHz the x87 side is about 110 cycles a vertex for twenty-four
+// instructions, which only adds up with the six branches being mispredicted:
+// six times fifteen is ninety of those cycles. The vector side is about seven
+// cycles a vertex, which is thirteen branchless instructions at roughly two a
+// cycle. So the sixteen is not the vector width - four lanes cannot give
+// sixteen - it is the branches not being there.
+//
+// And the two agree: 400 models of 300 vertices, 117995 non-zero outcodes, no
+// byte different. The x87 build came through a different instruction set and a
+// different compiler path, so agreeing with it checks the outcode table itself
+// and not just my own vectorisation of my own reading.
+//
+// This is the classification loop. The triangle loop after it is the client's
+// and is untouched, so it is not a speedup of the whole function.
+//
+// ---------------------------------------------------------------------------
 // The two patch sites and what the second one is for
 //
 // Entry is 0x007C67D9, the first of the six flds that load the box, six bytes
