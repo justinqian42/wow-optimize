@@ -101,6 +101,17 @@ static volatile DWORD  g_lastWalkTick = 0;
 
 static double   g_walkMsWorst = 0.0;
 static double   g_walkMsTotal = 0.0;
+
+// Which thread paid for each walk. The two used to share one pair of counters
+// and the report called all of them main-thread work, which was true before the
+// monitor thread existed and false afterwards. Reading that line as it stood,
+// 811 runs and 7.7 seconds looked like a stall inside a frame every ten seconds;
+// the arithmetic is what gave it away - 811 walks over a 7854 second session is
+// one every 9.7 seconds, which is the monitor interval and cannot be a frame.
+static DWORD    g_monitorTid    = 0;
+static unsigned g_walkCountMain = 0;
+static double   g_walkMsMain    = 0.0;
+static double   g_walkMsWorstMain = 0.0;
 static unsigned g_walkCount   = 0;
 static unsigned g_walkRegionsWorst = 0;
 
@@ -169,6 +180,11 @@ static SIZE_T GetLargestFreeBlock(SIZE_T* lowHalfOut = nullptr,
         g_walkMsTotal += ms;
         ++g_walkCount;
         if (ms > g_walkMsWorst) { g_walkMsWorst = ms; g_walkRegionsWorst = regions; }
+        if (GetCurrentThreadId() != g_monitorTid) {
+            ++g_walkCountMain;
+            g_walkMsMain += ms;
+            if (ms > g_walkMsWorstMain) g_walkMsWorstMain = ms;
+        }
     }
 
     if (lowHalfOut)  *lowHalfOut  = largestLow;
@@ -395,7 +411,9 @@ bool HeapCompactor_Init() {
     }
     
     g_shutdown = false;
-    g_monitorThread = CreateThread(NULL, 0, MonitorThread, NULL, 0, NULL);
+    DWORD monTid = 0;
+    g_monitorThread = CreateThread(NULL, 0, MonitorThread, NULL, 0, &monTid);
+    g_monitorTid = monTid;
     
     if (!g_monitorThread) {
         Log("[HeapCompactor] Failed to create monitor thread");
@@ -454,20 +472,21 @@ extern "C" void HeapCompactor_LogStats() {
         all = GetLargestFreeBlock(&low);
     }
 
-    // Printed before the numbers it produced, because if this walk is what a
-    // tester is seeing as a forty-millisecond stall then it is the more important
-    // of the two facts. It runs on the main thread, inside a frame.
+    // Printed before the numbers it produced, and split by which thread paid.
+    // Only the second figure is a stall a player can feel; the first is off the
+    // frame entirely and is here so the two are not confused, which is exactly
+    // what happened while they shared one line.
     if (g_walkCount) {
         Log("[HeapCompactor] the address-space walk that produces the figures "
             "below: %u run(s), %.1f ms in total, worst %.1f ms over %u regions. "
-            "This runs on the main thread and lands inside a frame, and a "
-            "\"periodic maintenance\" stall in this log is worth comparing "
-            "against it.",
-            g_walkCount, g_walkMsTotal, g_walkMsWorst, g_walkRegionsWorst);
+            "%u of those (%.1f ms, worst %.1f ms) were on a thread other than "
+            "the monitor - those are the ones that land inside a frame. The rest "
+            "are the monitor thread and cost the player nothing.",
+            g_walkCount, g_walkMsTotal, g_walkMsWorst, g_walkRegionsWorst,
+            g_walkCountMain, g_walkMsMain, g_walkMsWorstMain);
     }
     Log("[HeapCompactor] the figures below are %lu ms old - taken by the monitor "
-        "thread, not walked again here. That walk is VirtualQuery over the whole "
-        "address space and this function runs inside a frame.",
+        "thread, so this report does not walk again for them.",
         (unsigned long)ageMs);
     Log("[HeapCompactor] %uMB largest free below 2GB, %uMB across all address "
         "space; %llu compactions, %lluKB recovered, next attempt no sooner than "
