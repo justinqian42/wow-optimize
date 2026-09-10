@@ -27,6 +27,53 @@ static volatile long g_rawgetFast  = 0;
 typedef int (__cdecl* lua_rawget_fn)(uintptr_t L, int idx);
 static lua_rawget_fn orig_rawget = nullptr;
 
+// The same one-off that kept lua_rawgeti out of its own fast path. Three field
+// sessions: 61362728 calls with 576 taking it, 5557775 with 170, 8322978 with
+// 187. Nought point nought per cent, every time.
+//
+// lua_rawget is reached as lua_rawget(L, LUA_GLOBALSINDEX) for a global read and
+// as lua_rawget(L, LUA_REGISTRYINDEX) for a registry one, and both are below the
+// `idx > -10000` floor the stack-slot resolution uses. So the fast path was
+// available for exactly the indices nobody passes.
+//
+// Resolved out of the client's own index2adr at 0x0084D9C0, which is explicit:
+//
+//     case -10000:  return (_DWORD *)(a2[5] + 104);   // l_G + 104
+//     case -10002:  return a2 + 18;                   // L + 72
+//
+// a2 is the lua_State as dwords, so a2[5] is L->l_G at 0x14. -10001 stays with
+// the engine: that case writes four lua_State fields before returning.
+//
+// Checked rather than asserted. The first calls compare this against what the
+// client's index2adr returns for the same arguments, through a naked thunk -
+// that function is __usercall with the index in EAX and the state in ECX - and
+// one disagreement retires the pseudo-index path for the session.
+static const int kRegistryIndex = -10000;
+static const int kGlobalsIndex  = -10002;
+
+static const long kPseudoProve = 20000;
+static long g_pseudoChecked = 0;
+static long g_pseudoUsed    = 0;
+static bool g_pseudoDead    = false;
+
+static __declspec(naked) int* __cdecl ClientIndex2Adr(int /*idx*/, void* /*L*/) {
+    __asm {
+        mov  eax, [esp+4]
+        mov  ecx, [esp+8]
+        push ebx
+        push esi
+        push edi
+        push ebp
+        mov  ebx, 0x0084D9C0
+        call ebx
+        pop  ebp
+        pop  edi
+        pop  esi
+        pop  ebx
+        ret
+    }
+}
+
 static __forceinline bool IsValidPtr(uintptr_t p) {
     return p > 0x10000 && p < 0xFFE00000;
 }
@@ -66,6 +113,29 @@ static int __cdecl Hooked_RawGet(uintptr_t L, int idx) {
             if (targetSlot >= L_base) {
                 tableSlot = targetSlot;
             }
+        } else if ((idx == kRegistryIndex || idx == kGlobalsIndex) && !g_pseudoDead) {
+            int* slot = nullptr;
+            if (idx == kGlobalsIndex) {
+                slot = (int*)(L + 72);
+            } else {
+                uintptr_t g = *(uintptr_t*)(L + 0x14);   // L->l_G
+                if (IsValidPtr(g)) slot = (int*)(g + 104);
+            }
+            if (slot && g_pseudoChecked < kPseudoProve) {
+                int* theirs = ClientIndex2Adr(idx, (void*)L);
+                ++g_pseudoChecked;
+                if (theirs != slot) {
+                    g_pseudoDead = true;
+                    Log("[RawGet] pseudo-index path retired: index %d resolved "
+                        "0x%08X here and 0x%08X in the client's own index2adr. "
+                        "Nothing was read from ours, so this call and the "
+                        "session are unaffected.",
+                        idx, (unsigned)(uintptr_t)slot,
+                        (unsigned)(uintptr_t)theirs);
+                    slot = nullptr;
+                }
+            }
+            if (slot) { tableSlot = slot; ++g_pseudoUsed; }
         }
 
         if (tableSlot && IsValidPtr((uintptr_t)tableSlot) && tableSlot[2] == 5) { // LUA_TTABLE
@@ -146,6 +216,13 @@ void LuaRawGetInline_LogStats(void) {
     Log("[LuaRawGet] %lld calls, %lld inline (%.1f%%).",
         (long long)total, (long long)fast,
         100.0 * (double)fast / (double)total);
+    if (g_pseudoUsed || g_pseudoDead)
+        Log("[LuaRawGet]   the globals and registry indices resolved here rather "
+            "than deferring: %ld call(s), %ld checked against the client's own "
+            "index2adr%s. Those two are how a global read and a registry read "
+            "arrive, and they used to fall through by one.",
+            g_pseudoUsed, g_pseudoChecked,
+            g_pseudoDead ? " - RETIRED, one disagreed" : "");
 }
 
 void UninstallLuaRawGetInline() {
