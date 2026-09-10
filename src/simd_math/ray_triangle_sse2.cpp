@@ -259,31 +259,46 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
 
     if (g_dead || !ray || !verts || !tri)
         return orig_Test(ray, verts, tri, outT, outUV, tol);
-    if (g_abSubject && AbTest::StandAside()) {
-        ++g_stood;
-        return orig_Test(ray, verts, tri, outT, outUV, tol);
-    }
     if (!ReadableRange(ray, 24) || !ReadableRange(tri, 6))
         return orig_Test(ray, verts, tri, outT, outUV, tol);
 
     const bool checking = !g_armed || (g_calls & kResample) == 0;
 
     if (!checking) {
-        Out o;
+        // Both halves of the A/B run are bracketed by the same pair, so the
+        // harness files an ON sample against an OFF one and the report is this
+        // function measured against the client's rather than a frame time that
+        // cannot see it. A subject with no bracket is a subject that measures
+        // nothing, which is what three modules shipped as this morning.
+        const unsigned long long t = AbTest::TickIn();
         int r;
-        __try {
-            r = Test((const float*)ray, (const float*)verts,
-                     (const uint16_t*)tri, outT != nullptr, outUV != nullptr,
-                     tol, &o);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return orig_Test(ray, verts, tri, outT, outUV, tol);
+        if (g_abSubject && AbTest::StandAside()) {
+            ++g_stood;
+            r = orig_Test(ray, verts, tri, outT, outUV, tol);
+            if (r & 0xFF) ++g_hits;
+        } else {
+            Out o;
+            __try {
+                r = Test((const float*)ray, (const float*)verts,
+                         (const uint16_t*)tri, outT != nullptr,
+                         outUV != nullptr, tol, &o);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                AbTest::TickOut(t);
+                return orig_Test(ray, verts, tri, outT, outUV, tol);
+            }
+            if (r) {
+                ++g_hits;
+                if (o.wroteT)  *(float*)outT = o.t;
+                if (o.wroteUV) { ((float*)outUV)[0] = o.u; ((float*)outUV)[1] = o.v; }
+            }
         }
-        if (r) {
-            ++g_hits;
-            if (o.wroteT)  *(float*)outT = o.t;
-            if (o.wroteUV) { ((float*)outUV)[0] = o.u; ((float*)outUV)[1] = o.v; }
-        }
+        AbTest::TickOut(t);
         return r;
+    }
+
+    if (g_abSubject && AbTest::StandAside()) {
+        ++g_stood;
+        return orig_Test(ray, verts, tri, outT, outUV, tol);
     }
 
     // Checking: work out the answer without touching the caller's buffers, let
@@ -369,8 +384,10 @@ bool Init() {
             "the width this was written for is not the width the client is "
             "using. Read the FpuState lines above.");
     if (g_abSubject)
-        Log("[RayTriangle]   under A/B test: the control half runs the same "
-            "hook and the same call, and only the arithmetic differs.");
+        Log("[RayTriangle]   under A/B test, and both halves are timed directly "
+            "with rdtsc rather than left to frame time, which cannot see a "
+            "function this size. The report compares ticks a call one way "
+            "against the other.");
     return true;
 }
 

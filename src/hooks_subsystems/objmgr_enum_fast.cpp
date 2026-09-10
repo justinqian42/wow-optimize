@@ -92,6 +92,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
+#include "ab_test.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -117,12 +118,14 @@ constexpr long kCheckNodes = 200000;   // link offsets compared before trusting 
 
 bool g_installed = false;
 bool g_dead      = false;
+bool g_abSubject = false;
 
 // Plain 32-bit, main thread only, and lower bounds if that ever stops being
 // true. Every one is incremented before any early return that could stop it.
 unsigned long g_calls      = 0;
 unsigned long g_deferred   = 0;   // handed to the client: no manager, or retired
 unsigned long g_stopped    = 0;   // a callback ended the walk early
+unsigned long g_stood      = 0;   // the A/B off stint ran the client's walk
 unsigned long g_maxNodes   = 0;
 unsigned long g_checked    = 0;
 unsigned long g_frames     = 0;
@@ -154,10 +157,29 @@ uintptr_t ObjectManager() {
     }
 }
 
+int __cdecl HoistedEnum(EnumCb_t cb, int ctx);
+
+// Both halves of the A/B run go through the same bracket, so the harness files
+// an ON sample against an OFF one and the report is this walk measured against
+// the client's own. A subject without this pair measures nothing at all.
 int __cdecl Hooked_Enum(EnumCb_t cb, int ctx) {
     ++g_calls;
 
     if (g_dead || !cb) { ++g_deferred; return orig_Enum(cb, ctx); }
+
+    const unsigned long long t = AbTest::TickIn();
+    int r;
+    if (g_abSubject && AbTest::StandAside()) {
+        ++g_stood;
+        r = orig_Enum(cb, ctx);
+    } else {
+        r = HoistedEnum(cb, ctx);
+    }
+    AbTest::TickOut(t);
+    return r;
+}
+
+int __cdecl HoistedEnum(EnumCb_t cb, int ctx) {
 
     const uintptr_t om = ObjectManager();
     if (!om || !Readable(om)) { ++g_deferred; return orig_Enum(cb, ctx); }
@@ -253,6 +275,7 @@ bool Init() {
         return false;
     }
     g_installed = true;
+    g_abSubject = AbTest::IsSubject("ObjMgrEnumFast", &g_abSubject);
 
     Log("[ObjMgrEnum] ACTIVE on sub_4D4B30, the enumerate-all-objects call that "
         "twenty-five sites reach. Its loop rebuilds the object manager pointer "
@@ -296,6 +319,10 @@ void LogStats() {
     Log("[ObjMgrEnum]   %lu link offsets recomputed and compared, %lu walks "
         "ended early by their callback, %lu calls handed to the client.",
         g_checked, g_stopped, g_deferred);
+    if (g_stood > 0)
+        Log("[ObjMgrEnum]   %lu walks ran the client's own loop for the A/B off "
+            "stint, and both halves are timed with rdtsc, so the harness "
+            "compares ticks a walk one way against the other.", g_stood);
     Log("[ObjMgrEnum]   No frame-time gain is claimed. These are the counts "
         "that say whether the walk is worth anything, not a saving.");
 }
