@@ -55,6 +55,8 @@
 
 #include <windows.h>
 #include <cstdint>
+#include <cstring>
+#include <intrin.h>
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
@@ -84,8 +86,44 @@ PoolAlloc_fn orig_PoolAlloc = nullptr;
 // from one of them, so a small direct-mapped table is enough and costs one
 // compare on the hot path.
 constexpr int kHintSlots = 8;
-struct HintSlot { uint32_t pool; uint32_t index; };
-HintSlot g_hints[kHintSlots];
+
+// One index per pool was not enough, and the field said so. A session's
+// histogram of chunks walked before a block was found:
+//
+//     0 (first chunk had one)   4827684 (86.8%)
+//     1 .. 32                    329566 ( 5.9%)
+//     33+                        406274 ( 7.3%)
+//
+// The 33+ bucket has no upper edge, and this is the loop both tester freeze
+// samples landed in. A single hint cannot fix it: a free below the hint pulls it
+// back - 535397 times in that session - and everything between the new hint and
+// the chunk that actually has a block is walked again, two dependent loads at a
+// time into descriptors scattered across the heap.
+//
+// So the hint becomes a bitmap: one bit a chunk, set when a free puts a block
+// back into that chunk, cleared when the chunk is found empty or is emptied. The
+// search is then over set bits in our own contiguous words rather than over
+// every chunk through a pointer, and chunks known to be full are never touched.
+//
+// The bitmap is never the authority. A set bit only nominates a chunk, and that
+// chunk's own free-list head is read before anything is popped - the same field
+// the client reads, from the same place - so a stale bit costs one check and
+// clears itself. When the bitmap nominates nothing the client's own function
+// runs, searching from zero exactly as before, so no free block can be missed
+// and no chunk is grown that was not needed. That is the safety net the single
+// hint already had; only the search changed.
+constexpr int kMaxChunks = 2048;    // the measured pool held 972
+constexpr int kWords     = kMaxChunks / 32;
+
+struct PoolSlot {
+    uint32_t pool;
+    uint32_t bits[kWords];
+};
+PoolSlot g_slots[kHintSlots];
+
+unsigned long long g_bmpServed  = 0;   // served from a nominated chunk
+unsigned long long g_bmpStale   = 0;   // a set bit whose chunk had filled up
+unsigned long long g_bmpRebuild = 0;   // full scans done to reseed a bitmap
 
 // Plain counters, not interlocked: this runs on the Lua thread and a
 // lock-prefixed increment on a path taking millions of calls has already eaten
@@ -126,65 +164,110 @@ uint32_t* __fastcall Hooked_PoolAlloc(void* self, void* edx) {
     if (count == 0 || chunks == nullptr) return orig_PoolAlloc(self, edx);
     if (count > g_maxCount) g_maxCount = count;
 
-    int slot = (int)(((uintptr_t)self >> 4) & (kHintSlots - 1));
-    uint32_t start = 0;
-    if (g_hints[slot].pool == (uint32_t)(uintptr_t)self) {
-        start = g_hints[slot].index;
-        if (start >= count) start = 0;
-    }
+    const int slot = (int)(((uintptr_t)self >> 4) & (kHintSlots - 1));
+    PoolSlot& s = g_slots[slot];
 
-    __try {
-        unsigned steps = 0;
-        for (uint32_t i = start; i < count; i++, steps++) {
-            uint32_t chunk = chunks[i];
-            if (!chunk) continue;
-            uint32_t head = *(volatile uint32_t*)(chunk + kOff_FreeHead);
-            if (head) {
-                // Same three writes the original performs, in the same order.
-                *(volatile uint32_t*)(chunk + kOff_FreeHead) = *(volatile uint32_t*)head;
-                --*(volatile uint32_t*)(chunk + kOff_FreeCount);
+    if (s.pool == (uint32_t)(uintptr_t)self) {
+        __try {
+            unsigned steps = 0;
+            int words = (int)((count + 31u) / 32u);
+            if (words > kWords) words = kWords;
+            for (int w = 0; w < words; ++w) {
+                uint32_t word = s.bits[w];
+                while (word) {
+                    unsigned long bit;
+                    _BitScanForward(&bit, word);
+                    const uint32_t mask = 1u << bit;
+                    word &= ~mask;
+                    ++steps;
 
-                g_hints[slot].pool  = (uint32_t)(uintptr_t)self;
-                g_hints[slot].index = i;
-                g_hintHits++;
-                g_scanSteps += steps;
-                g_iterBuckets[Bucket(steps)]++;
-                return (uint32_t*)head;
+                    const uint32_t i = (uint32_t)(w * 32) + (uint32_t)bit;
+                    if (i >= count) { s.bits[w] &= ~mask; continue; }
+                    const uint32_t chunk = chunks[i];
+                    if (!chunk) { s.bits[w] &= ~mask; continue; }
+
+                    const uint32_t head =
+                        *(volatile uint32_t*)(chunk + kOff_FreeHead);
+                    if (!head) {
+                        // A bit that no longer means anything. Clearing it here
+                        // is the whole self-healing story: nothing else has to
+                        // be told the chunk filled up.
+                        s.bits[w] &= ~mask;
+                        ++g_bmpStale;
+                        continue;
+                    }
+
+                    // The same three writes the original performs, in order.
+                    const uint32_t next = *(volatile uint32_t*)head;
+                    *(volatile uint32_t*)(chunk + kOff_FreeHead) = next;
+                    --*(volatile uint32_t*)(chunk + kOff_FreeCount);
+                    if (!next) s.bits[w] &= ~mask;   // that was its last block
+
+                    g_hintHits++;
+                    ++g_bmpServed;
+                    g_scanSteps += steps - 1;
+                    g_iterBuckets[Bucket(steps - 1)]++;
+                    return (uint32_t*)head;
+                }
             }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return orig_PoolAlloc(self, edx);
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return orig_PoolAlloc(self, edx);
     }
 
-    // Nothing from the hint onward. The original searches from zero and grows
+    // The bitmap nominated nothing. The original searches from zero and grows
     // the pool if it has to, so no free block can be missed and no chunk is
     // created that was not needed.
     g_hintMisses++;
-    g_hints[slot].pool  = (uint32_t)(uintptr_t)self;
-    g_hints[slot].index = 0;
-    return orig_PoolAlloc(self, edx);
+    uint32_t* result = orig_PoolAlloc(self, edx);
+
+    // Reseed once from what the pool looks like now. This costs the same walk
+    // the original has just paid for, and it is what stops the next allocation
+    // arriving here again: a bitmap filled only by frees never learns about a
+    // chunk that was grown.
+    __try {
+        const uint32_t now = pool[kIdx_Count];
+        uint32_t* nowChunks = (uint32_t*)pool[kIdx_Chunks];
+        if (nowChunks) {
+            s.pool = (uint32_t)(uintptr_t)self;
+            memset(s.bits, 0, sizeof(s.bits));
+            uint32_t lim = now;
+            if (lim > (uint32_t)kMaxChunks) lim = (uint32_t)kMaxChunks;
+            for (uint32_t i = 0; i < lim; ++i) {
+                const uint32_t chunk = nowChunks[i];
+                if (!chunk) continue;
+                if (*(volatile uint32_t*)(chunk + kOff_FreeHead))
+                    s.bits[i >> 5] |= 1u << (i & 31u);
+            }
+            ++g_bmpRebuild;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        s.pool = 0;
+    }
+    return result;
 }
 
 bool g_installed = false;
 
 } // namespace
 
+// Called from the free path, which has already worked out which chunk the block
+// went back into. One bit; the allocator checks the chunk itself before
+// believing it.
 void NoteFreeIntoChunk(unsigned pool, unsigned index) {
     if (!g_installed) return;
-    int slot = (int)((pool >> 4) & (kHintSlots - 1));
-    if (g_hints[slot].pool != (uint32_t)pool) {
-        // A different pool owns this slot. Claiming it is still correct - the
-        // allocator checks the pool pointer before trusting the index - and it
-        // is what the allocator itself does on a miss.
-        g_hints[slot].pool  = (uint32_t)pool;
-        g_hints[slot].index = (uint32_t)index;
-        ++g_hintLowered;
-        return;
-    }
-    if ((uint32_t)index < g_hints[slot].index) {
-        g_hints[slot].index = (uint32_t)index;
+    if (index >= (unsigned)kMaxChunks) return;   // past what a bitmap covers
+    const int slot = (int)((pool >> 4) & (kHintSlots - 1));
+    PoolSlot& s = g_slots[slot];
+    if (s.pool != (uint32_t)pool) {
+        // A different pool owns this slot. Claiming it leaves a bitmap that
+        // knows one chunk, which is correct if slow - everything else falls
+        // through to the client until the next reseed.
+        s.pool = (uint32_t)pool;
+        memset(s.bits, 0, sizeof(s.bits));
         ++g_hintLowered;
     }
+    s.bits[index >> 5] |= 1u << (index & 31u);
 }
 
 bool Init() {
