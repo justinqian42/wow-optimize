@@ -216,7 +216,7 @@ static bool IsReadable(uintptr_t addr) {
 //   sub_67D770 @ 0x67D770: GUID→object resolver (public wrapper, calls sub_6792E0)
 //   sub_6792E0 @ 0x6792E0: inner hash-table lookup
 //   sub_67B130 @ 0x67B130: creates GUID object entry on first visibility
-//   Object removal: handled by StaleCleanupGuidCache periodic scan
+//   Object removal: was to be handled by a periodic scan that never existed
 
 // ADDR_OBJECT_CREATED: object constructor — inserts GUID into hash table
 // ADDR_OBJECT_DESTROYED: destructor — evicts GUID from hash table  
@@ -231,149 +231,17 @@ static bool IsReadable(uintptr_t addr) {
 #define ADDR_GET_OBJECT_BY_GUID 0x0067D770  // sub_67D770: public GUID resolver
 #endif
 
-// Max distance considered "in scope" for caching (meters)
-static constexpr float GUID_CACHE_MAX_DIST = 150.0f;
-
-static constexpr int GUID_CACHE_SIZE = 16384;
-static constexpr int GUID_CACHE_MASK = GUID_CACHE_SIZE - 1;
-
-struct GuidCacheEntry {
-    uint64_t guid;          // 0 = unused slot
-    uintptr_t objectPtr;    // CUnit* or CGameObject* (validated)
-    float    x, y, z;       // last known position
-    uint32_t entryType;     // 0=unit, 1=player, 2=gameobject, 3=pet, etc.
-    uint32_t insertFrame;   // frame counter when inserted (for LRU eviction)
-};
-
-static GuidCacheEntry g_guidCache[GUID_CACHE_SIZE] = {};
-static volatile DWORD  g_guidCacheFrame = 0;
-static volatile LONG64 g_guidLookups    = 0;
-static volatile LONG64 g_guidHits       = 0;
-static volatile LONG64 g_guidEvictions  = 0;
-static volatile LONG64 g_guidStaleCheck = 0;
-
-// FNV-1a 64-bit hash
-static inline uint32_t HashGuid(uint64_t guid) {
-    uint32_t hash = 2166136261u;
-    hash ^= (uint32_t)(guid & 0xFFFFFFFF);
-    hash *= 16777619u;
-    hash ^= (uint32_t)(guid >> 32);
-    hash *= 16777619u;
-    return hash;
-}
-
-// Lock-free GUID lookup. Returns 0 if not found.
-// The caller must still validate the object pointer (SEH guard).
-static uintptr_t LookupGuid(uint64_t guid) {
-    InterlockedIncrement64(&g_guidLookups);
-
-    uint32_t hash = HashGuid(guid);
-    uint32_t idx  = hash & GUID_CACHE_MASK;
-
-    // Linear probe
-    for (int probe = 0; probe < 8; probe++) {
-        GuidCacheEntry& entry = g_guidCache[(idx + probe) & GUID_CACHE_MASK];
-
-        if (entry.guid == guid && entry.objectPtr != 0) {
-            InterlockedIncrement64(&g_guidHits);
-            return entry.objectPtr;
-        }
-
-        if (entry.guid == 0) break; // empty slot — GUID not in cache
-    }
-
-    return 0; // not found
-}
-
-// Insert or update a GUID entry. Called from object creation hook.
-static void InsertGuid(uint64_t guid, uintptr_t objectPtr, uint32_t entryType,
-                       float x, float y, float z) {
-    uint32_t hash = HashGuid(guid);
-    uint32_t idx  = hash & GUID_CACHE_MASK;
-
-    // Check if already exists (update in place)
-    for (int probe = 0; probe < 8; probe++) {
-        GuidCacheEntry& entry = g_guidCache[(idx + probe) & GUID_CACHE_MASK];
-        if (entry.guid == guid) {
-            entry.objectPtr = objectPtr;
-            entry.x = x; entry.y = y; entry.z = z;
-            entry.entryType   = entryType;
-            entry.insertFrame = g_guidCacheFrame;
-            return;
-        }
-    }
-
-    // Find empty slot or evict the oldest entry in the probe chain
-    int emptySlot = -1;
-    int oldestSlot = 0;
-    uint32_t oldestFrame = g_guidCacheFrame;
-
-    for (int probe = 0; probe < 8; probe++) {
-        uint32_t slotIdx = (idx + probe) & GUID_CACHE_MASK;
-        GuidCacheEntry& entry = g_guidCache[slotIdx];
-
-        if (entry.guid == 0) {
-            if (emptySlot < 0) emptySlot = (int)slotIdx;
-        } else if (entry.insertFrame < oldestFrame) {
-            oldestFrame = entry.insertFrame;
-            oldestSlot  = (int)slotIdx;
-        }
-    }
-
-    int writeIdx = (emptySlot >= 0) ? emptySlot : oldestSlot;
-    if (emptySlot < 0) {
-        InterlockedIncrement64(&g_guidEvictions);
-    }
-
-    GuidCacheEntry& e = g_guidCache[writeIdx];
-    e.guid       = guid;
-    e.objectPtr  = objectPtr;
-    e.x = x; e.y = y; e.z = z;
-    e.entryType   = entryType;
-    e.insertFrame = g_guidCacheFrame;
-}
-
-// Remove a GUID from the cache. Called from object destruction hook.
-static void RemoveGuid(uint64_t guid) {
-    uint32_t hash = HashGuid(guid);
-    uint32_t idx  = hash & GUID_CACHE_MASK;
-
-    for (int probe = 0; probe < 8; probe++) {
-        GuidCacheEntry& entry = g_guidCache[(idx + probe) & GUID_CACHE_MASK];
-        if (entry.guid == guid) {
-            entry.guid      = 0;
-            entry.objectPtr = 0;
-            return;
-        }
-        if (entry.guid == 0) break;
-    }
-}
-
-// Periodic stale-entry cleanup. Walk through a slice of the cache
-// each frame and remove entries whose objects have been freed.
-// This catches GUIDs that were not properly removed via the destructor hook.
-static void StaleCleanupGuidCache(size_t startIdx, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        size_t idx = (startIdx + i) & GUID_CACHE_MASK;
-        GuidCacheEntry& entry = g_guidCache[idx];
-
-        if (entry.guid == 0 || entry.objectPtr == 0) continue;
-
-        InterlockedIncrement64(&g_guidStaleCheck);
-
-        // Validate the object pointer is still readable
-        // and the GUID at the object still matches
-        if (!IsReadable(entry.objectPtr)) {
-            entry.guid      = 0;
-            entry.objectPtr = 0;
-            continue;
-        }
-
-        // CUnit/CGameObject stores its GUID at a known offset.
-        // For now, skip in-depth validation — the crash dumper will
-        // catch stale pointer dereferences.
-    }
-}
+// The GUID cache that used to live here is gone, and so are the four functions
+// that worked on it. They were already known to be unreachable - the comment in
+// InstallMemoryHooks said InsertGuid, LookupGuid and RemoveGuid were each
+// defined once and called from nothing, because the addresses they would have
+// been hooked at are unfilled placeholders. What that fix did not do was remove
+// the table.
+//
+// A static array costs its space whether anything reads it or not: 16384 entries
+// of 32 bytes is half a megabyte of this DLL's image, mapped into the low 2GB,
+// and the memset at startup committed every page of it. Sicsoo's sessions report
+// that half down to a 5 MB largest free block, twice, at BAD severity.
 
 // ================================================================
 // Public API
@@ -442,11 +310,9 @@ bool InstallMemoryHooks(void) {
         "from them - Aligned64Alloc has no caller.",
         SLAB_TIERS, SLAB_SIZE / 1024);
 
-    // Initialize GUID cache
-    memset(g_guidCache, 0, sizeof(g_guidCache));
-    g_guidLookups = g_guidHits = g_guidEvictions = g_guidStaleCheck = 0;
-
-    Log("[MemoryHooks] GUID hash-table: %d slots, open-addressed, 8-probe max", GUID_CACHE_SIZE);
+    Log("[MemoryHooks] the GUID hash table is gone rather than merely unused: "
+        "half a megabyte of this DLL's image, committed at startup by its own "
+        "memset, for four functions that had no caller.");
 
     if (!ADDR_GET_OBJECT_BY_GUID)
         Log("[MemoryHooks] GUID lookup: fill ADDR_GET_OBJECT_BY_GUID to hook");
@@ -484,10 +350,6 @@ void ShutdownMemoryHooks(void) {
     Log("[MemoryHooks] Aligned allocs: %lld allocs, %lld frees, %lld misses",
         g_alignedAllocs, g_alignedFrees, g_alignedMisses);
 
-    Log("[MemoryHooks] GUID cache: %lld lookups, %lld hits (%.1f%%), %lld evictions, %lld stale checks",
-        g_guidLookups, g_guidHits,
-        g_guidLookups ? 100.0 * g_guidHits / g_guidLookups : 0.0,
-        g_guidEvictions, g_guidStaleCheck);
 
 #if !TEST_DISABLE_CRT_MIMALLOC
     MH_DisableHook((void*)0x00415074);
@@ -497,5 +359,6 @@ void ShutdownMemoryHooks(void) {
 }
 
 void ClearGuidHashTable(void) {
-    memset(g_guidCache, 0, sizeof(g_guidCache));
+    // Kept because the memory pressure ladder in dllmain calls it. There is no
+    // table to clear any more, and there never was one with anything in it.
 }

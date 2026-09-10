@@ -17,6 +17,7 @@
 #include "crash_dumper.h"
 #include "lua_vm_engine.h"
 #include "lua_optimize.h"
+#include "high_tables.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -98,7 +99,14 @@ struct ICEntry {
     uint32_t  generation;
 };
 
-static ICEntry g_inlineCache[IC_TOTAL_SITES * IC_ENTRIES_PER_SITE];
+// A megabyte exactly, and it used to sit in this DLL's image, which is
+// mapped into the low 2GB - the half the client allocates from and the half
+// a tester log has reported down to a 5MB largest free block. It is indexed
+// the same way through a pointer, and the hot path below cannot see a null
+// one because the hook it lives in is only installed after this is reserved.
+static constexpr size_t IC_BYTES =
+    sizeof(ICEntry) * IC_TOTAL_SITES * IC_ENTRIES_PER_SITE;
+static ICEntry* g_inlineCache = nullptr;
 static volatile LONG g_icGeneration = 0;
 
 static inline void ICInvalidate() {
@@ -125,8 +133,8 @@ void ClearLuaVMEngineCaches() {
     // entry could carry a generation equal to the new current one. Physically
     // clearing there keeps the invariant exact, and costs 1 MB once per 2^32
     // invalidations.
-    if (gen == 0) {
-        memset(g_inlineCache, 0, sizeof(g_inlineCache));
+    if (gen == 0 && g_inlineCache) {
+        memset(g_inlineCache, 0, IC_BYTES);
     }
 }
 
@@ -892,6 +900,13 @@ static int __cdecl Hooked_luaV_execute(void* L, int nexeccalls) {
 // ================================================================
 bool InstallLuaVMEngine()
 {
+    g_inlineCache = (ICEntry*)HighTables::Reserve("lua_vm_engine", IC_BYTES);
+    if (!g_inlineCache) {
+        Log("[VMEngine] NOT installed: the %u KB inline cache could not be "
+            "allocated.", (unsigned)(IC_BYTES / 1024));
+        return false;
+    }
+
     void* target = (void*)0x00859160;
 
     unsigned char* p = (unsigned char*)target;
@@ -917,7 +932,7 @@ bool InstallLuaVMEngine()
 
     
     // Initialize caches
-    memset(g_inlineCache, 0, sizeof(g_inlineCache));
+    if (g_inlineCache) memset(g_inlineCache, 0, IC_BYTES);
     
     CrashDumper::RegisterFeature("LuaVMEngine");
     CrashDumper::FeatureSetActive("LuaVMEngine", true);
