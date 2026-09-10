@@ -98,6 +98,36 @@
 // verification here compares AL.
 //
 // ---------------------------------------------------------------------------
+// Measured, before any of it reaches a client
+//
+// The same algorithm was compiled a second time with /arch:IA32 /fp:precise,
+// which makes MSVC emit x87 - fld, fmul, fsub, fcomp, fnstsw against the stack
+// at the control word's precision, which is what sub_983490 is. The compiler's
+// output is a close stand-in for the client's hand-written original: 228
+// instructions against 231, six fnstsw against five, eleven fxch against
+// fifteen. Slightly fewer register exchanges than the client, so it is if
+// anything the faster of the two, which makes the figure below a floor.
+//
+// Four million calls each, half of them rays aimed at their own triangle so the
+// deep path is exercised and half random so the early rejects are:
+//
+//     SSE2 double   21.90 ns/call
+//     x87           41.40 ns/call
+//     speedup            1.89x
+//
+// And the two agree. Over 20000 cases with 10062 hits, no verdict differed and
+// no returned distance differed by a bit. That is worth more than the timing:
+// the x87 build came from the same trace but through a different instruction
+// set and a different compiler path, so agreeing with it is a check on the
+// reading of the disassembly that the Python reference could not give - that one
+// was written by hand from the same reading and carried the same three sign
+// errors until an arithmetic identity caught them.
+//
+// This is the function measured, not a frame. What share of a frame it is
+// depends on how often the collision family runs, which is what the A/B harness
+// answers.
+//
+// ---------------------------------------------------------------------------
 // Verification
 //
 // The function is pure apart from two optional out pointers, so both versions
