@@ -782,6 +782,7 @@ void ClearCombatLogCache();
 #include "async_sound_loader.h"
 #include "rcu_obj_mgr.h"
 #include "objmgr_enum_fast.h"
+#include "mpq_open_census.h"
 #include "async_terrain_loader.h"
 
 #include "d3d9_state_manager.h"
@@ -5500,6 +5501,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("X87Precision::LogStats", X87Precision::LogStats());
     STAT_TIME("RayTriangle::LogStats", RayTriangle::LogStats());
     STAT_TIME("ObjMgrEnumFast::LogStats", ObjMgrEnumFast::LogStats());
+    STAT_TIME("MpqOpenCensus::LogStats", MpqOpenCensus::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
@@ -9316,6 +9318,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("--- RCU Object Manager Traverser ---");
     if (Config::g_settings.OptRcuObjMgr) RcuObjMgr::Init();
     ObjMgrEnumFast::Init();
+    MpqOpenCensus::Init();
 
     Log("");
     Log("--- Asynchronous Terrain Mesh Loader ---");
@@ -11323,6 +11326,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             AsyncSoundLoader::Shutdown();
             RcuObjMgr::Shutdown();
             ObjMgrEnumFast::Shutdown();
+            MpqOpenCensus::Shutdown();
             AsyncTerrainLoader::Shutdown();
             AsyncTexLoader::Shutdown();
             MipBiasGovernor::Shutdown();

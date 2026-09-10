@@ -33,6 +33,7 @@
 #include "runtime_vm/lua_gc_governor.h"
 #include "diagnostics/crash_dumper.h"
 #include "diagnostics/sampling_profiler.h"
+#include "mpq_open_census.h"
 
 extern "C" void Log(const char* fmt, ...);
 extern "C" void ReserveLoadingArena();
@@ -126,6 +127,7 @@ static double   g_ioMsTotal   = 0.0;
 static uint64_t g_ioBytesTotal = 0;
 
 static void LoadTimerBegin() {
+    MpqOpenCensus::OnLoadBegin();
     if (g_qpcFreq.QuadPart == 0) QueryPerformanceFrequency(&g_qpcFreq);
     QueryPerformanceCounter(&g_loadStartQpc);
     g_ioMsThisLoad = 0.0;
@@ -197,6 +199,10 @@ static void LoadTimerEnd() {
     g_compileMsThisLoad = 0.0;
     g_compileMsFirstThisLoad = 0.0;
     g_compilesThisLoad = 0;
+
+    // The fourth component of a loading screen, and the one that was missing
+    // when a field load came to 45509 ms with 186 of them accounted for.
+    MpqOpenCensus::ReportLoad(ms);
 
     if (!g_writeHookOn) {
         Log("[LoadingState]   writes not measured - the client's write wrapper is "

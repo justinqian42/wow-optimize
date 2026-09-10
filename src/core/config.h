@@ -168,6 +168,7 @@ namespace Config {
         bool OptAsyncTerrainLoader = false;
         bool OptRcuObjMgr = false;
         bool OptObjMgrEnumFast = false;
+        bool OptMpqOpenCensus = false;
         bool OptMipBiasGovernor = false;
         
         // Combat & Network

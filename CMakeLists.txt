@@ -95,6 +95,7 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/obj_vis_cache.h
     src/hooks_subsystems/rcu_obj_mgr.cpp
     src/hooks_subsystems/objmgr_enum_fast.cpp
+    src/hooks_subsystems/mpq_open_census.cpp
     src/hooks_subsystems/rcu_obj_mgr.h
     src/hooks_subsystems/async_terrain_loader.cpp
     src/hooks_subsystems/async_terrain_loader.h

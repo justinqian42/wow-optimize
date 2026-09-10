@@ -91,6 +91,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "AsyncTerrainLoader", &Settings::OptAsyncTerrainLoader },
     { "UI_Lua", "RcuObjMgr", &Settings::OptRcuObjMgr },
     { "UI_Lua", "ObjMgrEnumFast", &Settings::OptObjMgrEnumFast },
+    { "General", "MpqOpenCensus", &Settings::OptMpqOpenCensus },
     { "Graphics_Sound", "MipBiasGovernor", &Settings::OptMipBiasGovernor },
     { "Combat_Net", "CombatLogLeakFix", &Settings::OptCombatLogLeakFix },
     { "Combat_Net", "CombatLogParser", &Settings::OptCombatLogParser },
@@ -590,6 +591,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptAsyncTerrainLoader  = GetPrivateProfileIntA("UI_Lua", "AsyncTerrainLoader", 0, iniPath.c_str()) != 0;
         g_settings.OptRcuObjMgr           = GetPrivateProfileIntA("UI_Lua", "RcuObjMgr", 0, iniPath.c_str()) != 0;
         g_settings.OptObjMgrEnumFast      = GetPrivateProfileIntA("UI_Lua", "ObjMgrEnumFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptMpqOpenCensus       = GetPrivateProfileIntA("General", "MpqOpenCensus", 0, iniPath.c_str()) != 0;
         g_settings.OptMipBiasGovernor     = GetPrivateProfileIntA("Graphics_Sound", "MipBiasGovernor", 0, iniPath.c_str()) != 0;
 
         // Combat & Network
