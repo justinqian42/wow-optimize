@@ -97,7 +97,22 @@ struct ICEntry {
     int       keyType;       // LUA_TSTRING
     void*     resultNode;    // Node*
     uint32_t  generation;
+    uint32_t  nodeArray;     // the table's node array when this was recorded
 };
+
+// This client's Table is the stock Lua 5.1 layout plus four, the same shift the
+// rest of the VM has: stock `node` is at +16, so it is at +20 here.
+static const unsigned kTable_Node = 20;
+
+// A cache that says it found the same node the engine would is a claim, and it
+// is cheap to check: luaH_getstr is a pure lookup with no side effect, so it can
+// simply be asked. The first hits are all checked and one in kIcRecheck after,
+// and a single disagreement retires the cache for the session.
+static const long kIcProve   = 20000;
+static const unsigned kIcRecheck = 1023;
+static long g_icChecked = 0;
+static long g_icHitSeq  = 0;
+static bool g_icDead    = false;
 
 // A megabyte exactly, and it used to sit in this DLL's image, which is
 // mapped into the low 2GB - the half the client allocates from and the half
@@ -177,6 +192,91 @@ static get_cycles_fn g_get_cycles = (get_cycles_fn)0x0086AE30;
 // ================================================================
 // Fast TValue helpers (SSE2-accelerated)
 // ================================================================
+// The tail of the client's luaV_gettable at 0x00857250, transcribed from the
+// disassembly rather than the decompiler, because the decompiler renders the
+// taint cell as a pointer and it is not one - 0x0085737F is
+// `mov dword_D4139C, ebx`, a direct store.
+//
+//     mov ecx,[ebx]    / mov [eax],ecx        ; value lo
+//     mov edx,[ebx+4]  / mov [eax+4],edx      ; value hi
+//     mov ecx,[ebx+8]  / mov [eax+8],ecx      ; tt
+//     mov edx,[ebx+0Ch]/ mov [eax+0Ch],edx    ; taint
+//     mov ebx,[ebx+0Ch] / test ebx,ebx / jz  ...
+//     cmp dword_D413A0,0 / jz  out
+//     cmp dword_D413A4,0 / jnz out
+//     mov dword_D4139C, ebx                   ; and taint the context
+//
+// with the zero branch writing the *current* global taint into the result.
+//
+// A plain sixteen-byte copy is what this module used to do, and it is wrong in
+// the direction that matters. An untainted value read through the cache came
+// back with a taint word of zero where the engine would have written the
+// ambient taint, so a read through the cache laundered the context clean. That
+// is not a performance bug; in this client's terms it is a security one, and it
+// is a sufficient reason for the module to have been switched off.
+static const uintptr_t kTaintCell   = 0x00D4139C;
+static const uintptr_t kTaintArmed  = 0x00D413A0;
+static const uintptr_t kTaintFrozen = 0x00D413A4;
+static const uintptr_t kTaintReport = 0x00D413B0;   // a callback, may be null
+
+// value, tt and taint copied the way the engine copies them, then the engine's
+// own two-branch taint rule.
+static inline void CopyWithTaint(TValue* dst, const TValue* src) {
+    dst->value = src->value;
+    dst->tt    = src->tt;
+    const uint32_t t = src->taint;
+    dst->taint = t;
+    if (t) {
+        if (*(volatile uint32_t*)kTaintArmed && !*(volatile uint32_t*)kTaintFrozen)
+            *(volatile uint32_t*)kTaintCell = t;
+    } else {
+        dst->taint = *(volatile uint32_t*)kTaintCell;
+    }
+}
+
+// The engine also reports a tainted read of a global, before the copy:
+//
+//     if (D413B0 && table == *(L+72) && key->tt == LUA_TSTRING) {
+//         v11 = node->taint;
+//         if (v11 && !D413A4) D413B0(L, 2, key->value.gc + 20, v11);
+//     }
+//
+// L+72 is gt(L), the same slot LUA_GLOBALSINDEX resolves to, and key + 20 is the
+// TString's characters - this client's TString is the stock layout plus four.
+typedef void (__cdecl* TaintReport_fn)(int L, int kind, const char* name, uint32_t taint);
+
+static inline void ReportTaintedGlobalRead(int L, uintptr_t tablePtr,
+                                           const TValue* key, uint32_t nodeTaint) {
+    TaintReport_fn cb = *(TaintReport_fn*)kTaintReport;
+    if (!cb) return;
+    if (tablePtr != *(uint32_t*)((uintptr_t)L + 72)) return;
+    if (key->tt != LUA_TSTRING) return;
+    if (!nodeTaint) return;
+    if (*(volatile uint32_t*)kTaintFrozen) return;
+    cb(L, 2, (const char*)((uintptr_t)key->value.gc + 20), nodeTaint);
+}
+
+// Asks the engine's own luaH_getstr whether the cached node is the node it would
+// have found. Pure, so it can be called without disturbing anything.
+static inline bool VerifyAgainstEngine(uintptr_t tablePtr, uintptr_t keyPtr,
+                                       void* cached) {
+    if (g_icDead) return false;
+    const bool check = (g_icChecked < kIcProve) ||
+                       ((++g_icHitSeq & kIcRecheck) == 0);
+    if (!check) return true;
+    if (!g_orig_luaH_getstr) return true;
+    void* theirs = g_orig_luaH_getstr((int)tablePtr, (int)keyPtr);
+    ++g_icChecked;
+    if (theirs == cached) return true;
+    g_icDead = true;
+    Log("[VMEngine] inline cache RETIRED after %ld checks: for one table and key "
+        "it held node 0x%08X and the engine's own luaH_getstr answers 0x%08X. "
+        "Nothing was read from ours on this call - the engine answers it - so "
+        "the session is unaffected.",
+        g_icChecked, (unsigned)(uintptr_t)cached, (unsigned)(uintptr_t)theirs);
+    return false;
+}
+
 static inline void TValueCopy(TValue* dst, const TValue* src) {
     __m128i v = _mm_loadu_si128((const __m128i*)src);
     _mm_storeu_si128((__m128i*)dst, v);
@@ -262,8 +362,22 @@ static void* __fastcall FastGetTable(void* L, TValue* table, TValue* key, TValue
                 uint32_t* np = (uint32_t*)node;
                 // Check key matches (np[6] is key.tt at +24, np[4] is key.value.gc at +16)
                 if (np[6] == LUA_TSTRING && np[4] == (uint32_t)tstringPtr) {
+                    // The cached node has to still belong to this table's live
+                    // node array. A rehash frees the old array, and without this
+                    // the reads above land in memory the allocator has taken
+                    // back. Comparing the array pointer the entry was made
+                    // against with the table's current one closes that window:
+                    // a freed array cannot still be the table's own.
+                    if (*(uint32_t*)(tablePtr + kTable_Node) != site[way].nodeArray) {
+                        site[way].tablePtr = 0;   // stale, drop it
+                        break;
+                    }
+                    if (!VerifyAgainstEngine(tablePtr, tstringPtr, node))
+                        break;
                     ++g_stats.icHits;
-                    TValueCopy(result, (TValue*)node);
+                    ReportTaintedGlobalRead((int)L, tablePtr, key,
+                                            ((TValue*)node)->taint);
+                    CopyWithTaint(result, (TValue*)node);
                     return result;
                 }
             }
@@ -292,6 +406,7 @@ static void* __fastcall FastGetTable(void* L, TValue* table, TValue* key, TValue
         site[victim].keyIdentity = tstringPtr;
         site[victim].keyType = LUA_TSTRING;
         site[victim].resultNode = node;
+        site[victim].nodeArray  = *(uint32_t*)(tablePtr + kTable_Node);
         site[victim].generation = currentGen;
         MemoryBarrier();
         site[victim].tablePtr = tablePtr;
@@ -960,6 +1075,13 @@ void UninstallLuaVMEngine()
             (double)s.icHits / (s.icHits + s.icMisses) * 100.0 : 0.0;
         Log("[VMEngine] Stats: %lld opcodes | %lld IC hits (%.1f%%) | %lld fused | %lld fallbacks",
             s.totalOpcodes, s.icHits, icRate, s.fusedOpcodes, s.fallbackExecutions);
+    Log("[VMEngine]   %ld cached nodes checked against the engine's own "
+        "luaH_getstr%s. Every hit carries the taint the engine would have "
+        "written - the ambient one when the value is clean, the value's own "
+        "otherwise - and reports a tainted read of a global the way the engine "
+        "does. A hit whose table has rehashed since is dropped rather than "
+        "followed.",
+        g_icChecked, g_icDead ? " - RETIRED, one disagreed" : "");
     }
     
     CrashDumper::FeatureSetActive("LuaVMEngine", false);
