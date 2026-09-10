@@ -39,6 +39,29 @@ static DbcRowEntry* g_cache = nullptr;
 static uint64_t   g_hits = 0;
 static int g_featureToken = -1;
 static uint64_t   g_misses = 0;
+
+// A hit rate does not say which of two problems a miss is, and they have
+// opposite answers. A row never looked up before has to be decoded once
+// whatever we do. A row that was looked up before and is no longer here was
+// pushed out, and that is what a larger table would recover.
+//
+// The split matters because the price is known: sub_4CFBB0 walks 680 output
+// bytes with a compare and an unpredictable branch each, so a tester's 2.8
+// million misses are somewhere between one and one and a half seconds of CPU in
+// a session. Whether any of that is recoverable is exactly this question.
+//
+// One bit per (store, row) ever seen. 65536 bits is 8 KB and costs one test per
+// miss; a collision marks a new row as seen, which counts a cold miss as an
+// eviction and overstates what a bigger table would win. That is the direction
+// to be wrong in only if the number is read as an upper bound, which is how the
+// report words it.
+static constexpr int SEEN_BITS = 65536;
+static uint32_t   g_seen[SEEN_BITS / 32] = {};
+static uint64_t   g_missCold = 0;
+static uint64_t   g_missEvicted = 0;
+// Every clear turns the whole table into evictions, so the two figures cannot
+// be read without knowing how many there were.
+static uint64_t   g_clears = 0;
 // Calls handed straight back because the client's own path was a plain memcpy
 // that this cache cannot improve on. See the note in the hook.
 static uint64_t   g_bypassedPlainCopy = 0;
@@ -115,6 +138,13 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
     }
 
     g_misses++;
+    {
+        const uint32_t sb = (uint32_t)((storeKey >> 2) ^ (uint32_t)recordId * 2654435761u)
+                            & (SEEN_BITS - 1);
+        uint32_t& word = g_seen[sb >> 5];
+        const uint32_t bit = 1u << (sb & 31);
+        if (word & bit) ++g_missEvicted; else { ++g_missCold; word |= bit; }
+    }
     // Call original function to load
     bool result = g_orig(store, recordId, outBuf);
 
@@ -170,8 +200,13 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
 bool InstallDbcLookupCache()
 {
     if (!g_cache) {
+        // MEM_TOP_DOWN: 2.7 MB of a 32-bit address space, and without this it
+        // is taken from the bottom - the half the client allocates from, which
+        // a field session reports at a 5 MB largest free block. Nothing about
+        // the table changes, only where it lands.
         g_cache = (DbcRowEntry*)VirtualAlloc(nullptr, sizeof(DbcRowEntry) * CACHE_SIZE,
-                                             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+                                             MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
+                                             PAGE_READWRITE);
         if (!g_cache) {
             Log("[DbcLookupCache] Could not commit %zu KB for the row cache - disabled",
                 (sizeof(DbcRowEntry) * CACHE_SIZE) / 1024);
@@ -187,6 +222,10 @@ bool InstallDbcLookupCache()
     }
     g_hits = 0;
     g_misses = 0;
+    g_missCold = 0;
+    g_missEvicted = 0;
+    g_clears = 0;
+    memset(g_seen, 0, sizeof(g_seen));
 
     void* target = reinterpret_cast<void*>(0x004CFD20);
 
@@ -233,6 +272,18 @@ void DbcLookupCache_LogStats()
     if (total > 0) {
         Log("[DbcLookupCache] %llu calls, %llu hits, %llu misses (%.1f%% hit rate)",
             total, g_hits, g_misses, 100.0 * g_hits / total);
+        if (g_misses) {
+            Log("[DbcLookupCache]   of those misses %llu were rows never looked "
+                "up before, which have to be decoded once whatever we do, and "
+                "%llu were rows that had been here and were pushed out. The "
+                "second figure is an upper bound on what a larger table would "
+                "recover - each one is a byte-at-a-time decode of 680 bytes.",
+                g_missCold, g_missEvicted);
+            if (g_clears)
+                Log("[DbcLookupCache]   the table was cleared %llu time(s), and "
+                    "every clear turns rows that were here into evictions, so "
+                    "read the figure above with that in mind.", g_clears);
+        }
     }
     if (g_bypassedPlainCopy > 0) {
         Log("[DbcLookupCache] %llu calls handed straight back - the client's own path "
@@ -251,6 +302,7 @@ void UninstallDbcLookupCache()
 extern "C" void ClearDbcLookupCache()
 {
     if (!g_cache) return;   // never installed - nothing to walk
+    ++g_clears;
     for (int i = 0; i < CACHE_SIZE; i++) {
         DbcRowEntry* e = &g_cache[i];
         // Bounded retry: a slot's seq should always return to even quickly (the
