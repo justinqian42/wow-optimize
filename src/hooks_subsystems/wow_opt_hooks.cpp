@@ -26,7 +26,6 @@ extern "C" void Log(const char* fmt, ...);
 static long g_w1Hits = 0, g_w1Calls = 0;
 static long g_w2Hits = 0, g_w2Calls = 0;
 static long g_w3Skipped = 0, g_w3Calls = 0;
-static long g_w4Fast = 0, g_w4Calls = 0;
 static long g_w5Cached = 0, g_w5Calls = 0;
 static long g_w6Prefetched = 0;
 static long g_w8Fast = 0, g_w8Calls = 0;
@@ -67,16 +66,15 @@ static void __cdecl Hooked_Memcpy680(const void* src, size_t len, void* dst) {
 typedef void (__stdcall *ObjDestroy_fn)(void*);
 static ObjDestroy_fn orig_ObjDestroy = nullptr;
 
-volatile void* g_w4LastSrc = nullptr;
 volatile void* g_w5LastPtr = nullptr;
 
 static void __stdcall Hooked_ObjDestroy(void* obj) {
     ++g_w2Calls;
     if (obj) {
-        // Invalidate recycled file handles from W4 and W5 caches
-        if (obj == g_w4LastSrc) {
-            g_w4LastSrc = nullptr;
-        }
+        // Invalidate a recycled file handle in the W5 cache. There used to be a
+        // second check here against a W4 pointer that nothing ever assigned, so
+        // it compared against a permanent null that the `if (obj)` above had
+        // already excluded.
         if (obj == g_w5LastPtr) {
             g_w5LastPtr = nullptr;
         }
@@ -110,19 +108,20 @@ static void __stdcall Hooked_ErrorHandler(unsigned int code) {
 // W4: sub_424B50 - File read dispatcher (21 callers, texture/model loads)
 // Cache last successful file read result to avoid re-reading same data.
 // ================================================================
-typedef int (__stdcall *FileReadDispatch_fn)(void*, void*, int, int);
-static FileReadDispatch_fn orig_FileReadDispatch = nullptr;
-volatile int g_w4LastResult = 0;
 
-static int __stdcall Hooked_FileReadDispatch(void* src, void* dst, int a3, int Block) {
-    ++g_w4Calls;
-    // File read dispatch caching is unsafe: it skips writing actual data to the
-    // destination buffer 'dst' on cache hits, and sequential reads from the same
-    // stream expect different file offsets. Always call original.
-    int result = orig_FileReadDispatch(src, dst, a3, Block);
-    if (result) ++g_w4Fast;
-    return result;
-}
+// W4 is gone. It hooked 0x00424B50 as FileReadDispatch(src, dst, a3, Block) and
+// did nothing but count: the caching idea behind it was abandoned as unsafe and
+// the comment saying so stayed for the life of the hook.
+//
+// The name was wrong as well. sub_424B50 is int __stdcall(void*, char* String1,
+// int, void* Block) - the second argument is a filename, and the function's own
+// assert strings are "SFile" and ".\\SFile2-Core.cpp". It is SFileOpenFileEx,
+// an archive open, not a file read, so what W4 counted was never what it said.
+//
+// It also cost something. Two tester sessions report 0x00424B50 hooked by two of
+// our own modules with only the first to install running, and the other one is
+// the loading-screen census that measures where forty-five seconds of a loading
+// screen go. A counter under a wrong name was standing in front of it.
 
 // ================================================================
 // W5: sub_4218C0 - Data size calculator (21 callers)
@@ -419,7 +418,6 @@ namespace WowOptHooks {
             {(void*)0x004CFBB0, (void*)Hooked_Memcpy680,      (void**)&orig_Memcpy680,      "W1 memcpy680 prefetch"},
             {(void*)0x00422910, (void*)Hooked_ObjDestroy,      (void**)&orig_ObjDestroy,      "W2 obj destroy prefetch"},
             {(void*)0x00771870, (void*)Hooked_ErrorHandler,    (void**)&orig_ErrorHandler,    "W3 error handler skip"},
-            {(void*)0x00424B50, (void*)Hooked_FileReadDispatch,(void**)&orig_FileReadDispatch,"W4 file read passthrough"},
             {(void*)0x004218C0, (void*)Hooked_DataSizeCalc,    (void**)&orig_DataSizeCalc,    "W5 data size cache"},
             {(void*)0x004B9DE0, (void*)Hooked_AsyncReadDestroy,(void**)&orig_AsyncReadDestroy,"W8 async destroy fast"},
             {(void*)0x004B4F90, (void*)Hooked_SysMsgHandler,   (void**)&orig_SysMsgHandler,   "W9 sysmsg dedup"},
@@ -455,8 +453,8 @@ namespace WowOptHooks {
     void DumpStats() {
         Log("[WowOpt] hits/calls below are plain counters on hooked client "
             "functions and are lower bounds.");
-        Log("[WowOpt] Memcpy680: %d/%d | ObjDestroy: %d/%d | ErrSkip: %d/%d | FileRead: %d/%d",
-            g_w1Hits, g_w1Calls, g_w2Hits, g_w2Calls, g_w3Skipped, g_w3Calls, g_w4Fast, g_w4Calls);
+        Log("[WowOpt] Memcpy680: %d/%d | ObjDestroy: %d/%d | ErrSkip: %d/%d",
+            g_w1Hits, g_w1Calls, g_w2Hits, g_w2Calls, g_w3Skipped, g_w3Calls);
         Log("[WowOpt] DataSize: %d/%d | BlkCopyPf: %d | AsyncDest: %d/%d",
             g_w5Cached, g_w5Calls, g_w6Prefetched, g_w8Fast, g_w8Calls);
         Log("[WowOpt] SysMsg: %d/%d | Context: %d/%d | ItemName: %d/%d | AllocBatch: %d/%d",

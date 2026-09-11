@@ -146,7 +146,13 @@ bool Readable(uintptr_t p) { return p >= 0x10000 && p < 0xFFE00000; }
 // The client's own way in: TlsGetValue inlined, then the manager at +8.
 uintptr_t ObjectManager() {
     __try {
-        uintptr_t* const* tls = *(uintptr_t* const**)__readfsdword(0x2C);
+        // fs:[0x2C] is TEB.ThreadLocalStoragePointer and it already IS the
+        // array of per-module blocks - the client does `mov ecx, fs:2Ch` and
+        // indexes straight off it. Dereferencing once more reads the array's
+        // first entry and then indexes THAT, which is what this did: every call
+        // fell through to the client and the report said so plainly, 5888283
+        // calls and 0 objects visited.
+        uintptr_t* const* tls = (uintptr_t* const*)__readfsdword(0x2C);
         if (!tls) return 0;
         const uint32_t idx = *(const uint32_t*)kTlsIndex;
         const uintptr_t* block = tls[idx];

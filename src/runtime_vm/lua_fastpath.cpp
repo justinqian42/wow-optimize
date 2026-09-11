@@ -1200,35 +1200,18 @@ static int __cdecl Hooked_MathFmod(lua_State* L) {
     return orig_math_fmod(L);
 }
 
-// math.mod and the global mod are Lua 5.0's name for fmod, kept by this client
-// through LUA_COMPAT_MOD and used far more in addon code than math.fmod itself.
-// They are separate table slots holding the same client function, so each needs
-// its own original; hooking one does not reach the other.
-static lua_CFunction_t orig_math_mod = nullptr;
-
-static int __cdecl Hooked_MathMod(lua_State* L) {
-    if (lua_gettop_(L) >= 2 &&
-        lua_type_(L, 1) == LUA_TNUMBER && lua_type_(L, 2) == LUA_TNUMBER) {
-        lua_pushnumber_(L, fmod(lua_tonumber_(L, 1), lua_tonumber_(L, 2)));
-        g_mathHits++;
-        return 1;
-    }
-    g_mathFallbacks++;
-    return orig_math_mod(L);
-}
-
-static lua_CFunction_t orig_global_mod = nullptr;
-
-static int __cdecl Hooked_GlobalMod(lua_State* L) {
-    if (lua_gettop_(L) >= 2 &&
-        lua_type_(L, 1) == LUA_TNUMBER && lua_type_(L, 2) == LUA_TNUMBER) {
-        lua_pushnumber_(L, fmod(lua_tonumber_(L, 1), lua_tonumber_(L, 2)));
-        g_mathHits++;
-        return 1;
-    }
-    g_mathFallbacks++;
-    return orig_global_mod(L);
-}
+// math.mod and the global mod are Lua 5.0's names for fmod, kept by this client
+// through LUA_COMPAT_MOD, and entries were added here for both. That was wrong,
+// and the field said so: two tester sessions carry
+//
+//     _G      .mod       0x008512C0  discovered
+//     math    .fmod      0x008512C0  discovered
+//     0x008512C0 is already hooked by a DIFFERENT module of ours
+//
+// They are separate table slots, but all three hold the SAME function object,
+// and this installer hooks the address a name resolves to rather than the slot
+// that names it. So the fmod entry already covers every name bound to that
+// function, and the two extra entries only collided with it. Removed.
 
 // math.modf(x) — split integral/fractional part (matches Lua 5.1 math_modf,
 // returns intpart then fracpart). Used in number/coordinate formatting.
@@ -3223,8 +3206,6 @@ static FuncHookEntry g_funcHooks[] = {
     {"math",   "ceil",     (void*)Hooked_MathCeil,         &orig_math_ceil,        0, false},
     {"math",   "abs",      (void*)Hooked_MathAbs,          &orig_math_abs,         0, false},
     {"math",   "fmod",     (void*)Hooked_MathFmod,         &orig_math_fmod,        0, false},
-    {"math",   "mod",      (void*)Hooked_MathMod,          &orig_math_mod,         0, false},
-    {nullptr,  "mod",      (void*)Hooked_GlobalMod,        &orig_global_mod,       0, false},
     {"math",   "modf",     (void*)Hooked_MathModf,         &orig_math_modf,        0, false},
     {"string", "char",     (void*)Hooked_StrChar,          &orig_str_char,         0, false},
     {"math",   "max",      (void*)Hooked_MathMax,          &orig_math_max,         0, false},

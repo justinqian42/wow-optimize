@@ -143,7 +143,11 @@ constexpr int kHintSlots = 8;
 // across half a million frames, which nobody would feel. The tail is the point:
 // the 33+ bucket has no upper edge, it is where both tester freeze samples
 // landed, and a bitmap scan has no tail to land in.
-constexpr int kMaxChunks = 2048;    // the measured pool held 972
+// A field session reported "Largest chunk count seen: 2436", so 2048 left about
+// a sixth of the pool outside the bitmap and those allocations fell through to
+// the client. 4096 covers it with room; the cost is one kilobyte of bitmap for
+// eight pool slots.
+constexpr int kMaxChunks = 4096;
 constexpr int kWords     = kMaxChunks / 32;
 
 struct PoolSlot {

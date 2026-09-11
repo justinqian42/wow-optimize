@@ -32,7 +32,11 @@ typedef void* (__thiscall *GetObjectByGUID_fn)(void* pThis, uint64_t guid);
 static GetObjectByGUID_fn orig_GetObjectByGUID = nullptr;
 
 inline void* GetActiveObjMgr() {
-    uintptr_t** tls = *(uintptr_t***)__readfsdword(0x2C);
+    // fs:[0x2C] is already the array of TLS blocks; the extra dereference this
+    // used to have read its first entry instead. Corrected here for the same
+    // reason it was corrected in objmgr_enum_fast, though this module stays off
+    // for the snapshot reasons written in that one.
+    uintptr_t** tls = (uintptr_t**)__readfsdword(0x2C);
     if (!tls) return nullptr;
     uint32_t* tlsIndexPtr = (uint32_t*)0x00D439BC;
     if (!tlsIndexPtr) return nullptr;
