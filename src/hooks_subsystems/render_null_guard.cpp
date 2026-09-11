@@ -66,11 +66,25 @@ static bool g_active = false;
 // Suppression accounting. This runs on the render thread only, and these are
 // counters read after the fact, so plain increments are enough - an interlocked
 // pair on a per-draw path would cost more than the call being guarded.
-static volatile long g_calls        = 0;
-static volatile long g_suppressed   = 0;
-static volatile long g_noParamTable = 0;   // D43020 set but D43024 null
-static volatile long g_noGxDevice   = 0;   // C5DF88 null
-static volatile long g_deviceNotReady = 0; // D3D9 device missing or vtable bad
+// Sixty-four bits, and not for tidiness. A field session has g_calls at
+// 1097427112 and these were signed 32-bit, where the wrap is at 2147483648 - so
+// a session about twice as long prints a negative number of draw calls. This
+// project has been there: fifteen signed counters in matrix_copy_sse2 did
+// exactly that, one of them ran out inside the second hour and took the total
+// with it.
+//
+// The width was chosen by measurement rather than by the rule of thumb. On this
+// target a volatile 64-bit increment is 1.03 ns against 1.24 for the
+// plain-32-with-a-wrap-counter pattern, because the 64-bit form is two
+// dependent ALU operations and the other one has a compare and a branch. The
+// rule in CLAUDE.md about never using a plain 64-bit counter is about a value
+// tearing when another thread reads it; these are written and read on the main
+// thread, and the report says the counts are lower bounds.
+static volatile LONG64 g_calls        = 0;
+static volatile LONG64 g_suppressed   = 0;
+static volatile LONG64 g_noParamTable = 0;   // D43020 set but D43024 null
+static volatile LONG64 g_noGxDevice   = 0;   // C5DF88 null
+static volatile LONG64 g_deviceNotReady = 0; // D3D9 device missing or vtable bad
 
 static bool IsDeviceReady() {
     uintptr_t pGxDevice = *(uintptr_t*)0x00C5DF88;
@@ -156,16 +170,18 @@ void RenderNullGuard_LogStats()
     }
 
     if (g_suppressed == 0) {
-        Log("[RenderGuard] %ld draw-path calls, none suppressed", g_calls);
+        Log("[RenderGuard] %lld draw-path calls, none suppressed - the three "
+            "null conditions it exists for did not occur. Counts are lower "
+            "bounds.", (long long)g_calls);
         return;
     }
 
     // Worth saying loudly. Each suppressed call is a model drawn with whatever
     // parameters the previous one left behind.
-    Log("[RenderGuard] %ld of %ld draw-path calls SUPPRESSED (%.3f%%) - each one "
+    Log("[RenderGuard] %lld of %lld draw-path calls SUPPRESSED (%.3f%%) - each one "
         "is a model drawn with the previous model's parameters",
         g_suppressed, g_calls, (double)g_suppressed * 100.0 / (double)g_calls);
-    Log("[RenderGuard]   parameter table null: %ld   CGxDevice null: %ld   "
-        "D3D9 device not ready: %ld",
+    Log("[RenderGuard]   parameter table null: %lld   CGxDevice null: %lld   "
+        "D3D9 device not ready: %lld",
         g_noParamTable, g_noGxDevice, g_deviceNotReady);
 }

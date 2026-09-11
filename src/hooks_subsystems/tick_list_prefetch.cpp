@@ -67,8 +67,19 @@ MH_STATUS WO_EnableHook(void* target);
 // assembly, which does not resolve namespace-qualified symbols.
 static void*    g_origTick        = nullptr;
 static uint32_t g_nextStage       = 0x006C6B90;  // the tail call, jumped indirectly
-static uint32_t g_tickCalls       = 0;           // plain 32-bit: a lower bound
-static uint32_t g_tickPrefetched  = 0;
+// Sixty-four bits, in two dwords, because the field reached 2639039124 calls -
+// sixty-one per cent of the way to a 32-bit wrap - and the report divides one of
+// these by the other. The call counter wraps first, since every call increments
+// it while only a prefetchable one increments the other, and past the wrap the
+// share is a real count over a wrapped one. That is how frustum_aabb came to
+// print 73322% before it was fixed the same week.
+//
+// The thunk increments them in assembly, so this is `add` plus `adc` rather than
+// `inc`. Both forms write flags and both are followed by the client's own `cmp`,
+// which is what sets the flags the `jle` below reads - so the sequence behaves
+// exactly as it did.
+static uint64_t g_tickCalls       = 0;
+static uint64_t g_tickPrefetched  = 0;
 
 // Exactly what sub_6C6C00 is, byte for byte.
 static const unsigned char kExpectedTick[] = {
@@ -95,9 +106,11 @@ __declspec(naked) static void HookedTick() {
         jz   no_prefetch
         prefetcht0 [eax+0B0h]
         prefetcht0 [eax+0D4h]
-        inc  dword ptr [g_tickPrefetched]
+        add  dword ptr [g_tickPrefetched], 1
+        adc  dword ptr [g_tickPrefetched+4], 0
     no_prefetch:
-        inc  dword ptr [g_tickCalls]
+        add  dword ptr [g_tickCalls], 1
+        adc  dword ptr [g_tickCalls+4], 0
 
         // Verbatim from here down. The cmp precedes the lea and mov in the
         // client too, and neither of those touches flags, so the jle tests the
@@ -166,10 +179,10 @@ void LogStats() {
     if (!Config::g_settings.OptTickListPrefetch) return;
     if (!g_installed)     { Log("[TickPrefetch] not installed - nothing measured"); return; }
     if (g_tickCalls == 0) { Log("[TickPrefetch] installed but never called"); return; }
-    Log("[TickPrefetch] %u calls, %u with a next node to prefetch (%.1f%%). Both "
-        "are plain 32-bit counters on a hot path and are lower bounds. No "
+    Log("[TickPrefetch] %llu calls, %llu with a next node to prefetch (%.1f%%). "
+        "Both are plain counters on a hot path and are lower bounds. No "
         "frame-time gain is claimed: this says what it did, not what it saved.",
-        g_tickCalls, g_tickPrefetched,
+        (unsigned long long)g_tickCalls, (unsigned long long)g_tickPrefetched,
         100.0 * (double)g_tickPrefetched / (double)g_tickCalls);
 }
 
