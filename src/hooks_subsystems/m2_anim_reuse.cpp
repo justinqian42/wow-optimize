@@ -110,11 +110,16 @@
 #include <cstring>
 
 #include "m2_anim_reuse.h"
+#include "MinHook.h"
 #include "version.h"
 #include "config.h"
 #include "ab_test.h"
 
 extern "C" void Log(const char* fmt, ...);
+
+MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
+MH_STATUS WO_EnableHook(void* target);
+MH_STATUS WO_DisableHook(void* target);
 
 namespace M2AnimReuse {
 
@@ -125,6 +130,7 @@ const unsigned char kHead[5] = { 0x8B, 0x53, 0x2C, 0x3B, 0xD7 };
 // The client's own no-bones branch, immediately after them.
 const unsigned char kTail[6] = { 0x0F, 0x86, 0x7D, 0x0E, 0x00, 0x00 };
 
+constexpr uintptr_t kEntryAddr = 0x0082F0F0;   // the function itself
 constexpr uintptr_t kHeadAddr = 0x0082F418;
 constexpr uintptr_t kTailAddr = 0x0082F420;   // the jbe, for the signature
 constexpr uintptr_t kRunAddr  = 0x0082F41D;   // mov [ebp+arg_10],edi ; jbe
@@ -170,6 +176,29 @@ Slot g_slot[kSlots];
 // The byte the thunk tests. A naked thunk cannot read EAX across the popad that
 // protects the client's registers, so the answer comes back in memory.
 unsigned char g_hold = 0;
+
+// The five arguments, captured where they still are what the caller passed.
+//
+// They cannot be read at the cut. The client overwrites one of its own at
+// 0x0082F364 - `xor edi, edi` then `mov [ebp+arg_8], edi` - so by 0x0082F418
+// arg_8 is a scratch zero and a tuple built there is missing a fifth of its
+// key. That is not a theory: this module retired in six field sessions with
+// "the same model and the same arguments produced two different bone arrays",
+// and they were not the same arguments.
+//
+// So the entry is hooked as well, purely to record them. A stack rather than a
+// single slot because the tail of this function animates attached models and
+// can re-enter it; each call reads the entry it pushed, matched on the model so
+// a mismatched depth cannot hand one call another's arguments.
+typedef int (__fastcall* Animate_fn)(void* This, void* edx, int a0, int a1,
+                                     int a2, float a3, float a4);
+Animate_fn orig_Animate = nullptr;
+
+constexpr int kMaxDepth = 8;
+struct Stash { void* model; uint32_t a[5]; };
+Stash g_stash[kMaxDepth];
+int   g_depth = 0;
+unsigned long g_tooDeep = 0;   // re-entered past kMaxDepth; those are refused
 
 bool g_armed     = false;
 bool g_dead      = false;
@@ -283,14 +312,13 @@ extern "C" void __cdecl M2AnimReuse_Decide(void* model, void* framePtr, void* eb
         return;
     }
 
+    // From the entry hook, not from the frame: see the note on g_stash.
+    if (g_depth <= 0 || g_depth > kMaxDepth) { ++g_refusedShape; return; }
+    const Stash& st = g_stash[g_depth - 1];
+    if (st.model != model) { ++g_refusedShape; return; }
     uint32_t arg[5];
-    __try {
-        const uint32_t* a = (const uint32_t*)((uintptr_t)framePtr + 8);
-        arg[0] = a[0]; arg[1] = a[1]; arg[2] = a[2]; arg[3] = a[3]; arg[4] = a[4];
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        ++g_refusedShape;
-        return;
-    }
+    memcpy(arg, st.a, sizeof(arg));
+    (void)framePtr;
 
     Slot& s = g_slot[(unsigned)(((uintptr_t)model >> 4) & kSlotMask)];
 
@@ -380,6 +408,28 @@ namespace {
 
 // Entered by a jump, not a call. Every exit is a jump to an address the client
 // would have reached anyway.
+int __fastcall Hooked_Animate(void* This, void* edx, int a0, int a1, int a2,
+                             float a3, float a4) {
+    if (g_depth >= kMaxDepth) {
+        ++g_tooDeep;
+        ++g_depth;                       // still balanced on the way out
+        const int deep = orig_Animate(This, edx, a0, a1, a2, a3, a4);
+        --g_depth;
+        return deep;
+    }
+    Stash& s = g_stash[g_depth];
+    s.model = This;
+    s.a[0] = (uint32_t)a0;
+    s.a[1] = (uint32_t)a1;
+    s.a[2] = (uint32_t)a2;
+    memcpy(&s.a[3], &a3, 4);
+    memcpy(&s.a[4], &a4, 4);
+    ++g_depth;
+    const int r = orig_Animate(This, edx, a0, a1, a2, a3, a4);
+    --g_depth;
+    return r;
+}
+
 __declspec(naked) void Thunk() {
     __asm {
         pushad
@@ -414,50 +464,13 @@ void OnFrame() { ++g_frames; }
 bool Init() {
     if (!Config::g_settings.OptM2AnimReuse) return true;
 
-    // Held back, with the field evidence for why.
-    //
-    // Six sessions on c53bef30 ran this and it retired in every one of them:
-    //
-    //     4348 calls, 2 repeats (0.0%), 0 held. Retired.
-    //     Retired: the same model and the same arguments produced two different
-    //     bone arrays
-    //
-    // against a census that measured 91.6% repeats on the same workload. Two of
-    // our own instruments disagreeing by four orders of magnitude is
-    // information, and resolving it found two defects rather than one.
-    //
-    // The first was the clock. A repeat is only a repeat in a LATER frame, and
-    // the frame counter came from MainThreadPump - which is reached from
-    // hooked_Sleep and from the frame limiter behind an eight millisecond gate,
-    // so on a client at seven milliseconds a frame it fires less than once a
-    // frame. That is fixed: every per-frame caller moved to
-    // WowOpt_OnFrameBoundary, which both present paths reach exactly once.
-    //
-    // The second is not fixed and is why this stays off. The tuple is read at
-    // the cut, 0x0082F418, and the client has already overwritten one of its own
-    // arguments by then:
-    //
-    //     0x0082F320  xor  edi, edi
-    //     0x0082F364  mov  [ebp+arg_8], edi
-    //
-    // so arg_8 reads as zero rather than as the pointer it arrived as. A tuple
-    // missing one of its five values matches where the real arguments differed,
-    // which is exactly the failure the hash check caught: the arguments were not
-    // the same, this only thought they were.
-    //
-    // The fix needs the arguments as they arrive, and the function entry at
-    // 0x0082F0F0 is where anim_lod's hook already reads them - it pushes
-    // [ebp+08h] through [ebp+18h] to the census from there. Feeding them across
-    // is a small change and a deliberate one, not something to bolt on while
-    // guessing. Until then this refuses rather than running on a key it is known
-    // to read wrongly.
-    Log("[M2AnimReuse] NOT installed: the tuple is read at the cut, and the "
-        "client overwrites arg_8 with zero at 0x0082F364 before that point, so "
-        "one of the five values is a scratch zero. It retired in six field "
-        "sessions for exactly that reason. It needs the arguments as they "
-        "arrive at 0x0082F0F0, which is where anim_lod already reads them.");
-    return false;
-
+    if (Config::g_settings.OptAnimLod) {
+        Log("[M2AnimReuse] NOT installed: Animation LOD is on and hooks the "
+            "entry at 0x%08X, which this needs to read the arguments before the "
+            "client overwrites one of them. They cannot both have it.",
+            (unsigned)kEntryAddr);
+        return false;
+    }
     if (Config::g_settings.OptM2AnimStride) {
         Log("[M2AnimReuse] NOT installed: Model Animation Stride is on and cuts "
             "the same five bytes at 0x%08X. Turn that one off - it is marked as "
@@ -489,6 +502,18 @@ bool Init() {
             (unsigned)kHeadAddr);
         return false;
     }
+    // The entry hook goes in first. Without it the cut has no arguments to key
+    // on, and a cut installed alone would run on a tuple with a hole in it -
+    // which is exactly what retired this module in six field sessions.
+    if (WineSafe_CreateHook((void*)kEntryAddr, (void*)&Hooked_Animate,
+                            (void**)&orig_Animate) != MH_OK ||
+        WO_EnableHook((void*)kEntryAddr) != MH_OK) {
+        Log("[M2AnimReuse] NOT installed: could not hook the entry at 0x%08X, "
+            "and the cut is useless without the arguments it reads there.",
+            (unsigned)kEntryAddr);
+        return false;
+    }
+
     memcpy(g_saved, (const void*)kHeadAddr, 5);
     unsigned char patch[5];
     patch[0] = 0xE9;
@@ -518,6 +543,12 @@ bool Init() {
 }
 
 void Shutdown() {
+    // The entry hook goes first: the cut reads what it records, so a cut left
+    // running against an unhooked entry would read a stale depth.
+    if (orig_Animate) {
+        MH_DisableHook((void*)kEntryAddr);
+        orig_Animate = nullptr;
+    }
     if (!g_patched) return;
     DWORD old = 0;
     if (VirtualProtect((void*)kHeadAddr, 5, PAGE_EXECUTE_READWRITE, &old)) {
@@ -564,6 +595,10 @@ void LogStats() {
             "clock into every bone on that model, so a second run does not "
             "reproduce the first and holding it would stop the clock.",
             g_refusedAccum);
+    if (g_tooDeep > 0)
+        Log("[M2AnimReuse]   %lu calls re-entered past %d deep - an attached "
+            "model animating from inside the tail - and were refused rather "
+            "than given another call's arguments.", g_tooDeep, kMaxDepth);
     if (g_refusedShape > 0)
         Log("[M2AnimReuse]   %lu calls refused: the bone array could not be "
             "read, or the model reported more bones than this will hash.",
