@@ -168,6 +168,7 @@ namespace Config {
         bool OptAsyncTerrainLoader = false;
         bool OptRcuObjMgr = false;
         bool OptObjMgrEnumFast = false;
+        bool OptFreezeCatcher = false;
         bool OptMpqOpenCensus = false;
         bool OptMpqNegativeCache = false;
         bool OptMipBiasGovernor = false;

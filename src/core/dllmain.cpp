@@ -48,6 +48,7 @@
 #include "high_tables.h"
 #include "x87_precision_check.h"
 #include "self_bench.h"
+#include "freeze_catcher.h"
 #include "ray_triangle_sse2.h"
 #include "bone_matrix_upload_sse2.h"
 #include "m2_matrix_slot_sse2.h"
@@ -2128,6 +2129,7 @@ static void MainThreadPump() {
 
         // Enable D3D9 State Manager frame update
         X87Precision::Sample("with frames running");
+        FreezeCatcher::OnFrame();
         M2AnimStride::OnFrame();
         M2AnimReuse::OnFrame();
         OnFrameD3D9StateManager(g_mainThreadId);
@@ -5501,6 +5503,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("HighTables::LogStats", HighTables::LogStats());
     STAT_TIME("X87Precision::LogStats", X87Precision::LogStats());
     STAT_TIME("SelfBench::LogStats", SelfBench::LogStats());
+    STAT_TIME("FreezeCatcher::LogStats", FreezeCatcher::LogStats());
     STAT_TIME("RayTriangle::LogStats", RayTriangle::LogStats());
     STAT_TIME("ObjMgrEnumFast::LogStats", ObjMgrEnumFast::LogStats());
     STAT_TIME("MpqOpenCensus::LogStats", MpqOpenCensus::LogStats());
@@ -9459,6 +9462,19 @@ static DWORD WINAPI MainThread(LPVOID param) {
             if (SamplingProfiler::Init(hMain))
                 CrashDumper::FeatureSetActive("SamplingProfiler", true);
             CloseHandle(hMain);
+        }
+    }
+
+    // The freeze catcher wants the same access and is deliberately separate: it
+    // samples only inside a frame that has already overrun, so it can be on in
+    // a session where the profiler is not.
+    if (Config::g_settings.OptFreezeCatcher) {
+        HANDLE hFreeze = OpenThread(THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, g_mainThreadId);
+        if (hFreeze) {
+            FreezeCatcher::Init(hFreeze);
+            CloseHandle(hFreeze);
+        } else {
+            Log("[FreezeCatcher] NOT active: could not open the main thread.");
         }
     }
 #endif
