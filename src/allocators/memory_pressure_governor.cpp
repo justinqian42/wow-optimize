@@ -12,9 +12,9 @@
 #include <atomic>
 #include "memory_pressure_governor.h"
 #include "version.h"
+#include "heap_compactor.h"
 
 extern "C" void Log(const char* fmt, ...);
-extern "C" SIZE_T HeapCompactor_GetCachedLowHalf();
 
 namespace PressureGovernor {
 

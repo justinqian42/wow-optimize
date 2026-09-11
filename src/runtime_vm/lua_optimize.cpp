@@ -43,7 +43,6 @@ extern "C" void ReleaseLoadingArena();
 
 extern bool g_isMultiClient;
 extern "C" void Log(const char* fmt, ...);
-extern "C" SIZE_T HeapCompactor_GetCachedLowHalf();
 
 // ================================================================
 // Lua 5.1 types and GC constants.

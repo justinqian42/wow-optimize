@@ -497,20 +497,16 @@ extern "C" void HeapCompactor_LogStats() {
         g_compactionGaveUp ? " - stopped, it was not recovering anything" : "");
 }
 
-extern "C" SIZE_T HeapCompactor_GetLargestFreeBlock() {
-    return GetLargestFreeBlock();
-}
+// Every query below hands back the monitor thread's last walk.
+//
+// Two that walked on the caller's thread used to stand here, exported from the
+// header with no thread rule attached and called by nothing. The walk is
+// VirtualQuery over all of user address space and the field data has 6183 free
+// regions in the low half alone; a main-thread copy of it, run once a second,
+// is the one stall this project has measured against itself. With them gone
+// there is no way to reach the walk except from the monitor thread that owns it.
 
-// The low half separately, which is the number that matters: the client
-// allocates from below 2GB and a caller that wants to say how much room was left
-// at some moment needs that figure rather than the whole address space.
-extern "C" SIZE_T HeapCompactor_GetLargestFreeLowHalf() {
-    SIZE_T low = 0;
-    GetLargestFreeBlock(&low);
-    return low;
-}
-
-// The same figure without the walk, for callers on the main thread.
+// The low-half figure without the walk, for callers on the main thread.
 //
 // Returns the monitor thread's last result and how old it is, or 0 with an age of
 // 0 when the monitor has not run yet - which is a different fact from "no memory
