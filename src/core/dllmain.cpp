@@ -2128,10 +2128,14 @@ static void MainThreadPump() {
 #endif
 
         // Enable D3D9 State Manager frame update
-        X87Precision::Sample("with frames running");
-        FreezeCatcher::OnFrame();
-        M2AnimStride::OnFrame();
-        M2AnimReuse::OnFrame();
+        //
+        // Anything that wants a FRAME does not belong here. This pump is reached
+        // from hooked_Sleep and from the frame limiter, behind an eight
+        // millisecond gate, so on a client running at seven milliseconds a frame
+        // it fires less than once a frame and on one that never sleeps it may
+        // not fire at all. Those callers moved to WowOpt_OnFrameBoundary, which
+        // both present paths reach exactly once. M2SortKey was moved out of here
+        // for the same reason and the note above it says so.
         OnFrameD3D9StateManager(g_mainThreadId);
         OnFrameRenderHooks(g_mainThreadId);
         OnFrameLogicHooks(g_mainThreadId);
@@ -5904,6 +5908,20 @@ extern "C" void WowOpt_OnFrameBoundary() {
     // thread went 85.9%, 91.3%, 95.5%, 99.0% executing, and ended up claiming
     // 72 ms of animation inside a 53 ms frame.
     AnimCensus::OnFrame();
+
+    // Moved out of MainThreadPump, which is not a frame. M2AnimReuse counts a
+    // repeat only when the same model is asked for the same pose in a LATER
+    // frame, and with the pump's clock it counted 2 repeats in 4348 calls
+    // against the census's 91.6% on the same workload - two of our own
+    // instruments disagreeing by four orders of magnitude, which is information
+    // rather than noise. The freeze catcher has the same dependency in a worse
+    // direction: it measures how long the current frame has been running, and a
+    // clock that ticks on Sleep would have had it arming on frames that never
+    // happened.
+    X87Precision::Sample("with frames running");
+    FreezeCatcher::OnFrame();
+    M2AnimStride::OnFrame();
+    M2AnimReuse::OnFrame();
     AnimLod::OnFrame();
 
     FlushFieldUpdates();

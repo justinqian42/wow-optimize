@@ -414,6 +414,50 @@ void OnFrame() { ++g_frames; }
 bool Init() {
     if (!Config::g_settings.OptM2AnimReuse) return true;
 
+    // Held back, with the field evidence for why.
+    //
+    // Six sessions on c53bef30 ran this and it retired in every one of them:
+    //
+    //     4348 calls, 2 repeats (0.0%), 0 held. Retired.
+    //     Retired: the same model and the same arguments produced two different
+    //     bone arrays
+    //
+    // against a census that measured 91.6% repeats on the same workload. Two of
+    // our own instruments disagreeing by four orders of magnitude is
+    // information, and resolving it found two defects rather than one.
+    //
+    // The first was the clock. A repeat is only a repeat in a LATER frame, and
+    // the frame counter came from MainThreadPump - which is reached from
+    // hooked_Sleep and from the frame limiter behind an eight millisecond gate,
+    // so on a client at seven milliseconds a frame it fires less than once a
+    // frame. That is fixed: every per-frame caller moved to
+    // WowOpt_OnFrameBoundary, which both present paths reach exactly once.
+    //
+    // The second is not fixed and is why this stays off. The tuple is read at
+    // the cut, 0x0082F418, and the client has already overwritten one of its own
+    // arguments by then:
+    //
+    //     0x0082F320  xor  edi, edi
+    //     0x0082F364  mov  [ebp+arg_8], edi
+    //
+    // so arg_8 reads as zero rather than as the pointer it arrived as. A tuple
+    // missing one of its five values matches where the real arguments differed,
+    // which is exactly the failure the hash check caught: the arguments were not
+    // the same, this only thought they were.
+    //
+    // The fix needs the arguments as they arrive, and the function entry at
+    // 0x0082F0F0 is where anim_lod's hook already reads them - it pushes
+    // [ebp+08h] through [ebp+18h] to the census from there. Feeding them across
+    // is a small change and a deliberate one, not something to bolt on while
+    // guessing. Until then this refuses rather than running on a key it is known
+    // to read wrongly.
+    Log("[M2AnimReuse] NOT installed: the tuple is read at the cut, and the "
+        "client overwrites arg_8 with zero at 0x0082F364 before that point, so "
+        "one of the five values is a scratch zero. It retired in six field "
+        "sessions for exactly that reason. It needs the arguments as they "
+        "arrive at 0x0082F0F0, which is where anim_lod already reads them.");
+    return false;
+
     if (Config::g_settings.OptM2AnimStride) {
         Log("[M2AnimReuse] NOT installed: Model Animation Stride is on and cuts "
             "the same five bytes at 0x%08X. Turn that one off - it is marked as "
