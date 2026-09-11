@@ -88,6 +88,9 @@ typedef uint32_t* (__fastcall* Find_fn)(void* self, void* edx, uint32_t key, uin
 struct SiteState {
     Find_fn       orig;
     unsigned long calls;
+    unsigned long callWraps;   // 1258648980 in one field session; the wrap is at
+                               // 4294967296 and a rate divided by a wrapped
+                               // count is how frustum_aabb came to print 73322%
     unsigned long agreements;
     unsigned long steps;
     volatile LONG armed;
@@ -95,6 +98,29 @@ struct SiteState {
     bool          installed;
     const char*   name;
     uintptr_t     addr;
+
+    // The last answer, kept so a repeat can skip the hash and the chain.
+    //
+    // A field session has sub_4D4BB0 at 1.26 billion lookups, which is six
+    // hundred a frame, and the callers are game code asking for an object it is
+    // about to read several fields of. The same key arriving twice running is
+    // not a guess about the workload, but the share of them is, so this counts
+    // hits and misses and the report says which it was.
+    //
+    // The memo never answers on its own. It names a node, and that node is put
+    // through the same comparison Walk would have applied when it reached it -
+    // the key fields, read from the node, in the same order. A node that was
+    // freed and reused fails that and costs one miss. This is the shape
+    // lua_pool_fast uses for the same reason: a cache that nominates cannot
+    // return something the client's own walk would have rejected.
+    void*         memoSelf;
+    uint32_t      memoKey;
+    uint32_t      memoAux0;
+    uint32_t      memoAux1;
+    uint32_t*     memoNode;
+    unsigned long memoHits;
+    unsigned long memoHitWraps;
+    unsigned long memoMiss;
 };
 
 // Indexed by the enum below; the three are separate hooks because MinHook needs
@@ -102,10 +128,34 @@ struct SiteState {
 enum { S_Key = 0, S_KeyPair, S_GuidPair, S_COUNT };
 
 SiteState g_site[S_COUNT] = {
-    { nullptr, 0, 0, 0, 0, 0, false, "sub_6F6020 (key)",       0x006F6020 },
-    { nullptr, 0, 0, 0, 0, 0, false, "sub_6792E0 (key+pair)",  0x006792E0 },
-    { nullptr, 0, 0, 0, 0, 0, false, "sub_4D4BB0 (guid)",      0x004D4BB0 },
+    { nullptr, 0, 0, 0, 0, 0, 0, false, "sub_6F6020 (key)",      0x006F6020 },
+    { nullptr, 0, 0, 0, 0, 0, 0, false, "sub_6792E0 (key+pair)", 0x006792E0 },
+    { nullptr, 0, 0, 0, 0, 0, 0, false, "sub_4D4BB0 (guid)",     0x004D4BB0 },
 };
+
+inline void Bump(unsigned long& low, unsigned long& wraps) {
+    const unsigned long before = low;
+    low = before + 1;
+    if (low < before) ++wraps;
+}
+
+inline double Total(unsigned long low, unsigned long wraps) {
+    return (double)low + (double)wraps * 4294967296.0;
+}
+
+// The comparison Walk applies once it reaches a node, applied to a node the
+// memo named instead. KIND decides which fields carry the key, exactly as the
+// three instantiations of the client's template differ.
+template <int KIND>
+inline bool NodeStillMatches(uint32_t* node, uint32_t key, const uint32_t* aux) {
+    if (!node) return false;
+    const uintptr_t n = (uintptr_t)node;
+    if (n < 0x10000 || n > 0xFFE00000) return false;
+    if (KIND == S_Key)      return Rd(n) == key;
+    if (KIND == S_KeyPair)  return Rd(n) == key && Rd(n + 24) == aux[0] &&
+                                   Rd(n + 28) == aux[1];
+    return Rd(n + 24) == key && Rd(n + 48) == aux[0] && Rd(n + 52) == aux[1];
+}
 
 inline uint32_t Rd(uintptr_t p) { return *(volatile uint32_t*)p; }
 
@@ -156,8 +206,25 @@ inline uint32_t* Dispatch(void* self, void* edx, uint32_t key, uint32_t* aux) {
     if (st.dead || !self) return st.orig(self, edx, key, aux);
     if (KIND != S_Key && !aux) return st.orig(self, edx, key, aux);
 
-    unsigned long n = ++st.calls;
+    Bump(st.calls, st.callWraps);
+    const unsigned long n = st.calls;
     bool verifying = (st.armed == 0) || ((n & kResampleMask) == 0);
+
+    // Armed and not this call's turn to be checked: try the last answer first.
+    if (!verifying && st.memoSelf == self && st.memoKey == key &&
+        (KIND == S_Key || (aux && st.memoAux0 == aux[0] && st.memoAux1 == aux[1]))) {
+        bool ok = false;
+        __try {
+            ok = NodeStillMatches<KIND>(st.memoNode, key, aux);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            ok = false;
+        }
+        if (ok) {
+            Bump(st.memoHits, st.memoHitWraps);
+            return st.memoNode;
+        }
+        ++st.memoMiss;
+    }
 
     uint32_t* mine;
     unsigned steps = 0;
@@ -168,6 +235,12 @@ inline uint32_t* Dispatch(void* self, void* edx, uint32_t key, uint32_t* aux) {
         return st.orig(self, edx, key, aux);
     }
     st.steps += steps;
+
+    st.memoSelf = self;
+    st.memoKey  = key;
+    st.memoAux0 = aux ? aux[0] : 0;
+    st.memoAux1 = aux ? aux[1] : 0;
+    st.memoNode = mine;
 
     if (verifying) {
         uint32_t* theirs = st.orig(self, edx, key, aux);
@@ -254,10 +327,20 @@ void LogStats() {
         SiteState& st = g_site[i];
         if (!st.installed) { Log("[StormHash] %s: not installed", st.name); continue; }
         if (st.calls == 0) { Log("[StormHash] %s: never called", st.name); continue; }
-        Log("[StormHash] %s: %lu lookups, %lu verified, %.2f nodes walked each%s",
-            st.name, st.calls, st.agreements,
-            (double)st.steps / (double)st.calls,
+        const double calls = Total(st.calls, st.callWraps);
+        const double memoHits = Total(st.memoHits, st.memoHitWraps);
+        Log("[StormHash] %s: %.0f lookups, %lu verified, %.2f nodes walked each%s",
+            st.name, calls, st.agreements,
+            calls > 0.0 ? (double)st.steps / calls : 0.0,
             st.dead ? " - DISABLED" : (st.armed ? "" : " (still verifying)"));
+        if (memoHits || st.memoMiss)
+            Log("[StormHash]   %.0f of those (%.1f%%) were the same lookup as the "
+                "one before and skipped the hash and the chain; %lu named a node "
+                "that no longer held the key and cost one comparison. The share "
+                "is the number that says whether remembering the last answer was "
+                "worth it.",
+                memoHits, calls > 0.0 ? 100.0 * memoHits / calls : 0.0,
+                st.memoMiss);
     }
 }
 
