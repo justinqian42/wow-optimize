@@ -106,6 +106,7 @@
 #include "config.h"
 #include "sampling_profiler.h"
 #include "ab_test.h"
+#include "self_bench.h"
 #include "session_verdict.h"
 
 extern "C" void Log(const char* fmt, ...);
@@ -131,6 +132,7 @@ bool g_armed     = false;
 // tests a plain bool instead of calling out on every invocation.
 bool g_abSubject = false;
 bool g_dead      = false;
+int  g_benchSlot = -1;
 
 // Plain 32-bit on a leaf this hot. A lost increment costs a number, and the
 // report says the numbers are lower bounds.
@@ -195,12 +197,18 @@ int __fastcall Hooked_OverlapBody(const float* self, void* edx, const float* oth
     if (g_dead) return orig_Overlap(self, edx, other);
 
 
+    const uint64_t tA = SelfBench::Now();
     int mine = Sse2Overlap(self, other);
+    const uint64_t tB = SelfBench::Now();
 
     // Unarmed, or one call in kResampleMask+1 afterwards: run the client's own
     // code and compare. Its answer is the one returned either way.
     if (!g_armed || (g_calls & kResampleMask) == 0) {
+        // The verification already runs both halves on the same input. Timing
+        // it is the only paired comparison this project gets without asking a
+        // tester to configure anything.
         int theirs = orig_Overlap(self, edx, other);
+        SelfBench::Pair(g_benchSlot, tB - tA, SelfBench::Now() - tB);
         g_verified++;
         if ((theirs != 0) != (mine != 0)) {
             g_dead = true;
@@ -263,6 +271,7 @@ bool Init() {
     }
 
     g_abSubject = AbTest::IsSubject("AabbOverlap", &g_abSubject);
+    g_benchSlot = SelfBench::Register("AabbOverlap");
     if (g_abSubject) {
         Log("[AabbOverlap] under A/B test: it alternates on and off in stints "
             "and AbTest reports the frame times either way. The correctness "

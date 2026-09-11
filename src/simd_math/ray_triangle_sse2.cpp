@@ -146,6 +146,7 @@
 
 #include "ray_triangle_sse2.h"
 #include "x87_precision_check.h"
+#include "self_bench.h"
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
@@ -178,6 +179,7 @@ bool g_installed = false;
 bool g_armed     = false;
 bool g_dead      = false;
 bool g_abSubject = false;
+int  g_benchSlot = -1;
 
 unsigned long g_calls    = 0;
 unsigned long g_verified = 0;
@@ -333,8 +335,12 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
 
     // Checking: work out the answer without touching the caller's buffers, let
     // the client run and write them, then compare.
+    // The verification runs both halves on the same input, which is the only
+    // paired comparison this project ever gets. Timing it costs two rdtsc on a
+    // path that was already doing twice the work.
     Out mine;
     int ours;
+    const uint64_t tOursA = SelfBench::Now();
     __try {
         ours = Test((const float*)ray, (const float*)verts,
                     (const uint16_t*)tri, outT != nullptr, outUV != nullptr,
@@ -343,7 +349,10 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
         return orig_Test(ray, verts, tri, outT, outUV, tol);
     }
 
+    const uint64_t tOursB = SelfBench::Now();
     const int theirs = orig_Test(ray, verts, tri, outT, outUV, tol);
+    const uint64_t tTheirsB = SelfBench::Now();
+    SelfBench::Pair(g_benchSlot, tOursB - tOursA, tTheirsB - tOursB);
     ++g_verified;
     if (theirs & 0xFF) ++g_hits;   // counted on both paths, or the rate lies
 
@@ -395,6 +404,7 @@ bool Init() {
     }
     g_installed = true;
     g_abSubject = AbTest::IsSubject("RayTriangleSse2", &g_abSubject);
+    g_benchSlot = SelfBench::Register("RayTriangle");
 
     Log("[RayTriangle] ACTIVE on sub_983490, the ray-triangle test every "
         "collision path shares - four functions in the collision family call it "

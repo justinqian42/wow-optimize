@@ -47,6 +47,7 @@
 #include "collision_ray_outcode_sse2.h"
 #include "high_tables.h"
 #include "x87_precision_check.h"
+#include "self_bench.h"
 #include "ray_triangle_sse2.h"
 #include "bone_matrix_upload_sse2.h"
 #include "m2_matrix_slot_sse2.h"
@@ -5499,6 +5500,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
     STAT_TIME("HighTables::LogStats", HighTables::LogStats());
     STAT_TIME("X87Precision::LogStats", X87Precision::LogStats());
+    STAT_TIME("SelfBench::LogStats", SelfBench::LogStats());
     STAT_TIME("RayTriangle::LogStats", RayTriangle::LogStats());
     STAT_TIME("ObjMgrEnumFast::LogStats", ObjMgrEnumFast::LogStats());
     STAT_TIME("MpqOpenCensus::LogStats", MpqOpenCensus::LogStats());

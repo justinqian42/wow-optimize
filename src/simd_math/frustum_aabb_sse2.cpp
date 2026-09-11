@@ -80,6 +80,7 @@
 #include "config.h"
 #include "sampling_profiler.h"
 #include "ab_test.h"
+#include "self_bench.h"
 #include "session_verdict.h"
 
 extern "C" void Log(const char* fmt, ...);
@@ -106,6 +107,7 @@ bool g_armed     = false;
 // tests a plain bool instead of calling out on every invocation.
 bool g_abSubject = false;
 bool g_dead      = false;
+int  g_benchSlot = -1;
 
 // Plain 32-bit, because this is called hard from the visibility walk and a
 // locked increment there has eaten whole optimisations in this project before.
@@ -215,13 +217,19 @@ int __fastcall Hooked_IsVisibleBody(void* frustum, void* edx, void* aabb) {
 
 
     if (!g_armed || (g_calls & kResampleMask) == 0) {
+        // The verification already runs both halves on the same input. Timing
+        // it is the only paired comparison this project gets without asking a
+        // tester to configure anything.
         int mine;
+        const uint64_t tA = SelfBench::Now();
         __try {
             mine = Evaluate(frustum, aabb);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             return orig_IsVisible(frustum, edx, aabb);
         }
+        const uint64_t tB = SelfBench::Now();
         int theirs = orig_IsVisible(frustum, edx, aabb);
+        SelfBench::Pair(g_benchSlot, tB - tA, SelfBench::Now() - tB);
         g_verified++;
 
         if (mine != theirs) {
@@ -300,6 +308,7 @@ bool Init() {
     }
 
     g_abSubject = AbTest::IsSubject("FrustumAabb", &g_abSubject);
+    g_benchSlot = SelfBench::Register("FrustumAabb");
     if (g_abSubject) {
         Log("[FrustumAabb] under A/B test: it alternates on and off in stints "
             "and AbTest reports the frame times either way. The correctness "
