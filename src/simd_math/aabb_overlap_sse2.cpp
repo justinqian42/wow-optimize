@@ -134,9 +134,33 @@ bool g_dead      = false;
 
 // Plain 32-bit on a leaf this hot. A lost increment costs a number, and the
 // report says the numbers are lower bounds.
-unsigned long g_calls    = 0;
-unsigned long g_verified = 0;
-unsigned long g_overlaps = 0;
+// Plain 32-bit, because a locked increment on a path this hot has eaten whole
+// optimisations in this project before. But 32 bits is not enough to divide by:
+// a field session has this counter at 3865121557, against a wrap at 4294967296, and
+// the call counter always wraps before the hit counter because every call
+// increments it while only a hit increments the other. Past the wrap the report
+// divides a real count by a wrapped one.
+//
+// That is not hypothetical here. The sibling module frustum_aabb printed
+// "1496607690 visibility tests, 1691870587 came back visible (113.0%)" and once
+// 73322.0%, which is more things visible than tests run. Same shape, same fix:
+// each counter keeps its wraps and the report recombines them as a double.
+unsigned long g_calls     = 0;
+unsigned long g_callWraps = 0;
+unsigned long g_verified  = 0;
+unsigned long g_overlaps  = 0;
+unsigned long g_overWraps = 0;
+
+inline void Bump(unsigned long& low, unsigned long& wraps) {
+    const unsigned long before = low;
+    low = before + 1;
+    if (low < before) ++wraps;
+}
+
+inline double Total(unsigned long low, unsigned long wraps) {
+    return (double)low + (double)wraps * 4294967296.0;
+}
+
 
 constexpr unsigned long kVerifyFirst  = 20000;
 constexpr unsigned long kResampleMask = 4095;
@@ -166,7 +190,7 @@ inline int Sse2Overlap(const float* self, const float* other) {
 }  // namespace
 
 int __fastcall Hooked_OverlapBody(const float* self, void* edx, const float* other) {
-    g_calls++;
+    Bump(g_calls, g_callWraps);
 
     if (g_dead) return orig_Overlap(self, edx, other);
 
@@ -195,11 +219,11 @@ int __fastcall Hooked_OverlapBody(const float* self, void* edx, const float* oth
                 "now answering directly and rechecking one call in %lu",
                 g_verified, kResampleMask + 1);
         }
-        if (theirs) g_overlaps++;
+        if (theirs) Bump(g_overlaps, g_overWraps);
         return theirs;
     }
 
-    if (mine) g_overlaps++;
+    if (mine) Bump(g_overlaps, g_overWraps);
     return mine;
 }
 
@@ -263,10 +287,12 @@ void LogStats() {
     if (!g_installed) { Log("[AabbOverlap] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[AabbOverlap] installed but never called"); return; }
 
-    Log("[AabbOverlap] %lu calls, %lu boxes overlapped (%.1f%%), %lu verified "
+    const double callsTotal   = Total(g_calls, g_callWraps);
+    const double overlapTotal = Total(g_overlaps, g_overWraps);
+    Log("[AabbOverlap] %.0f calls, %.0f boxes overlapped (%.1f%%), %lu verified "
         "against the client%s. Counts are lower bounds.",
-        g_calls, g_overlaps,
-        g_calls ? (100.0 * (double)g_overlaps / (double)g_calls) : 0.0,
+        callsTotal, overlapTotal,
+        callsTotal > 0.0 ? (100.0 * overlapTotal / callsTotal) : 0.0,
         g_verified,
         g_dead ? " - RETIRED on a disagreement"
                : (g_armed ? " - armed" : " - still verifying, every call still "

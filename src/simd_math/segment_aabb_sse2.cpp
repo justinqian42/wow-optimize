@@ -103,9 +103,33 @@ bool g_armed     = false;
 bool g_abSubject = false;
 bool g_dead      = false;
 
-unsigned long g_calls    = 0;
-unsigned long g_verified = 0;
-unsigned long g_hits     = 0;
+// Plain 32-bit, because a locked increment on a path this hot has eaten whole
+// optimisations in this project before. But 32 bits is not enough to divide by:
+// a field session has this counter at 1703651856 and climbing, against a wrap at 4294967296, and
+// the call counter always wraps before the hit counter because every call
+// increments it while only a hit increments the other. Past the wrap the report
+// divides a real count by a wrapped one.
+//
+// That is not hypothetical here. The sibling module frustum_aabb printed
+// "1496607690 visibility tests, 1691870587 came back visible (113.0%)" and once
+// 73322.0%, which is more things visible than tests run. Same shape, same fix:
+// each counter keeps its wraps and the report recombines them as a double.
+unsigned long g_calls     = 0;
+unsigned long g_callWraps = 0;
+unsigned long g_verified  = 0;
+unsigned long g_hits      = 0;
+unsigned long g_hitWraps  = 0;
+
+inline void Bump(unsigned long& low, unsigned long& wraps) {
+    const unsigned long before = low;
+    low = before + 1;
+    if (low < before) ++wraps;
+}
+
+inline double Total(unsigned long low, unsigned long wraps) {
+    return (double)low + (double)wraps * 4294967296.0;
+}
+
 
 constexpr unsigned long kVerifyFirst  = 20000;
 constexpr unsigned long kResampleMask = 4095;
@@ -176,7 +200,7 @@ int Evaluate(const float* box, const float* start, const float* end) {
 }  // namespace
 
 int __cdecl Hooked_TestBody(const float* box, const float* start, const float* end) {
-    g_calls++;
+    Bump(g_calls, g_callWraps);
     if (g_dead || !box || !start || !end) return orig_Test(box, start, end);
 
 
@@ -206,13 +230,13 @@ int __cdecl Hooked_TestBody(const float* box, const float* start, const float* e
                 "answering directly and rechecking one in %lu.",
                 g_verified, kResampleMask + 1);
         }
-        if (theirs) g_hits++;
+        if (theirs) Bump(g_hits, g_hitWraps);
         return theirs;
     }
 
     __try {
         int r = Evaluate(box, start, end);
-        if (r) g_hits++;
+        if (r) Bump(g_hits, g_hitWraps);
         return r;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return orig_Test(box, start, end);
@@ -297,12 +321,15 @@ void LogStats() {
     if (!g_installed) { Log("[SegmentAabb] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[SegmentAabb] installed but never called"); return; }
 
-    Log("[SegmentAabb] %lu segment tests%s, %lu intersected (%.1f%%), %lu verified "
+    const double callsTotal = Total(g_calls, g_callWraps);
+    const double hitsTotal  = Total(g_hits, g_hitWraps);
+    Log("[SegmentAabb] %.0f segment tests%s, %.0f intersected (%.1f%%), %lu verified "
         "against the client. Counts are lower bounds.",
-        g_calls,
+        callsTotal,
         g_dead ? " - RETIRED on a disagreement"
                : (g_armed ? "" : " - still verifying, the client still answers every one"),
-        g_hits, 100.0 * (double)g_hits / (double)g_calls, g_verified);
+        hitsTotal, callsTotal > 0.0 ? 100.0 * hitsTotal / callsTotal : 0.0,
+        g_verified);
 }
 
 void Shutdown() {

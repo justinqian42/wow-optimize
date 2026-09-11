@@ -107,11 +107,45 @@ bool g_armed     = false;
 bool g_abSubject = false;
 bool g_dead      = false;
 
-// Plain 32-bit; this is called hard from the visibility walk. Lower bounds, and
-// the report says so.
-unsigned long g_calls    = 0;
-unsigned long g_verified = 0;
-unsigned long g_visible  = 0;
+// Plain 32-bit, because this is called hard from the visibility walk and a
+// locked increment there has eaten whole optimisations in this project before.
+//
+// But 32 bits is not enough to divide by. Field sessions reach 1.7 billion calls
+// and the counter wraps at 4.29 billion, and it wraps before g_visible does
+// because every call increments it while only a visible one increments the
+// other. Past that point the report divided a real count by a wrapped one:
+//
+//     1496607690 visibility tests, 1691870587 came back visible (113.0%)
+//      106645051 visibility tests, 1314017835 came back visible (1232.1%)
+//
+// and once, 73322.0%. More things visible than tests run is not a number that
+// can happen, and the share was the headline the module exists to report.
+//
+// So each counter keeps its wraps and the report recombines them as a double.
+// This is the same fix the fifteen counters in matrix_copy_sse2 needed, for the
+// same reason, found the same way - by an impossible number rather than by
+// reading the code.
+unsigned long g_calls      = 0;
+unsigned long g_callWraps  = 0;
+unsigned long g_verified   = 0;
+unsigned long g_visible    = 0;
+unsigned long g_visWraps   = 0;
+
+inline void BumpCalls() {
+    const unsigned long before = g_calls;
+    g_calls = before + 1;
+    if (g_calls < before) ++g_callWraps;
+}
+
+inline void BumpVisible() {
+    const unsigned long before = g_visible;
+    g_visible = before + 1;
+    if (g_visible < before) ++g_visWraps;
+}
+
+inline double Total(unsigned long low, unsigned long wraps) {
+    return (double)low + (double)wraps * 4294967296.0;
+}
 
 constexpr unsigned long kVerifyFirst  = 20000;
 constexpr unsigned long kResampleMask = 4095;
@@ -176,7 +210,7 @@ inline int Evaluate(void* frustum, void* aabb) {
 }  // namespace
 
 int __fastcall Hooked_IsVisibleBody(void* frustum, void* edx, void* aabb) {
-    g_calls++;
+    BumpCalls();
     if (g_dead || !frustum || !aabb) return orig_IsVisible(frustum, edx, aabb);
 
 
@@ -206,13 +240,13 @@ int __fastcall Hooked_IsVisibleBody(void* frustum, void* edx, void* aabb) {
                 "answering directly and rechecking one in %lu.",
                 g_verified, kResampleMask + 1);
         }
-        if (theirs) g_visible++;
+        if (theirs) BumpVisible();
         return theirs;
     }
 
     __try {
         int r = Evaluate(frustum, aabb);
-        if (r) g_visible++;
+        if (r) BumpVisible();
         return r;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return orig_IsVisible(frustum, edx, aabb);
@@ -294,12 +328,18 @@ void LogStats() {
     if (!g_installed) { Log("[FrustumAabb] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[FrustumAabb] installed but never called"); return; }
 
-    Log("[FrustumAabb] %lu visibility tests%s, %lu came back visible (%.1f%%), "
+    const double calls   = Total(g_calls, g_callWraps);
+    const double visible = Total(g_visible, g_visWraps);
+    Log("[FrustumAabb] %.0f visibility tests%s, %.0f came back visible (%.1f%%), "
         "%lu verified against the client. Counts are lower bounds.",
-        g_calls,
+        calls,
         g_dead ? " - RETIRED on a disagreement"
                : (g_armed ? "" : " - still verifying, the client still answers every one"),
-        g_visible, 100.0 * (double)g_visible / (double)g_calls, g_verified);
+        visible, calls > 0.0 ? 100.0 * visible / calls : 0.0, g_verified);
+    if (visible > calls)
+        Log("[Wrong] [FrustumAabb] more tests came back visible than were run. "
+            "That cannot happen, and it means these two counters are no longer "
+            "being counted at the same boundary.");
 }
 
 void Shutdown() {
