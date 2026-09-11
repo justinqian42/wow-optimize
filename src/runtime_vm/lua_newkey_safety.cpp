@@ -34,6 +34,12 @@ __declspec(align(16)) static uint8_t g_scratch_node[40] = {};
 
 static volatile LONG64 g_total_calls = 0;
 static volatile LONG64 g_recovered   = 0;
+// The invalidations this hook performs. Without them the report said only
+// "0 recovered from chain corruption", which reads as a hook that does nothing
+// and very nearly got this one deleted as dead weight - the recoveries are the
+// SEH guard's half, and the other half is a table-cache invalidation running a
+// billion times a session and doing exactly what it was put here to do.
+static volatile LONG64 g_invalidated = 0;
 static volatile long g_logged        = 0;
 
 extern "C" void InvalidateTableCacheSlot(void* table, void* key_str);
@@ -49,6 +55,7 @@ static void* __cdecl Safe_newkey(int L, int t, void* key)
                 void* key_str = *(void**)key;
                 if (key_str && (uintptr_t)key_str >= 0x10000 && (uintptr_t)key_str < 0xFFE00000) {
                     InvalidateTableCacheSlot((void*)t, key_str);
+                    ++g_invalidated;
                 }
             }
         }
@@ -106,8 +113,12 @@ void LuaNewKeySafety_LogStats(void) {
         Log("[NewKeySafety] not measured: the guard is not installed.");
         return;
     }
-    Log("[NewKeySafety] %lld calls, %lld recovered from chain corruption.",
-        (long long)g_total_calls, (long long)g_recovered);
+    Log("[NewKeySafety] %lld calls, %lld cache slot(s) invalidated - that is "
+        "this hook's actual work and it is not a guard - and %lld recovered "
+        "from chain corruption, which is.",
+        (long long)g_total_calls, (long long)g_invalidated,
+        (long long)g_recovered);
+
 }
 
 void UninstallLuaNewKeySafety()
