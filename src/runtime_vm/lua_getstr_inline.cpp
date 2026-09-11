@@ -52,52 +52,39 @@ typedef void* (__cdecl *luaH_getstr_fn)(int table, int tstring);
 static luaH_getstr_fn g_orig_getstr = nullptr;
 
 // ----------------------------------------------------------------
-// Optimized replacement — SAFE (no pointer caching)
 // ----------------------------------------------------------------
-static void* __cdecl Optimized_GetStr(int table, int tstring)
+// The chain walk, and the SEH that used to cover everything
+// ----------------------------------------------------------------
+//
+// This function is 993333271 calls in one field session and half of them stop on
+// the first node. A __try region on 32-bit MSVC is not free: the prologue pushes
+// an exception registration record and links it through fs:[0], and that happens
+// on every call whether anything faults or not.
+//
+// Measured in a standalone harness, a hundred million first-node hits each way:
+//
+//     __try around the whole body  : 3.93 ns
+//     first node outside the __try : 1.45 ns
+//
+// The guard cost more than twice what the lookup did, and on the 508900616
+// first-node hits of that session it is 1.26 seconds of main thread.
+//
+// So the guard moves to where the risk actually is. The chain walk follows
+// node[8] to wherever it points and has no bound at all - that is what SEH is
+// for, and it keeps it. The first-node read is at node_array + 40*bucket, with
+// bucket masked by the table's own lsizenode, so it is inside the array the
+// table says it has.
+//
+// What changed about safety, stated plainly: the first-node read is no longer
+// caught if the table pointer is valid-looking but points at freed memory. Three
+// things still stand in front of it - the reload and swap check, the range test
+// on both pointers, and the range test on node_array - and the walk, which is
+// where a corrupt chain actually leads, is still guarded. If a fault ever
+// appears at this address, this is the change to revisit first.
+static __declspec(noinline) void* WalkChainGuarded(int table, int tstring,
+                                                   uint32_t* node)
 {
-    ++g_total_calls;
-
-    // Bail out during lua_State swap — table and tstring pointers become
-    // garbage when WoW destroys the old Lua VM during UI reload/logout.
-    if (LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
-        return g_orig_getstr(table, tstring);
-    }
-
-    // Validate inputs — reject obviously invalid pointers
-    if ((uintptr_t)table < 0x10000 || (uintptr_t)table > 0xFFE00000 ||
-        (uintptr_t)tstring < 0x10000 || (uintptr_t)tstring > 0xFFE00000) {
-        return g_orig_getstr(table, tstring);
-    }
-
-    // The entire node access is wrapped in SEH.
     __try {
-        // Read tstring hash: tstring[12] = precomputed string hash
-        uint32_t ts_hash = *(uint32_t*)(tstring + 12);
-
-        // Read table metadata
-        uint8_t  lsize      = *(uint8_t*)(table + 11);   // log2 of hash size
-        uint32_t* node_array = *(uint32_t**)(table + 20); // hash bucket array
-
-        if (!node_array || lsize == 0 || lsize > 24) {
-            return g_orig_getstr(table, tstring);
-        }
-
-        // Compute bucket index: ts_hash & ((1 << lsize) - 1)
-        uint32_t bucket_mask = (1u << lsize) - 1;
-        uint32_t bucket_idx  = ts_hash & bucket_mask;
-
-        // Get first node in chain (each node is 40 bytes = 10 DWORDs)
-        uint32_t* node = (uint32_t*)((uint8_t*)node_array + 40 * bucket_idx);
-
-        // FAST PATH: direct first-node check (~80% of lookups).
-        if (node[6] == 4 && node[4] == (uint32_t)tstring) {
-            ++g_first_node_hits;
-            return node;
-        }
-
-        // SLOW PATH: walk the chain exactly like the engine — follow node[8]
-        // until a match or NULL. NO early bounds-check break or state cache.
         ++g_chain_walks;
         int depth = 1;
         void* next = (void*)node[8];
@@ -110,14 +97,58 @@ static void* __cdecl Optimized_GetStr(int table, int tstring)
             next = (void*)n[8];
             depth++;
         }
-
-        // End of chain, no match — return unk_A46F78 (nil object)
         ++g_nil_returns;
         return g_nil_object;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        // Corrupt chain/table — fall back to the engine rather than fault.
+        // Corrupt chain - fall back to the engine rather than fault.
         return g_orig_getstr(table, tstring);
     }
+}
+
+// Optimized replacement - SAFE (no pointer caching)
+// ----------------------------------------------------------------
+static void* __cdecl Optimized_GetStr(int table, int tstring)
+{
+    ++g_total_calls;
+
+    // Bail out during lua_State swap - table and tstring pointers become
+    // garbage when WoW destroys the old Lua VM during UI reload/logout.
+    if (LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
+        return g_orig_getstr(table, tstring);
+    }
+
+    // Validate inputs - reject obviously invalid pointers
+    if ((uintptr_t)table < 0x10000 || (uintptr_t)table > 0xFFE00000 ||
+        (uintptr_t)tstring < 0x10000 || (uintptr_t)tstring > 0xFFE00000) {
+        return g_orig_getstr(table, tstring);
+    }
+
+    // Read tstring hash: tstring[12] = precomputed string hash
+    uint32_t ts_hash = *(uint32_t*)(tstring + 12);
+
+    // Read table metadata
+    uint8_t  lsize      = *(uint8_t*)(table + 11);   // log2 of hash size
+    uint32_t* node_array = *(uint32_t**)(table + 20); // hash bucket array
+
+    if (!node_array || lsize == 0 || lsize > 24 ||
+        (uintptr_t)node_array < 0x10000 || (uintptr_t)node_array > 0xFFE00000) {
+        return g_orig_getstr(table, tstring);
+    }
+
+    // Compute bucket index: ts_hash & ((1 << lsize) - 1)
+    uint32_t bucket_mask = (1u << lsize) - 1;
+    uint32_t bucket_idx  = ts_hash & bucket_mask;
+
+    // Get first node in chain (each node is 40 bytes = 10 DWORDs)
+    uint32_t* node = (uint32_t*)((uint8_t*)node_array + 40 * bucket_idx);
+
+    // FAST PATH: direct first-node check, about half of all lookups.
+    if (node[6] == 4 && node[4] == (uint32_t)tstring) {
+        ++g_first_node_hits;
+        return node;
+    }
+
+    return WalkChainGuarded(table, tstring, node);
 }
 
 // ----------------------------------------------------------------
