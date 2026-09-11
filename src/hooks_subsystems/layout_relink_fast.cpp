@@ -72,36 +72,44 @@
 // reorders the list on every call, so any key it maintained would be invalidated
 // by the next relink - including its own.
 //
-// There is a second reason, and it is stronger because it needs no argument about
-// ordering at all: an anchor cannot name the node that owns it.
+// A second reason used to stand here and it was wrong, which is worth keeping
+// rather than quietly deleting. It said an anchor cannot name the node that owns
+// it, so even a single unique match could not be identified: sub_489C30
+// allocates sixteen bytes with `.?AUFRAMENODE@CLayoutFrame@@` and fills two link
+// words, a frame at +8 and a word at +12, with no fifth word for an owner.
 //
-// If exactly one node in the whole list carried an accepting anchor to `this`,
-// that node would be the match whatever order the list is in, and the ordering
-// objection above would not bite. Answering it needs the owning node of an
-// anchor. sub_489C30 allocates each one with
-// `sub_76E540(16, ".?AUFRAMENODE@CLayoutFrame@@", -2, 8)` - sixteen bytes off the
-// heap, not a field inside the frame - and assigns all four of its dwords: two
-// link words, the frame at +8, and the flags at +12. There is no fifth word and
-// no owner pointer, and because the allocation is separate the offset from an
-// anchor to the node that references it is not a constant either.
+// All of that is true and none of it is about the anchor. Two different
+// sixteen-byte objects in this cluster have a frame at +8 and a word at +0x0C.
+// The anchor is a CFramePoint, built by sub_49CA40, sitting in one of nine slots
+// at frame+0x0C..0x2C; its +8 is the frame it points at. The FRAMENODE is the
+// dependants-index entry, chained off frame+0x38; its +8 is the DEPENDENT frame,
+// which is precisely the owner the paragraph said did not exist. sub_48A260
+// writes the anchor into `*(this + a2 + 3)` and then calls
+// `sub_489C30(a3, this, 1 << a2)`, so the frame it hands the index is the frame
+// whose slot it just filled.
 //
-// So the found case is left to the client, and the counters below separate it as
-// `deferred`. This is settled from the disassembly rather than open; a
-// measurement of anchor-minus-node offsets was written and then removed, because
-// its answer was already on the page above.
+// The ordering argument in the paragraph above still stands on its own, so the
+// found case is still left to the client and still counted as `deferred`. What
+// changed is that the single-candidate case is now answerable in principle, and
+// the counters below measure how often it arises before any surgery is written
+// for it.
 //
 // ---------------------------------------------------------------------------
-// The scan skips any anchor whose word at +0x0C has 0x800 set, while sub_489C30
-// registers a dependant regardless of it - the point mask it ORs into that same
-// word occupies the low bits. A dependants list holding only entries the scan
-// would reject is therefore a real state, and it is the state behind every
-// "something at +0x38 but the client found nothing".
+// The same conflation made the second predicate dead code for a whole field
+// session. It read 0x800 out of the index entry's +0x0C, believing that word to
+// be the anchor flags the scan masks. It is the point mask: sub_48A260 passes
+// `1 << a2` for a point index in 0..8 and sub_48A3E0 passes 0x101, so the mask
+// cannot exceed 0x1FF and bit 11 is not reachable through it. The predicate
+// therefore answered false every time, and the report line that would have said
+// so was written behind `if (g_rejectShortcut > 0)`.
 //
-// That extension is implemented: AllDependantsRejected below walks the list and
-// answers not-found when every entry carries 0x800. It is not a guess. On the
-// deferred path the client averages 73 to 93 nodes at nine dereferences each and
-// finds nothing 91.6% of the time, sampled one call in 256 over 154566 of them,
-// and the module's own verification agrees independently at 89.9%.
+// NoDependantCanMatch below does what that predicate was meant to do. For each
+// frame the index names it applies the scan's own three tests to that frame's
+// nine slots, and answers not-found when none of them holds an anchor the scan
+// would accept. The field said how much is waiting: of 62782 verified calls in
+// one session, 24691 - 39.3% - had a non-empty +0x38 and the client still found
+// nothing. Those are 25.4 million deferred calls a session, each one walking an
+// average of 43.3 nodes at nine dereferences apiece.
 //
 // ---------------------------------------------------------------------------
 // This is the second attempt. The first one crashed the game on login and is
@@ -194,6 +202,12 @@ constexpr long kResampleMask = 1023;   // one in 1024
 // how many dependants were examined to reach them.
 unsigned long g_rejectShortcut = 0;
 double        g_rejectWalked   = 0.0;
+// Of the calls that still defer, how many frames in the index actually carry an
+// anchor the scan would accept. Exactly one is the interesting case: a single
+// candidate is the match whatever order the global list is in, so this is the
+// number that says whether the found path is worth answering from the index too.
+unsigned long g_oneQualifier   = 0;
+unsigned long g_manyQualifiers = 0;
 
 unsigned long g_scanSample   = 0;
 unsigned long g_scansSeen    = 0;
@@ -275,14 +289,35 @@ inline void     Wr(uintptr_t p, uint32_t v) { *(volatile uint32_t*)p = v; }
 // with the low bit set.
 inline bool IsEmptyLink(uint32_t v) { return v == 0 || (v & 1) != 0; }
 
-// Anchors the scan refuses to match on. sub_489710 tests each of the nine slots
-// with `!(*(a + 0x0C) & 0x800)` before comparing the frame, so an anchor with
-// that bit set can never satisfy it. sub_489C30 registers a dependant whatever
-// the bit says, because the point mask it ORs into the same word lives in the
-// low bits, and a dependants list holding only rejected anchors is therefore a
-// real and common state.
-constexpr unsigned kFN_flags   = 0x0C;   // the word the scan masks with 0x800
+// Two different objects, both sixteen bytes, both with a frame at +8 and a word
+// at +0x0C. Conflating them is what made the second predicate dead code.
+//
+// An ANCHOR is a CFramePoint. It lives in one of nine slots at frame+0x0C..0x2C
+// and the scan tests it with `a && !(*(a+0x0C) & 0x800) && *(a+8) == this`, so
+// its +8 is the frame it points AT and its +0x0C is a packed word whose low
+// byte is the relative point (sub_48A260 compares `*(char *)(v9+12) != a4`) and
+// whose bit 11 is the reject flag.
+//
+// A DEPENDANTS ENTRY is the FRAMENODE sub_489C30 allocates,
+// `sub_76E540(16, ".?AUFRAMENODE@CLayoutFrame@@", -2, 8)`. It is chained off
+// frame+0x38 and sub_489C30 ends with `v6[2] = a2; v6[3] = a3`, so its +8 is the
+// DEPENDENT frame and its +0x0C is the point mask.
+//
+// Both registrars call it as sub_489C30(target, dependent, mask):
+// sub_48A260 passes `1 << a2` for a point index a2 in 0..8, and sub_48A3E0
+// passes 0x101, which is points 0 and 8. The mask therefore cannot exceed
+// 0x1FF, and bit 11 is not reachable through it at all.
+//
+// The old predicate read 0x800 out of the entry's +0x0C - the point mask - and
+// so answered true only for a bit the registrar cannot set. It never fired once
+// in a field session, and the line that would have said so was written behind
+// `if (g_rejectShortcut > 0)`, which is how a dead predicate stayed invisible.
+constexpr unsigned kAnchor0    = 0x0C;   // first of nine anchor slots in a frame
+constexpr unsigned kAnchorCount= 9;
+constexpr unsigned kAnchorTgt  = 0x08;   // the frame an anchor points at
+constexpr unsigned kAnchorFlag = 0x0C;   // the word the scan masks with 0x800
 constexpr unsigned kFN_next    = 0x04;   // dependants are chained through here
+constexpr unsigned kFN_frame   = 0x08;   // the dependent frame
 constexpr unsigned kScanReject = 0x800;
 
 // How far to walk a dependants list before giving up and deferring. The list is
@@ -290,27 +325,63 @@ constexpr unsigned kScanReject = 0x800;
 // shortcut into an unbounded walk.
 constexpr unsigned kMaxDependants = 64;
 
-// True when every dependant carries 0x800, so the client's scan cannot match
-// any of them and will walk the whole list for nothing.
+// Does this frame carry an anchor the scan would accept, pointing at `self`?
+// The same three tests sub_489710 applies to each of the nine slots, in the same
+// order, on one frame instead of every frame in the list.
+inline bool FrameAnchorsTo(uint32_t frame, uint32_t self) {
+    for (unsigned s = 0; s < kAnchorCount; ++s) {
+        const uint32_t a = Rd(frame + kAnchor0 + 4 * s);
+        if (!a) continue;
+        if (Rd(a + kAnchorFlag) & kScanReject) continue;
+        if (Rd(a + kAnchorTgt) == self) return true;
+    }
+    return false;
+}
+
+// What a walk of the dependants index found.
+struct DepScan {
+    unsigned entries;      // dependants examined
+    unsigned qualifying;   // of those, frames that really do anchor to self
+    uint32_t only;         // that frame, when there was exactly one
+};
+
+// True when no frame in the index carries an anchor the scan would accept, so
+// the client is about to walk the whole global list and find nothing.
 //
-// This is what the measurement said was worth doing. On the deferred path the
-// client averages 73 to 93 nodes at nine dereferences each and finds nothing
-// 91.6% of the time, sampled one call in 256 over 154566 of them. The module's
-// own verification agrees independently: 43398 of 48265 checked calls, 89.9%,
-// had something at +0x38 and the client still found nothing.
+// This is the same premise the empty case already rests on - sub_489C30 and
+// sub_489D70 are the only registrar and de-registrar, their five call sites are
+// all in SetPoint, sub_48A200 and the frame destructor, and nothing sets an
+// anchor without registering the frame that owns it. The empty case says the
+// index names no frames; this says the frames it names do not, on inspection,
+// hold a matching anchor.
+//
+// It reads all nine slots rather than only the ones the point mask names. The
+// mask would usually save eight reads, but trusting it adds a second premise -
+// that the mask is never stale - whose failure would point this at the wrong
+// slot and produce a wrong not-found. Nine reads on a handful of frames against
+// nine reads on 43 of them is not a trade worth another assumption.
 //
 // Read-only, bounded, and inside the caller's SEH. Anything unreadable or
 // longer than the cap answers false, which defers exactly as before.
-bool AllDependantsRejected(uint32_t head, unsigned* outCount) {
-    unsigned n = 0;
+bool NoDependantCanMatch(uint32_t head, uint32_t self, DepScan* out) {
+    unsigned n = 0, q = 0;
+    uint32_t first = 0;
     uint32_t e = head;
     while (!IsEmptyLink(e)) {
-        if (++n > kMaxDependants) return false;
-        if ((Rd(e + kFN_flags) & kScanReject) == 0) { *outCount = n; return false; }
+        if (++n > kMaxDependants) {
+            out->entries = n; out->qualifying = 2; out->only = 0;
+            return false;
+        }
+        const uint32_t d = Rd(e + kFN_frame);
+        if (d && (d & 1) == 0 && FrameAnchorsTo(d, self)) {
+            if (++q == 1) first = d;
+        }
         e = Rd(e + kFN_next);
     }
-    *outCount = n;
-    return n > 0;
+    out->entries    = n;
+    out->qualifying = q;
+    out->only       = (q == 1) ? first : 0;
+    return n > 0 && q == 0;
 }
 
 // The not-found tail of sub_489710, transcribed from 0x004897CE to 0x0048983D.
@@ -398,10 +469,17 @@ uint32_t* __fastcall Hooked_RelinkBody(void* self, void* edx) {
             predictNotFound = true;
         } else {
             // The list is not empty, which used to end the matter. Ask whether
-            // any of it could match instead.
-            unsigned k = 0;
-            predictNotFound = AllDependantsRejected(head, &k);
-            if (predictNotFound) { ++g_rejectShortcut; g_rejectWalked += k; }
+            // any of the frames it names could match instead.
+            DepScan ds = { 0, 0, 0 };
+            predictNotFound = NoDependantCanMatch(head, (uint32_t)This, &ds);
+            if (predictNotFound) {
+                ++g_rejectShortcut;
+                g_rejectWalked += (double)ds.entries;
+            } else if (ds.qualifying == 1) {
+                ++g_oneQualifier;
+            } else {
+                ++g_manyQualifiers;
+            }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return orig_Relink(self, edx);
@@ -573,14 +651,22 @@ void LogStats() {
             g_dead ? "; the remaining invocations came after this module retired"
                    : "");
     }
-    if (g_rejectShortcut > 0) {
-        Log("[LayoutRelink] %lu shortcuts came from the second test - a dependants "
-            "list where every entry carries 0x800, so the scan could not have "
-            "matched any of them - after looking at %.1f entries on average. "
-            "Before this test those all deferred and the client walked the whole "
-            "list for nothing.",
-            g_rejectShortcut, g_rejectWalked / (double)g_rejectShortcut);
-    }
+    // Printed whether or not it fired. The previous version of this test was
+    // dead - it masked 0x800 against a point mask that cannot exceed 0x1FF - and
+    // the reason nobody saw that for a whole field session is that this line was
+    // behind `if (g_rejectShortcut > 0)`. A zero here is a measurement.
+    Log("[LayoutRelink] %lu shortcuts came from the second test - a dependants "
+        "index naming frames that hold no anchor the scan would accept - after "
+        "looking at %.1f entries on average. Those calls used to defer and the "
+        "client walked the whole global list for nothing.",
+        g_rejectShortcut,
+        g_rejectShortcut ? g_rejectWalked / (double)g_rejectShortcut : 0.0);
+    Log("[LayoutRelink] of the calls that still defer, %lu had exactly one frame "
+        "in the index carrying an accepting anchor and %lu had more than one. A "
+        "single candidate is the match whatever order the global list is in, so "
+        "the first of those two numbers is what answering the found path from "
+        "the index would be worth.",
+        g_oneQualifier, g_manyQualifiers);
     if (g_scansSeen > 0) {
         double avgLen   = g_nodesTotal / (double)g_scansSeen;
         unsigned long matched = g_scansSeen - g_scanNoMatch;
