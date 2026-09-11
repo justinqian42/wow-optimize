@@ -669,7 +669,13 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.MimallocHighArenaMB    = GetPrivateProfileIntA("General", "MimallocHighArenaMB", 256, iniPath.c_str());
         if (g_settings.MimallocHighArenaMB < 8)    g_settings.MimallocHighArenaMB = 8;
         if (g_settings.MimallocHighArenaMB > 1024) g_settings.MimallocHighArenaMB = 1024;
-        g_settings.MimallocHighArenaMaxMB = GetPrivateProfileIntA("General", "MimallocHighArenaMaxMB", 1024, iniPath.c_str());
+        // 1024 was the old default and it was also, by coincidence, exactly
+        // what the module's own half-of-the-high-region rule allowed, so both
+        // limits landed on the same number and the allocator hit it early. A
+        // field session had it at "ceiling 1023 MB" against 1552 MB committed.
+        // The fraction rule in mimalloc_high_arena.cpp is the real limit now;
+        // this is the manual override above it.
+        g_settings.MimallocHighArenaMaxMB = GetPrivateProfileIntA("General", "MimallocHighArenaMaxMB", 2048, iniPath.c_str());
         if (g_settings.MimallocHighArenaMaxMB < g_settings.MimallocHighArenaMB)
             g_settings.MimallocHighArenaMaxMB = g_settings.MimallocHighArenaMB;
         if (g_settings.MimallocHighArenaMaxMB > 2048) g_settings.MimallocHighArenaMaxMB = 2048;

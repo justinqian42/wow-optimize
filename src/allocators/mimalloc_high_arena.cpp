@@ -218,11 +218,37 @@ bool Init() {
     if (want < minSize) want = minSize;
     if (align > 1) want = (want + align - 1) & ~(align - 1);
 
-    // The ceiling, set once. Half of what lies above 2GB, or the configured
-    // maximum, whichever is smaller.
+    // The ceiling, set once: a fraction of what lies above 2GB, or the
+    // configured maximum, whichever is smaller.
+    //
+    // It used to be half, and half was not enough. Two field sessions say so
+    // exactly. This client is large-address-aware on 64-bit Windows, so it gets
+    // four gigabytes and the region above 2GB is 2047 MB - the arena in those
+    // logs sits at 0xEFCB0000, which is 3.75 GB, so the space is certainly
+    // there. Half of 2047 is the "ceiling 1023 MB" the report kept printing,
+    // while the line beside it read:
+    //
+    //     1023 MB handed to mimalloc in 4 block(s), ceiling 1023 MB. The
+    //     allocator has 1552 MB committed, so it has 0 MB of high address space
+    //     left before it would have to ask the OS.
+    //
+    // and 1285, and 1434, and 1513, climbing all session. So the allocator ran
+    // out of arena early and spent the rest of the session reserving from the
+    // OS bottom-up, which is the only thing that explains the other number in
+    // the same report: "free 85 MB in 6183 region(s), largest run 9 MB". The
+    // low half was not full, it was shredded, and the shredding was overflow
+    // this module exists to prevent.
+    //
+    // Seven eighths instead. That is 1791 MB of a 2047 MB region, against a
+    // measured need of 1552 MB and rising, and it still leaves 256 MB above 2GB
+    // for anything else that wants to live up there. Nothing is reserved up
+    // front by raising it - blocks are handed over only as the allocator fills
+    // what it already has - so the cost of the higher ceiling is nothing until
+    // the allocator actually needs it.
     g_highTotal = (SIZE_T)(top - kLowHalfEnd);
     g_maxHanded = (SIZE_T)Config::g_settings.MimallocHighArenaMaxMB * 1024 * 1024;
-    if (g_maxHanded > g_highTotal / 2) g_maxHanded = g_highTotal / 2;
+    const SIZE_T ceilingCap = g_highTotal / 8 * 7;
+    if (g_maxHanded > ceilingCap) g_maxHanded = ceilingCap;
     if (want > g_maxHanded) want = g_maxHanded;
 
     if (!ReserveAndHand(want, "first block")) {
