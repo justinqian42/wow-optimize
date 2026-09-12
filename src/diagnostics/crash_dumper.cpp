@@ -1203,10 +1203,29 @@ void ReportFeatureActivity() {
     }
 
     Log("");
-    Log("[Features] === WHAT ACTUALLY RAN THIS SESSION ===");
+    // The heading used to be "WHAT ACTUALLY RAN THIS SESSION" and the line
+    // saying how much of the DLL this counter cannot see came after the lists.
+    // A field log then reads "Did work (4)" while LayoutRelink reports 68
+    // million invocations, GetStrInline 11.5 billion calls and StormHash 4.3
+    // billion lookups in the same file - and the reader has already concluded
+    // that four features work and the rest are dead before reaching the
+    // sentence that says otherwise. That misreading is on record twice in this
+    // project's own notes.
+    //
+    // So the denominator goes first and the heading claims only what this
+    // counter measures. Nothing about the measurement changes; it was never
+    // wrong, only framed as an answer to a larger question than it can answer.
+    Log("[Features] === FEATURES THAT REPORT THROUGH THIS COUNTER (%d of %d) ===",
+        ran + silent, ran + silent + uncounted);
+    if (uncounted > 0) {
+        Log("[Features] %d enabled feature(s) do not report here at all and are "
+            "not judged below - most of them print their own counts elsewhere in "
+            "this log, so a name missing from these lists means nothing either "
+            "way.", uncounted);
+    }
 
     if (ran > 0) {
-        Log("[Features] Did work (%d):", ran);
+        Log("[Features] Did work (%d of the %d counted here):", ran, ran + silent);
         for (int i = 0; i < count; i++) {
             if (s_features[i].active && s_features[i].counted && s_features[i].hits > 0) {
                 unsigned stride = s_features[i].hitStride ? s_features[i].hitStride : 1;
@@ -1235,9 +1254,8 @@ void ReportFeatureActivity() {
         }
     }
 
-    // Said plainly, because the alternative is a reader assuming these did nothing.
-    Log("[Features] %d enabled features do not report activity and are not judged"
-        " here; %d are disabled.", uncounted, disabled);
+    if (disabled > 0)
+        Log("[Features] %d feature(s) are switched off.", disabled);
 }
 
 void FeatureCall(const char* name) {
