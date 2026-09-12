@@ -52,6 +52,35 @@
 // attachments, particle and ribbon emitters, lights and materials, and it still
 // runs - holding the skeleton does not hold the texture animation.
 //
+// The x87 half of that sentence is load-bearing and was worth checking rather
+// than asserting. Three instructions before the cut the client has
+//
+//     0x0082F3FB  fst  [ebp+var_98]      ; fst, not fstp
+//
+// so exactly one value is live on the x87 stack when control reaches 0x0082F418
+// and it is still live through the jbe. At the other end,
+//
+//     0x008302AE  jbe  loc_830363
+//     0x008302B4  fstp st                ; discards it
+//
+// the tail pops that value. Arriving there with an empty stack is an underflow,
+// and with exceptions masked it does not fault - it writes the indefinite value
+// and leaves the tag word wrong, so every float in the rest of the frame is
+// quietly wrong. That is a corrupted-skeleton bug, not a crash.
+//
+// Which means nothing between the cut and the jump may touch the x87 stack.
+// Today nothing does: every one of the 31 functions in this object was checked
+// for x87 opcodes in the built object, _M2AnimReuse_Decide included, and all are
+// clean. Re-run it after editing this file, because the compiler will reach for
+// the x87 stack the moment a float or double appears in the decision path and
+// nothing in C++ will warn:
+//
+//     dumpbin /DISASM:BYTES m2_anim_reuse.obj | findstr /R "\<f[a-z]*\>"
+//
+// A source check is not enough on its own, so the thunk also reads the x87 TOP
+// field either side of the call and refuses to hold when it moved. That turns a
+// future edit from silently wrong geometry into a counted refusal.
+//
 // ---------------------------------------------------------------------------
 // What the loop writes, and the models that must never be held
 //
@@ -176,6 +205,14 @@ Slot g_slot[kSlots];
 // The byte the thunk tests. A naked thunk cannot read EAX across the popad that
 // protects the client's registers, so the answer comes back in memory.
 unsigned char g_hold = 0;
+
+// The x87 TOP field on entry to the decision, and how often it came back
+// different. See the note on the cut: the tail pops a value the client left on
+// the stack, so anything of ours that pushed or popped one would corrupt every
+// float in the rest of the frame rather than fault. Zero is the expected count
+// and the report says so either way.
+unsigned short g_topBefore = 0;
+unsigned long  g_fpuMoved  = 0;
 
 // The five arguments, captured where they still are what the caller passed.
 //
@@ -433,11 +470,27 @@ int __fastcall Hooked_Animate(void* This, void* edx, int a0, int a1, int a2,
 __declspec(naked) void Thunk() {
     __asm {
         pushad
+        // TOP, bits 11..13 of the status word. Inside pushad, so ax is free.
+        fnstsw ax
+        and  ax, 3800h
+        mov  word ptr [g_topBefore], ax
+
         push ebx
         push ebp
         push esi
         call M2AnimReuse_Decide
         add  esp, 12
+
+        // If anything in there moved the x87 stack, the tail's fstp would pop
+        // the wrong thing. Refuse to hold rather than hand the client a frame
+        // whose floats are all indefinite.
+        fnstsw ax
+        and  ax, 3800h
+        cmp  ax, word ptr [g_topBefore]
+        je   top_unchanged
+        mov  byte ptr [g_hold], 0
+        inc  dword ptr [g_fpuMoved]
+    top_unchanged:
         popad
 
         cmp  byte ptr [g_hold], 0
@@ -595,6 +648,13 @@ void LogStats() {
             "clock into every bone on that model, so a second run does not "
             "reproduce the first and holding it would stop the clock.",
             g_refusedAccum);
+    // Printed whether or not it fired, because zero is the answer that says the
+    // decision path is still free of x87 and the hold is safe to take.
+    Log("[M2AnimReuse]   the x87 stack depth was unchanged across the decision "
+        "on every call but %lu. The tail pops a value the client left on the "
+        "stack, so a non-zero figure here means something in the decision now "
+        "uses the FPU and those calls refused to hold rather than corrupt the "
+        "frame.", g_fpuMoved);
     if (g_tooDeep > 0)
         Log("[M2AnimReuse]   %lu calls re-entered past %d deep - an attached "
             "model animating from inside the tail - and were refused rather "
