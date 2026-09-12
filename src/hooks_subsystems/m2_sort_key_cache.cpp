@@ -179,7 +179,38 @@ inline uint32_t DeriveDesc(uint32_t obj, uint32_t idx) {
     return base + kDescStride * sub;
 }
 
-inline uint32_t DescFor(uint32_t obj, uint32_t idx) {
+// The miss, kept out of line on purpose.
+//
+// The comparator runs 3175843467 times a session and asks for two descriptors
+// each time, so whether the lookup inlines decides whether six billion calls
+// happen. Growing this function for the set-associative table is exactly what
+// stops the compiler inlining it - and the growth is all in the half that
+// almost never runs once the cache is sized properly.
+//
+// So the hit stays in the caller and the miss becomes a call, the same split
+// lua_getstr_inline uses for its chain walk. A call on the miss path costs
+// nothing next to the five dependent loads it is about to do.
+__declspec(noinline) uint32_t DescForMiss(uint32_t obj, uint32_t idx, Slot* set) {
+    const uint32_t d = DeriveDesc(obj, idx);
+    g_misses++;
+
+    // Take a way that this frame has not claimed; only when both are live does
+    // anything get displaced, and that is the number the report prints.
+    unsigned pick = 0;
+    for (unsigned w = 0; w < kWays; ++w) {
+        if (set[w].gen != g_gen) { pick = w; break; }
+        if (w == kWays - 1) { pick = (obj >> 2) & (kWays - 1); ++g_conflict; }
+    }
+    Slot& s = set[pick];
+    s.obj = obj; s.idx = idx; s.desc = d; s.gen = g_gen;
+    return d;
+}
+
+// __forceinline, not inline: plain inline is a request and MSVC declined it,
+// leaving two calls per comparison on a path taken 3175843467 times a
+// session. Verified in the object after changing it - the comparator now
+// contains no call to this, only one to the miss.
+__forceinline uint32_t DescFor(uint32_t obj, uint32_t idx) {
     // Knuth's constant on each half and a shift down, so neither the pointer's
     // low bits nor a small index decides the set on its own.
     uint32_t h = (obj >> 4) * 2654435761u;
@@ -195,20 +226,7 @@ inline uint32_t DescFor(uint32_t obj, uint32_t idx) {
             return s.desc;
         }
     }
-
-    const uint32_t d = DeriveDesc(obj, idx);
-    g_misses++;
-
-    // Take a way that this frame has not claimed; only when both are live does
-    // anything get displaced, and that is the number the report prints.
-    unsigned pick = 0;
-    for (unsigned w = 0; w < kWays; ++w) {
-        if (set[w].gen != g_gen) { pick = w; break; }
-        if (w == kWays - 1) { pick = (obj >> 2) & (kWays - 1); ++g_conflict; }
-    }
-    Slot& s = set[pick];
-    s.obj = obj; s.idx = idx; s.desc = d; s.gen = g_gen;
-    return d;
+    return DescForMiss(obj, idx, set);
 }
 
 // Lexicographic less-than over the four keys, in the client's order.
