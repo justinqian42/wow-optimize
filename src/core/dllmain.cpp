@@ -5567,6 +5567,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
     STAT_TIME("CombatLogFilter::LogStats", CombatLogFilter::LogStats());
+    STAT_TIME("EventCoalescer::LogStats", EventCoalescer::LogStats());
     STAT_TIME("LuaThisCache_LogStats", LuaThisCache_LogStats());
     STAT_TIME("LuaAllocCensus::LogStats", LuaAllocCensus::LogStats());
 

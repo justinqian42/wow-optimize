@@ -45,8 +45,21 @@ static int g_queueCount = 0;
 static thread_local bool g_isReplaying = false;
 static SRWLOCK g_eventLock = SRWLOCK_INIT;
 
-static uint32_t g_eventsTotal = 0;
-static uint32_t g_eventsDropped = 0;
+// Plain 32-bit with wrap counters. A long raid night puts millions of events
+// through here and a bare uint32_t over another bare uint32_t is how a
+// percentage comes out impossible.
+static uint32_t g_eventsTotal = 0,   g_eventsTotalWraps = 0;
+static uint32_t g_eventsDropped = 0, g_eventsDroppedWraps = 0;
+
+static inline void BumpEv(uint32_t& low, uint32_t& wraps) {
+    const uint32_t before = low;
+    low = before + 1;
+    if (low < before) ++wraps;
+}
+
+static inline double EvTotal(uint32_t low, uint32_t wraps) {
+    return (double)low + (double)wraps * 4294967296.0;
+}
 
 static const char* GetEventName(int eventId) {
     __try {
@@ -202,7 +215,7 @@ static bool TryQueueEvent(int eventId, const char* format, void* vaStart) {
     }
 
     AcquireSRWLockExclusive(&g_eventLock);
-    g_eventsTotal++;
+    BumpEv(g_eventsTotal, g_eventsTotalWraps);
 
     if (g_queueCount >= MAX_QUEUED) {
         ReleaseSRWLockExclusive(&g_eventLock);
@@ -210,7 +223,7 @@ static bool TryQueueEvent(int eventId, const char* format, void* vaStart) {
     }
 
     if (IsDuplicate(&ev)) {
-        g_eventsDropped++;
+        BumpEv(g_eventsDropped, g_eventsDroppedWraps);
         ReleaseSRWLockExclusive(&g_eventLock);
         return true; // Drop duplicate (it's already queued to be dispatched at the end of the frame)
     }
@@ -264,12 +277,34 @@ namespace EventCoalescer {
         return TryQueueEvent(eventId, format, vaStart);
     }
 
+    // Printed from the periodic report, not from Shutdown.
+    //
+    // This used to be logged only on the way out, and the DLL leaves through
+    // TerminateProcess, so it has never once appeared in a field session. That
+    // matters more here than in most modules: this is the gate the combat log
+    // filter runs behind, and a player asking why a damage meter missed an
+    // encounter has no way to see from a log whether anything was dropped.
+    void LogStats() {
+        if (!Config::g_settings.OptEventCoalescer) return;
+        if (!g_active) {
+            Log("[EventCoalescer] switched on but not active, so nothing here "
+                "was measured.");
+            return;
+        }
+        const double total = EvTotal(g_eventsTotal, g_eventsTotalWraps);
+        if (total == 0.0) {
+            Log("[EventCoalescer] active and no event has reached it yet. That "
+                "is measured and zero, not unmeasured.");
+            return;
+        }
+        const double dropped = EvTotal(g_eventsDropped, g_eventsDroppedWraps);
+        Log("[EventCoalescer] %.0f event(s) seen, %.0f of them not passed on "
+            "(%.1f%%). Counts are lower bounds. Anything an addon did not "
+            "receive was dropped here or by the combat log filter behind this.",
+            total, dropped, 100.0 * dropped / total);
+    }
+
     void Shutdown() {
         EventCoalescer::g_active = false;
-        if (g_eventsTotal > 0) {
-            Log("[EventCoalescer] Stats: Total %u, Dropped %u (%.1f%% reduction)",
-                g_eventsTotal, g_eventsDropped,
-                100.0 * g_eventsDropped / g_eventsTotal);
-        }
     }
 }
