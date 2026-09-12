@@ -233,8 +233,41 @@ Animate_fn orig_Animate = nullptr;
 
 constexpr int kMaxDepth = 8;
 struct Stash { void* model; uint32_t a[5]; };
+// A guard band on each side of the stash, and the reason it is here.
+//
+// A tester on build 65ddf5e0 crashed entering the world with EIP and EAX both
+// 0x3F800000 - the bit pattern of 1.0f - and the return address on the stack
+// was Hooked_Animate+0xC2, which is the instruction after
+// `call dword ptr [orig_Animate]`. A float had been written over that function
+// pointer, and orig_Animate is declared immediately above this array.
+//
+// The write came from here. The entry hook indexed g_stash[g_depth] after
+// checking only that g_depth was below kMaxDepth, never that it was not
+// negative, and s.a[3] and s.a[4] are the two float arguments copied in as bit
+// patterns. One negative index puts a float on the pointer the very next call
+// goes through.
+//
+// The index is bounded at both ends now, which is the actual fix. The bands are
+// here so that a future mistake of the same shape lands on eight words of
+// nothing instead of on whatever the linker put next to the array.
+uint32_t g_stashGuardLow[8] = {0};
 Stash g_stash[kMaxDepth];
+uint32_t g_stashGuardHigh[8] = {0};
+
+// Depth, and the thread allowed to use the stash.
+//
+// This is a plain int and two threads incrementing it can lose an update, which
+// is how it reaches a value its own bounds check was not written for. Rather
+// than make it atomic on a path this hot, the stash belongs to one thread: the
+// first to arrive owns it, and every other thread passes straight through
+// without reading or writing either the stash or the depth. That is not a
+// restriction in practice - the cut this module installs only ever runs on the
+// thread the client animates on - and it removes the race rather than tightening
+// it.
 int   g_depth = 0;
+volatile LONG g_stashOwner = 0;   // thread id, 0 until claimed
+unsigned long g_offThreadCalls = 0;
+unsigned long g_badDepth = 0;     // the index was out of range on entry
 unsigned long g_tooDeep = 0;   // re-entered past kMaxDepth; those are refused
 
 bool g_armed     = false;
@@ -447,12 +480,23 @@ namespace {
 // would have reached anyway.
 int __fastcall Hooked_Animate(void* This, void* edx, int a0, int a1, int a2,
                              float a3, float a4) {
-    if (g_depth >= kMaxDepth) {
-        ++g_tooDeep;
-        ++g_depth;                       // still balanced on the way out
-        const int deep = orig_Animate(This, edx, a0, a1, a2, a3, a4);
-        --g_depth;
-        return deep;
+    // Only the thread that owns the stash may touch it or the depth. See the
+    // note on g_stashOwner.
+    const LONG me = (LONG)GetCurrentThreadId();
+    if (g_stashOwner == 0) InterlockedCompareExchange(&g_stashOwner, me, 0);
+    if (g_stashOwner != me) {
+        ++g_offThreadCalls;
+        return orig_Animate(This, edx, a0, a1, a2, a3, a4);
+    }
+
+    // Both ends. Checking only the top is what let a negative index write a
+    // float over orig_Animate; see the note on g_stashGuardLow.
+    if (g_depth < 0 || g_depth >= kMaxDepth) {
+        if (g_depth < 0) { ++g_badDepth; g_depth = 0; }
+        else ++g_tooDeep;
+        // Not stashing on this call, so the depth is left exactly as it is and
+        // the cut below will refuse rather than read a stale entry.
+        return orig_Animate(This, edx, a0, a1, a2, a3, a4);
     }
     Stash& s = g_stash[g_depth];
     s.model = This;
@@ -676,6 +720,23 @@ void LogStats() {
         "stack, so a non-zero figure here means something in the decision now "
         "uses the FPU and those calls refused to hold rather than corrupt the "
         "frame.", g_fpuMoved);
+    // Printed whether or not they fired. A non-zero bad-depth count means the
+    // index that once wrote a float over orig_Animate went out of range again
+    // and was caught this time; a non-zero off-thread count means a second
+    // thread reaches this hook, which the stash is no longer shared with.
+    Log("[M2AnimReuse]   %lu call(s) arrived with the stash index out of range "
+        "and were refused, %lu arrived on a thread that does not own the stash "
+        "and were handed straight to the client.", g_badDepth, g_offThreadCalls);
+    // The guard bands either side of the stash. Both are written by nothing, so
+    // anything but zero means an index ran past the array again.
+    {
+        uint32_t dirty = 0;
+        for (int i = 0; i < 8; ++i) dirty |= g_stashGuardLow[i] | g_stashGuardHigh[i];
+        if (dirty)
+            Log("[Wrong] [M2AnimReuse] the guard words either side of the stash "
+                "are not zero, so something indexed past it. Nothing writes them "
+                "on purpose.");
+    }
     if (g_tooDeep > 0)
         Log("[M2AnimReuse]   %lu calls re-entered past %d deep - an attached "
             "model animating from inside the tail - and were refused rather "

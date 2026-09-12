@@ -231,24 +231,29 @@ inline void Copy4(float* dst, const float* src) {
 // Everything read here is read by the client on the path that accepts, so a
 // pointer this can fault on is one the client faults on first. No __try: this
 // runs per bone per frame.
-// safebuffers, on this function only.
+// The /GS stack cookie stays on this function, and the commit that took it off
+// was wrong about why it could go.
 //
-// It has four local arrays - a[4], b[4], r[4] and q2[4] - so the compiler gives
-// it a /GS stack cookie: a load, an xor against esp and a store on entry, then
-// an xor back, a compare and a call to __security_check_cookie on return. A
-// field session evaluates 4231323327 quaternion tracks, and every one of them
-// paid that.
+// That commit said the four local arrays here are written only by UnpackQuat,
+// which is a single sixteen-byte store at offset zero, so nothing could overrun
+// them. The arrays are written by UnpackQuat. They are not written only by it.
 //
-// Here it guards nothing. All four arrays are four floats, and the only thing
-// that writes them is UnpackQuat, which is a single _mm_storeu_ps of sixteen
-// bytes at offset zero - no index, no loop, no length taken from the client.
-// There is no reachable write past the end of any of them, so there is nothing
-// for the cookie to catch.
+// This function hands the addresses of its own locals to three client routines:
+// kFindKey takes &second and &frac, kQuatLerp writes into r, and kQuatSlerp
+// writes into r2. How many bytes any of those three writes was never checked,
+// and a client routine writing past a local of ours is precisely the case /GS
+// exists to catch.
 //
-// This is deliberately not applied to the rest of the project. collision_outcode
-// keeps its cookie because its codes[] array is indexed by a vertex count that
-// comes out of a client model, which is exactly the case /GS exists for.
-__declspec(safebuffers)
+// A tester on build 65ddf5e0 crashed entering the world with
+// ACCESS_VIOLATION at 0x3F800000. That is not an address, it is the IEEE-754
+// bit pattern of 1.0f, so control had been transferred to a corrupted return
+// address holding a float - and q2 on this stack frame is initialised to
+// { 0, 0, 0, 1.0f }. With the cookie in place that overrun would have been
+// caught at the return instead of being followed.
+//
+// The cookie costs a load, an xor and a compare per call. It is on a path taken
+// 4231323327 times a session and that is a real price, but the trade was made
+// on an inventory of writers that was not complete.
 void Evaluate(void* obj, uint8_t* state, uint8_t* track,
               uint32_t* out, const float* defQuat) {
     const uint32_t  count   = *(const uint32_t*)(track + kT_count);
