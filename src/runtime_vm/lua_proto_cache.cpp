@@ -200,6 +200,10 @@ inline void*    RDP (const void* p, unsigned off) { return *(void* const*)   ((c
 // while the whole session compiled 40 MB. Fourteen of those forty megabytes
 // were refused at the door, in thirty-six offers, before a key was even
 // recorded for them - so the repeat detection below never saw them either.
+// Raising the cap fixed the number and not that: the door still returned before
+// recording anything, and a later session at 1 MB turned away 27508 KB it
+// likewise could not describe. The door now records a key and a length before
+// it returns, so the report can say whether those offers repeat.
 //
 // What they are is not a mystery: the census in the same log names them.
 // GlobalStrings.lua, 985 KB over two compiles. ChatFrame.lua, 266 over two.
@@ -322,6 +326,9 @@ unsigned long g_tooBig = 0, g_notBuffer = 0, g_capped = 0, g_anchorFailed = 0;
 // Of the capped ones, those already known to repeat. See the capped branch.
 unsigned long      g_cappedRepeats     = 0;
 unsigned long long g_cappedRepeatBytes = 0;
+// The same two figures for the other door. See the size cap below.
+unsigned long      g_tooBigRepeats     = 0;
+unsigned long long g_tooBigRepeatBytes = 0;
 unsigned long g_verified = 0, g_firstSighting = 0, g_flushes = 0, g_onSight = 0;
 // Chunks large enough to be worth keeping the moment they are first seen. The
 // number that says whether raising the cap was the right call.
@@ -591,6 +598,43 @@ void* Classify(void* L, void* z, void* buff, const char* name, bool* checked) {
     if (srcLen > kMaxChunkBytes) {
         g_tooBig++;
         g_bytesTooBig += srcLen;
+
+        // Record the key anyway, which is the whole of what was missing.
+        //
+        // The comment on kMaxChunkBytes says the old 128 KB cap refused
+        // fourteen of a session's forty megabytes "before a key was even
+        // recorded for them - so the repeat detection below never saw them
+        // either". The cap was raised and that sentence stayed true, because
+        // the blindness was never in the number. It is in this early return.
+        //
+        // A field session at the 1 MB cap turns away 5 offers totalling
+        // 27508 KB and cannot say whether they are five different files or one
+        // file compiled five times, which are opposite answers: the first means
+        // the cap costs nothing, the second means it is throwing away the
+        // largest parses in the session. Meanwhile the budget door below counts
+        // exactly this and the report says of it "measured and zero, raising it
+        // would have bought nothing" - a sentence a reader carries across to
+        // this door, where nothing of the kind has been measured.
+        //
+        // A key and a length are twelve bytes whatever the source weighs, so
+        // this costs the same for a six-megabyte chunk as for a small one, and
+        // it keeps no source and caches nothing. If the cap is ever raised, a
+        // chunk already known to repeat is then kept the first time it appears
+        // rather than the second, which is the behaviour the small path already
+        // has.
+        std::unordered_map<uint64_t, uint32_t>::iterator bseen = g_seenOnce.find(key);
+        const bool bsecond = (bseen != g_seenOnce.end() &&
+                              bseen->second == (uint32_t)srcLen);
+        const bool bknown  = (g_knownRepeaters.find(key) != g_knownRepeaters.end());
+        if (bsecond || bknown) {
+            g_tooBigRepeats++;
+            g_tooBigRepeatBytes += srcLen;
+            if (bsecond) g_seenOnce.erase(bseen);
+            if (!bknown && g_knownRepeaters.size() < kMaxSeenKeys)
+                g_knownRepeaters.insert(key);
+        } else if (g_seenOnce.size() < kMaxSeenKeys) {
+            g_seenOnce[key] = (uint32_t)srcLen;
+        }
         return nullptr;
     }
 
@@ -918,6 +962,24 @@ void LogStats() {
         Log("[ProtoCache]   measured and zero: of the %lu chunk(s) the budget "
             "turned away, not one had repeated before. Raising it would have "
             "bought nothing this session.", g_capped);
+    }
+
+    // The size cap, asked the same question. Until now it could only say how
+    // many offers it refused and how many bytes, never whether any of them was
+    // the same file arriving twice - which is the only thing that decides
+    // whether the cap costs anything.
+    if (g_tooBig) {
+        if (g_tooBigRepeats) {
+            Log("[ProtoCache]   of those, %lu chunk(s) over the size cap had "
+                "been compiled before, %llu KB of source. Those are the largest "
+                "parses in the session and the cap is the only thing keeping "
+                "them out; it is the case for raising it.",
+                g_tooBigRepeats, g_tooBigRepeatBytes / 1024);
+        } else {
+            Log("[ProtoCache]   measured and zero: of the %lu chunk(s) over the "
+                "size cap, not one arrived twice. The cap cost nothing this "
+                "session.", g_tooBig);
+        }
     }
 
     if (Config::g_settings.OptLuaBytecodeStore) {
