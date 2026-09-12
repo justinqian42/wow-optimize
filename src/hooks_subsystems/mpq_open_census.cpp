@@ -97,6 +97,8 @@ extern "C" void Log(const char* fmt, ...);
 MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
 MH_STATUS WO_EnableHook(void* target);
 
+extern DWORD g_mainThreadId;   // dllmain.cpp; the thread the client draws on
+
 namespace MpqOpenCensus {
 
 namespace {
@@ -141,6 +143,25 @@ struct Slot {
 };
 Slot* g_seen = nullptr;
 
+// This hook is not main-thread-only, whatever the note on the counters says.
+//
+// hooks_async.cpp reaches 0x00424B50 directly, as a raw function pointer inside
+// ProcessAdtPrefetch, and that runs on the async worker pool. So a second thread
+// arrives here whenever AsyncWorkerPool is on, and this module does two things
+// that are not safe to do from two threads at once.
+//
+// It writes a slot as three separate stores - the hash, the miss count, then a
+// strncpy of the name - so two threads landing on one slot can leave the hash
+// from one name beside the name of another, and the report then blames the
+// wrong file. And it answers "not found" on the client's behalf, a decision
+// verified only on the thread the verification ran on.
+//
+// So off-thread calls are handed straight to the client: no serve, no slot, no
+// timing, and a count of their own. That keeps the negative cache exactly as
+// wide as the evidence for it, and turns "does the prefetcher reach this hook"
+// from an assumption into a number.
+volatile LONG g_offThread = 0;
+
 // The serving half. Off unless its own switch is on, and then still silent
 // until it has proved itself.
 constexpr long     kProve   = 2000;
@@ -183,6 +204,13 @@ double NowMs() {
 }
 
 int __stdcall Hooked_Open(void* archive, const char* name, int scope, void** out) {
+    // Another thread, so none of what follows applies. See the note on
+    // g_offThread.
+    if (g_mainThreadId != 0 && GetCurrentThreadId() != g_mainThreadId) {
+        InterlockedIncrement(&g_offThread);
+        return orig_Open(archive, name, scope, out);
+    }
+
     // An unnamed open cannot be attributed to anything, so it is counted apart
     // rather than folded in.
     if (!name || !g_seen) {
@@ -367,6 +395,17 @@ void LogStats() {
     if (g_noName > 0)
         Log("[MpqOpen]   %lu opens had no name to attribute and are counted "
             "apart.", g_noName);
+    // Printed whether or not it fired. Zero says the async prefetcher never
+    // reached this hook - which is a measurement, not an absence of one - and a
+    // non-zero figure says how much of the archive traffic is invisible to
+    // everything above, because those calls are neither counted nor timed nor
+    // eligible to be served.
+    Log("[MpqOpen]   %ld open(s) arrived on a thread other than the one the "
+        "client draws on and were handed straight to it. hooks_async reaches "
+        "0x00424B50 as a raw pointer from the worker pool, and this module "
+        "writes a slot in three separate stores and answers on the client's "
+        "behalf - neither is safe to do from two threads, so those calls take "
+        "none of it.", g_offThread);
 
     // The worst offenders, so a name in the report can be looked at directly.
     for (int round = 0; round < 5; ++round) {
