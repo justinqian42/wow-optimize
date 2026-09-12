@@ -192,8 +192,10 @@ static bool CheckAndRestoreLuaInterface(lua_State* L) {
 
 
 // Thread-safe state flags for worker threads (atomic, no lock needed)
-static std::atomic<bool> g_isReloading{false};
-static std::atomic<bool> g_isSwapping{false};
+// Not static any more: lua_optimize.h reads these inline on the hot paths. See
+// the note on GuardActive there.
+std::atomic<bool> g_isReloading{false};
+std::atomic<bool> g_isSwapping{false};
 
 static double g_smoothedGcMs = 0.5;
 static LARGE_INTEGER g_gcPerfFreq = {};

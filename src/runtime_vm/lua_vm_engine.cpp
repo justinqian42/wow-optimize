@@ -445,7 +445,8 @@ static int __cdecl Hooked_luaV_execute(void* L, int nexeccalls) {
     if (IsTeardownState()) {
         return g_orig_luaV_execute(L, nexeccalls);
     }
-    if (LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
+    // The same three flags, read inline; see LuaOpt::GuardActive.
+    if (LuaOpt::GuardActive()) {
         return g_orig_luaV_execute(L, nexeccalls);
     }
     if (t_inOptimizedExecution) {

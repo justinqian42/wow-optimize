@@ -41,7 +41,10 @@ static const fn_FrameScript_Execute FrameScript_Execute_ = (fn_FrameScript_Execu
 static HANDLE g_defragThread = nullptr;
 static HANDLE g_defragEvent = nullptr;
 static std::atomic<bool> g_shutdown{false};
-static std::atomic<bool> g_loadingActive{false};
+// Not static any more: lua_optimize.h reads this inline. See the note there.
+// IsLoadingActive() below is still the only thing that applies the watchdog, so
+// the two are not interchangeable in general - only in the safe direction.
+std::atomic<bool> g_loadingActive{false};
 
 // Zone history tracking
 static char g_currentZone[128] = "Unknown";

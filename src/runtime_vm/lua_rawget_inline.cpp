@@ -83,7 +83,10 @@ static __forceinline bool IsValidPtr(uintptr_t p) {
 static int __cdecl Hooked_RawGet(uintptr_t L, int idx) {
     ++g_rawgetCalls;
 
-    if (LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
+    // GuardActive() rather than IsReloading() || IsSwapping(): the same three
+    // flags in the same order, read inline. The pair of calls cost four call and
+    // return pairs on a path this hook takes 578000000 times a session.
+    if (LuaOpt::GuardActive()) {
         return orig_rawget(L, idx);
     }
 

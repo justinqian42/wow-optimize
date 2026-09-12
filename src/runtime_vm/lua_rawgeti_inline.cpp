@@ -117,7 +117,10 @@ static int __cdecl Optimized_RawGetI(int L, int idx, int n)
     int res_val = 0;
 
     // Bail out during lua_State swap or active loading
-    if (LuaOpt::IsReloading() || LuaOpt::IsSwapping() || LoadingDefrag::IsLoadingActive()) {
+    // GuardActive() reads all three of these flags inline. This site spelled
+    // the loading one out as well, so it was five call and return pairs before
+    // any work, on 858941049 calls a session.
+    if (LuaOpt::GuardActive()) {
         return g_orig_rawgeti(L, idx, n);
     }
 

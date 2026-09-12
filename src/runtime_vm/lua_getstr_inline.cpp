@@ -115,7 +115,10 @@ static void* __cdecl Optimized_GetStr(int table, int tstring)
 
     // Bail out during lua_State swap - table and tstring pointers become
     // garbage when WoW destroys the old Lua VM during UI reload/logout.
-    if (LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
+    // GuardActive() rather than IsReloading() || IsSwapping(): the same three
+    // flags in the same order, read inline. The pair of calls cost four call and
+    // return pairs on a path this hook takes 11522349178 times a session.
+    if (LuaOpt::GuardActive()) {
         return g_orig_getstr(table, tstring);
     }
 
