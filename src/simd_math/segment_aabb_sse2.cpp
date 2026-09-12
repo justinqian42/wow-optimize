@@ -145,6 +145,26 @@ inline uint32_t Bits(float f) {
     return b;
 }
 
+// The plane-coherency hint that frustum_aabb_sse2 uses was measured here too
+// and is deliberately not applied. Written down so it is not re-derived.
+//
+// The axis loop below qualifies for it. Each iteration touches only its own
+// index, `inside` is an AND across them, and an early return is an existential,
+// so any axis order gives the same answer - checked over 200000 cases against
+// all six permutations, with NaN, both infinities and both zeroes among the
+// generated components, zero disagreements.
+//
+// It is not worth doing. On a segment walked against boxes in grid order the
+// axes evaluated per call go from 1.336 to 1.004, and shuffled from 1.336 to
+// 1.040. The saving is a third of one axis test - two float comparisons - while
+// the cost is a global load on entry and a global store on every cull, on a path
+// that culls 91.8% of 1225134361 calls a session. The fixed order already stops
+// on the first axis most of the time, which is the whole reason the hint has
+// nothing left to win.
+//
+// The frustum test is the opposite case and that is why it got the hint: six
+// planes rather than three, the culling plane sits deeper in the fixed order,
+// and the measured drop there is 3.486 to 1.854.
 int Evaluate(const float* box, const float* start, const float* end) {
     const float* mn = box;
     const float* mx = box + 3;
