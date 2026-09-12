@@ -77,6 +77,7 @@
 #include "sampling_profiler.h"
 #include "ab_test.h"
 #include "session_verdict.h"
+#include "high_tables.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -122,15 +123,45 @@ unsigned long g_misses   = 0;
 constexpr unsigned long kVerifyFirst  = 20000;
 constexpr unsigned long kResampleMask = 4095;
 
-constexpr unsigned kSlots = 256;   // power of two; direct-mapped
+// Geometry, from the field rather than from a round number.
+//
+// This was 256 slots, direct-mapped, indexed by `((obj >> 4) ^ idx) & 255`, and
+// it hits 62.5% - 575885710 lookups a session take the five dependent loads
+// this module exists to avoid, and the profile's weight is on the second of
+// them.
+//
+// Neither half of that index was doing much. A raw xor of a pointer field with
+// a small submesh index preserves whatever structure the allocator gave the
+// pointers, and `obj >> 4` under an 8-bit mask keeps only bits 4 to 11, so
+// objects a few kilobytes apart contribute nothing to distinguish themselves.
+//
+// The size was the larger problem. A session runs 2056719638 key lookups at a
+// 7.65 ms median frame, which is about 6500 a frame, and the generation counter
+// empties the cache every frame - so the table has to hold one frame's distinct
+// (object, submesh) pairs and nothing longer. A comparator revisits the same
+// pairs many times over a sort, so the distinct count is well under the lookup
+// count, but 256 is under it too, and that is what 62.5% means.
+//
+// A slot is sixteen bytes, so this is the cheapest table in the project to get
+// wrong and the cheapest to fix: 8192 sets of 2 ways is 16384 entries and
+// 256 KB. Two ways sit in the same cache line, so probing the second costs
+// nothing a miss would not have cost anyway. It moves out of this DLL's image
+// at the same time - 256 KB of static array would otherwise sit in the low half
+// of the address space, which is the half the client allocates from.
+constexpr unsigned kSets  = 8192;  // power of two
+constexpr unsigned kWays  = 2;
+constexpr unsigned kSlots = kSets * kWays;
 struct Slot {
     uint32_t obj;
     uint32_t idx;
     uint32_t gen;
     uint32_t desc;
 };
-Slot     g_slot[kSlots] = {};
+Slot*    g_slot = nullptr;
 uint32_t g_gen = 1;                // never 0, so a zeroed slot cannot match
+// Inserts that landed on a slot still live in this frame. Read against the
+// misses, this says whether the geometry holds a frame's working set.
+unsigned long g_conflict = 0;
 
 // The client's derivation, verbatim. Returns 0 if it cannot be followed.
 inline uint32_t DeriveDesc(uint32_t obj, uint32_t idx) {
@@ -149,11 +180,33 @@ inline uint32_t DeriveDesc(uint32_t obj, uint32_t idx) {
 }
 
 inline uint32_t DescFor(uint32_t obj, uint32_t idx) {
-    unsigned h = (unsigned)(((obj >> 4) ^ idx) & (kSlots - 1));
-    Slot& s = g_slot[h];
-    if (s.gen == g_gen && s.obj == obj && s.idx == idx) { g_hits++; return s.desc; }
-    uint32_t d = DeriveDesc(obj, idx);
+    // Knuth's constant on each half and a shift down, so neither the pointer's
+    // low bits nor a small index decides the set on its own.
+    uint32_t h = (obj >> 4) * 2654435761u;
+    h ^= idx * 2246822519u;
+    h ^= h >> 15;
+    const unsigned base = (unsigned)((h >> 8) & (kSets - 1)) * kWays;
+
+    Slot* set = &g_slot[base];
+    for (unsigned w = 0; w < kWays; ++w) {
+        Slot& s = set[w];
+        if (s.gen == g_gen && s.obj == obj && s.idx == idx) {
+            g_hits++;
+            return s.desc;
+        }
+    }
+
+    const uint32_t d = DeriveDesc(obj, idx);
     g_misses++;
+
+    // Take a way that this frame has not claimed; only when both are live does
+    // anything get displaced, and that is the number the report prints.
+    unsigned pick = 0;
+    for (unsigned w = 0; w < kWays; ++w) {
+        if (set[w].gen != g_gen) { pick = w; break; }
+        if (w == kWays - 1) { pick = (obj >> 2) & (kWays - 1); ++g_conflict; }
+    }
+    Slot& s = set[pick];
     s.obj = obj; s.idx = idx; s.desc = d; s.gen = g_gen;
     return d;
 }
@@ -266,6 +319,14 @@ int __stdcall Hooked_Compare(void* a, void* b) {
 bool Init() {
     if (!Config::g_settings.OptM2SortKey) return true;
 
+    g_slot = (Slot*)HighTables::Reserve("m2_sort_key", sizeof(Slot) * kSlots);
+    if (!g_slot) {
+        Log("[M2SortKey] no table - not installing. Without it every comparison "
+            "takes the five dependent loads this module exists to avoid, which "
+            "is slower than leaving the client alone.");
+        return false;
+    }
+
     if (IsBadReadPtr((void*)kCompare, 16)) {
         Log("[M2SortKey] 0x%08X unreadable - not installing", (unsigned)kCompare);
         return false;
@@ -332,6 +393,16 @@ void LogStats() {
         g_verified, g_hits,
         looked ? 100.0 * (double)g_hits / (double)looked : 0.0,
         g_misses);
+    // Printed whether or not it fired. The cache is emptied every frame by the
+    // generation counter, so a miss is either a pair this frame has not asked
+    // for yet - unavoidable - or one displaced by another pair landing on the
+    // same set. Only the second is something the geometry can fix, and a figure
+    // near zero says the table now holds a frame and the remaining misses are
+    // the floor.
+    Log("[M2SortKey]   %lu of those misses displaced a pair this frame was still "
+        "using, across %u sets of %u ways. Near zero means the table holds a "
+        "frame's working set and what is left is the first look at each pair.",
+        g_conflict, kSets, kWays);
 
     if (g_verified > 0) {
         if (g_highBitsDiffered > 0)
