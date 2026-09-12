@@ -57,6 +57,26 @@ static volatile LONG64 g_regexHits = 0;
 static volatile LONG64 g_regexMisses = 0;
 static volatile LONG64 g_regexEvictions = 0;
 
+// A hit rate on its own cannot say whether a cache is too small or pointless,
+// and this one reads as pointless: 253 hits against 29864 misses in a field
+// session, 0.8%, for 2181 KB of table. Two readings fit that and they have
+// opposite answers. If the client compiles a few hundred patterns over and over
+// then 256 direct-mapped slots are simply too few and the table should grow. If
+// it compiles thirty thousand different ones then no table helps and this
+// module should be deleted and its 2181 KB returned.
+//
+// The counters cannot tell them apart, so this does: one bit per pattern ever
+// offered. A miss on a pattern the bit says was here before was pushed out by a
+// collision; a miss on one never seen had to be compiled whatever we do. 65536
+// bits is 8 KB and costs one test per miss. A hash collision marks a new
+// pattern as seen and counts a cold miss as an eviction, which overstates what
+// a bigger table would win - the safe direction, as long as the report words it
+// as an upper bound, which it does.
+static constexpr int REGEX_SEEN_BITS = 65536;
+static uint32_t g_regexSeen[REGEX_SEEN_BITS / 32] = {};
+static volatile LONG64 g_regexMissCold  = 0;
+static volatile LONG64 g_regexMissAgain = 0;
+
 // ================================================================
 // FNV-1a Hash with options mix
 // ================================================================
@@ -94,6 +114,15 @@ const uint8_t* RegexCache_Get(const char* pattern, int patternLen, unsigned int 
         }
     }
     InterlockedIncrement64(&g_regexMisses);
+
+    // Was this pattern ever offered before? See the note on g_regexSeen.
+    {
+        const uint32_t sb  = (hash * 2654435761u) & (REGEX_SEEN_BITS - 1);
+        uint32_t& word     = g_regexSeen[sb >> 5];
+        const uint32_t bit = 1u << (sb & 31);
+        if (word & bit) InterlockedIncrement64(&g_regexMissAgain);
+        else { word |= bit; InterlockedIncrement64(&g_regexMissCold); }
+    }
     return nullptr;
 }
 
@@ -122,6 +151,10 @@ void RegexCache_Put(const char* pattern, int patternLen, unsigned int options, c
 
 void RegexCache_Clear() {
     if (g_regexCache) memset(g_regexCache, 0, REGEX_CACHE_BYTES);
+    // The seen bits deliberately survive a clear. They answer "how many
+    // different patterns does this client compile", which a clear does not
+    // change, and zeroing them here would turn every pattern's next appearance
+    // into a fresh cold miss and hide exactly the repetition being counted.
 }
 
 // ================================================================
@@ -219,6 +252,18 @@ void RegexCache_LogStats(void) {
         (long long)hits, (long long)misses,
         100.0 * (double)hits / (double)(hits + misses),
         (long long)g_regexEvictions);
+    // Printed whether or not either half is zero. This is the line that decides
+    // what happens to this module. A large second figure means the 256 slots
+    // are too few and the table should grow. A second figure near zero means
+    // the client compiles each pattern once, no table can help, and this module
+    // and its two megabytes should go.
+    Log("[RegexCache]   of those misses %lld were patterns never offered before, "
+        "which have to be compiled whatever we do, and %lld were patterns that "
+        "had been here and were pushed out. The second figure is an upper bound "
+        "on what a larger table would recover; the table is %d entries, direct "
+        "mapped, and %zu KB.",
+        (long long)g_regexMissCold, (long long)g_regexMissAgain,
+        REGEX_CACHE_SIZE, REGEX_CACHE_BYTES / 1024);
 }
 
 void ShutdownRegexCache() {
