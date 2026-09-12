@@ -19,8 +19,66 @@ extern "C" void Log(const char* fmt, ...);
 #include "crash_dumper.h"
 #include "sampling_profiler.h"
 
-static constexpr int CACHE_SIZE = 4096;
-static constexpr int CACHE_MASK = CACHE_SIZE - 1;
+// Geometry, chosen from the field rather than from a round number.
+//
+// The table used to be 4096 entries, direct-mapped, indexed by
+// `((storeKey >> 2) ^ recordId) & 4095`. Three things about that turned out to
+// be wrong together.
+//
+// There is only one store. All 345 call sites of sub_4CFD20 load ecx with
+// `offset off_AD49D0` - the same constant object every time - so `storeKey` is
+// invariant and the index reduced to `recordId & 4095` under a fixed xor. It
+// was not a hash at all, it was the record number modulo the table size.
+//
+// That leaves the record ids to collide directly, and they do. The seen-bitmap
+// counts 4331 distinct rows touched in one session and 1357 in another, against
+// 4096 slots, so by the pigeonhole alone some ids share a slot - and the field
+// says those shares are hot: 19637129 of 117085068 calls were rows that had
+// been in the table and were pushed out, an 83.2% hit rate. The other session is
+// worse and is the one that settles it: 1357 distinct rows, a third of the
+// slots available, and still 6488363 evictions at a 62.7% hit rate. A working
+// set that small cannot exhaust a table that large. Only collisions can do
+// that.
+//
+// The last part is the one worth remembering. The instrument beside the cache -
+// the seen bitmap - hashes with `recordId * 2654435761u` and mixes properly.
+// The cache itself did not. The good hash went into the diagnostic and the raw
+// xor into the thing being measured.
+//
+// So: 4096 sets of 4 ways, and a multiplicative index. At 4474 distinct rows
+// that is about 1.09 rows per set against 4 ways, which puts the expected
+// share of the working set in an over-subscribed set near 3% - the misses that
+// remain should be close to the cold-miss floor of a few thousand a session.
+// It costs 11.4 MB against 2.85 MB, committed MEM_TOP_DOWN into the half of
+// the address space the client does not allocate from.
+//
+// Both indexes were run over three access patterns before this was written,
+// counting the rows that do not fit their set. The middle row explains the
+// field: a constant xor preserves stride, so ids walked at a fixed step collapse
+// onto a fraction of the table however few of them there are.
+//
+//     4474 rows, pattern             old (direct)   new (4096 sets x 4 ways)
+//     dense 0..4473                     8.4%           0.4%
+//     stride 4 over 0..18000           77.2%           0.2%
+//     random over 0..80000             37.8%           0.7%
+//
+// The two field sessions miss at 16.8% and 37.3%, which lands between the first
+// and third rows. The model and the logs agree without either being fitted to
+// the other.
+static constexpr int CACHE_SETS = 4096;
+static constexpr int CACHE_WAYS = 4;
+static constexpr int CACHE_SIZE = CACHE_SETS * CACHE_WAYS;
+static constexpr int CACHE_SET_MASK = CACHE_SETS - 1;
+
+// Which set a record belongs to. Knuth's multiplicative constant, taking the
+// high bits, so ids that differ by a multiple of the set count land apart -
+// which is exactly what the old index could not do.
+static inline uint32_t DbcSetOf(uintptr_t storeKey, int recordId) {
+    uint32_t h = (uint32_t)recordId * 2654435761u;
+    h ^= (uint32_t)(storeKey >> 4) * 2246822519u;
+    h ^= h >> 15;
+    return (h >> 8) & CACHE_SET_MASK;
+}
 
 struct DbcRowEntry {
     std::atomic<uint32_t> seq;
@@ -29,6 +87,28 @@ struct DbcRowEntry {
     uint8_t   rowData[0x2A8]; // Cache the actual 680-byte record data directly!
     bool      valid;
 };
+
+// A filter, not a source of truth.
+//
+// Four ways means up to four tag comparisons, and with 696-byte entries those
+// are four separate cache lines on a path that runs 117 million times a
+// session. This array holds the same two words in eight bytes, so one set's
+// four tags sit inside a single 32-byte span and a lookup touches one line to
+// find the way instead of four to rule them out.
+//
+// Every authoritative check still reads the entry's own storePtr and recordId
+// inside the seqlock, exactly as before. A stale or torn tag here can only send
+// the lookup to a way that then fails the real check and falls through to the
+// client, which is the same outcome as a miss.
+struct DbcTag {
+    uint32_t storeLow;
+    uint32_t recordId;
+};
+static DbcTag* g_tags = nullptr;
+
+// Which way in each set to overwrite next, when no way is free. One byte per
+// set; a lost increment costs one avoidable eviction and nothing else.
+static uint8_t* g_victim = nullptr;
 
 // Committed by InstallDbcLookupCache rather than living in BSS. The feature is
 // off by default, so 2.7 MB of a 32-bit address space was being reserved at DLL
@@ -62,6 +142,11 @@ static uint64_t   g_missEvicted = 0;
 // Every clear turns the whole table into evictions, so the two figures cannot
 // be read without knowing how many there were.
 static uint64_t   g_clears = 0;
+// Inserts that had to throw a live row out because all four ways of the set
+// were taken. This is the number that says whether the geometry is right: it
+// should be a small fraction of the misses, and if it tracks them the working
+// set has outgrown four ways and the answer is more of them, not more sets.
+static uint64_t   g_evictedWay = 0;
 // Calls handed straight back because the client's own path was a plain memcpy
 // that this cache cannot improve on. See the note in the hook.
 static uint64_t   g_bypassedPlainCopy = 0;
@@ -97,8 +182,20 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
     }
 
     uintptr_t storeKey = (uintptr_t)store;
-    uint32_t idx = ((uint32_t)(storeKey >> 2) ^ recordId) & CACHE_MASK;
-    DbcRowEntry* e = &g_cache[idx];
+    const uint32_t set  = DbcSetOf(storeKey, recordId);
+    const uint32_t base = set * CACHE_WAYS;
+
+    // Find the way holding this record, reading the compact tags rather than
+    // four entries. A way that matches here is still checked properly below.
+    const DbcTag* tset = &g_tags[base];
+    int way = -1;
+    for (int w = 0; w < CACHE_WAYS; ++w) {
+        if (tset[w].recordId == (uint32_t)recordId &&
+            tset[w].storeLow == (uint32_t)storeKey) { way = w; break; }
+    }
+
+    DbcRowEntry* e = (way >= 0) ? &g_cache[base + way] : nullptr;
+    if (!e) goto miss;
 
     // Optimistic lock-free read using Sequence Lock.
     //
@@ -118,6 +215,7 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
     // authoritative check - the one after the sequence still is - but a slot
     // holding a different record is the common collision case and there is no
     // reason to copy 680 bytes before noticing.
+    {
     uint32_t s1 = e->seq.load(std::memory_order_acquire);
     if ((s1 & 1) == 0 && e->valid &&
         e->storePtr == storeKey && e->recordId == (uint32_t)recordId) {
@@ -136,7 +234,9 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
             return true;   // already in the caller's buffer
         }
     }
+    }
 
+miss:
     g_misses++;
     {
         const uint32_t sb = (uint32_t)((storeKey >> 2) ^ (uint32_t)recordId * 2654435761u)
@@ -158,6 +258,23 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
                 if (rowsArray) {
                     const void* rptr = *reinterpret_cast<const void**>(rowsArray + (recordId - minId) * 4);
                     if (rptr != nullptr) {
+                        // Choose where to put it. A way already carrying this
+                        // record is reused; otherwise a free way, and only if
+                        // the set is full does anything get thrown away.
+                        if (!e) {
+                            int pick = -1;
+                            for (int w = 0; w < CACHE_WAYS; ++w) {
+                                if (!g_cache[base + w].valid) { pick = w; break; }
+                            }
+                            if (pick < 0) {
+                                pick = g_victim[set] & (CACHE_WAYS - 1);
+                                g_victim[set] = (uint8_t)(pick + 1);
+                                ++g_evictedWay;
+                            }
+                            e = &g_cache[base + pick];
+                            g_tags[base + pick].storeLow = (uint32_t)storeKey;
+                            g_tags[base + pick].recordId = (uint32_t)recordId;
+                        }
                         uint32_t s = e->seq.load(std::memory_order_relaxed);
                         if ((s & 1) == 0) {
                             if (e->seq.compare_exchange_strong(s, s + 1, std::memory_order_acquire)) {
@@ -200,10 +317,11 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
 bool InstallDbcLookupCache()
 {
     if (!g_cache) {
-        // MEM_TOP_DOWN: 2.7 MB of a 32-bit address space, and without this it
+        // MEM_TOP_DOWN: 11.4 MB of a 32-bit address space, and without this it
         // is taken from the bottom - the half the client allocates from, which
         // a field session reports at a 5 MB largest free block. Nothing about
-        // the table changes, only where it lands.
+        // the table changes, only where it lands. The size matters more now
+        // than it did at 2.7 MB, and so does the flag.
         g_cache = (DbcRowEntry*)VirtualAlloc(nullptr, sizeof(DbcRowEntry) * CACHE_SIZE,
                                              MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
                                              PAGE_READWRITE);
@@ -212,7 +330,23 @@ bool InstallDbcLookupCache()
                 (sizeof(DbcRowEntry) * CACHE_SIZE) / 1024);
             return false;
         }
+        g_tags = (DbcTag*)VirtualAlloc(nullptr, sizeof(DbcTag) * CACHE_SIZE,
+                                       MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
+                                       PAGE_READWRITE);
+        g_victim = (uint8_t*)VirtualAlloc(nullptr, CACHE_SETS,
+                                          MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
+                                          PAGE_READWRITE);
+        if (!g_tags || !g_victim) {
+            Log("[DbcLookupCache] Could not commit the tag or victim array - disabled");
+            if (g_tags)   { VirtualFree(g_tags, 0, MEM_RELEASE);   g_tags = nullptr; }
+            if (g_victim) { VirtualFree(g_victim, 0, MEM_RELEASE); g_victim = nullptr; }
+            VirtualFree(g_cache, 0, MEM_RELEASE);
+            g_cache = nullptr;
+            return false;
+        }
     }
+    memset(g_tags, 0, sizeof(DbcTag) * CACHE_SIZE);
+    memset(g_victim, 0, CACHE_SETS);
     for (int i = 0; i < CACHE_SIZE; i++) {
         g_cache[i].storePtr = 0;
         g_cache[i].recordId = 0;
@@ -225,6 +359,7 @@ bool InstallDbcLookupCache()
     g_missCold = 0;
     g_missEvicted = 0;
     g_clears = 0;
+    g_evictedWay = 0;
     memset(g_seen, 0, sizeof(g_seen));
 
     void* target = reinterpret_cast<void*>(0x004CFD20);
@@ -254,7 +389,12 @@ bool InstallDbcLookupCache()
 
     g_featureToken = CrashDumper::FeatureTokenForCounting("DbcLookupCache", 1024);
     SamplingProfiler::RegisterSelfSymbol("dbc_lookup_cache", (const void*)&Hooked_DbcGetRow);
-    Log("[DbcLookupCache] Installed: %d-slot transformed data cache at 0x4CFD20", CACHE_SIZE);
+    Log("[DbcLookupCache] Installed at 0x4CFD20: %d sets of %d ways, %d entries, "
+        "%zu KB committed above 2GB. The previous table was %d entries indexed by "
+        "the record number alone, which collided hard enough to cost a third of "
+        "the lookups in one field session.",
+        CACHE_SETS, CACHE_WAYS, CACHE_SIZE,
+        (sizeof(DbcRowEntry) * CACHE_SIZE) / 1024, 4096);
     return true;
 }
 
@@ -283,6 +423,15 @@ void DbcLookupCache_LogStats()
                 Log("[DbcLookupCache]   the table was cleared %llu time(s), and "
                     "every clear turns rows that were here into evictions, so "
                     "read the figure above with that in mind.", g_clears);
+            // Printed whether or not it fired. Zero here with a high miss count
+            // would mean the misses are cold rather than conflicts, and the
+            // geometry is not the thing to change.
+            Log("[DbcLookupCache]   %llu insert(s) threw a live row out because "
+                "all %d ways of the set were taken. Read against the misses "
+                "above: a small fraction means the table holds the working set, "
+                "and a figure that tracks them means four ways is not enough and "
+                "the answer is more ways, not more sets.",
+                (unsigned long long)g_evictedWay, CACHE_WAYS);
         }
     }
     if (g_bypassedPlainCopy > 0) {
@@ -316,6 +465,13 @@ extern "C" void ClearDbcLookupCache()
                     e->storePtr = 0;
                     e->recordId = 0;
                     e->valid = false;
+                    // The tag has to go with it. A tag left naming a record
+                    // whose entry was just invalidated sends every later lookup
+                    // for that record to this way, where the real check fails
+                    // and it falls through - correct, but it would hide the way
+                    // from the insert path and the set would look full forever.
+                    g_tags[i].storeLow = 0;
+                    g_tags[i].recordId = 0;
                     e->seq.store(s + 2, std::memory_order_release);
                     break;
                 }
