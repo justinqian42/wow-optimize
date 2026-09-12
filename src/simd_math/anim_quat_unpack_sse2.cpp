@@ -231,6 +231,24 @@ inline void Copy4(float* dst, const float* src) {
 // Everything read here is read by the client on the path that accepts, so a
 // pointer this can fault on is one the client faults on first. No __try: this
 // runs per bone per frame.
+// safebuffers, on this function only.
+//
+// It has four local arrays - a[4], b[4], r[4] and q2[4] - so the compiler gives
+// it a /GS stack cookie: a load, an xor against esp and a store on entry, then
+// an xor back, a compare and a call to __security_check_cookie on return. A
+// field session evaluates 4231323327 quaternion tracks, and every one of them
+// paid that.
+//
+// Here it guards nothing. All four arrays are four floats, and the only thing
+// that writes them is UnpackQuat, which is a single _mm_storeu_ps of sixteen
+// bytes at offset zero - no index, no loop, no length taken from the client.
+// There is no reachable write past the end of any of them, so there is nothing
+// for the cookie to catch.
+//
+// This is deliberately not applied to the rest of the project. collision_outcode
+// keeps its cookie because its codes[] array is indexed by a vertex count that
+// comes out of a client model, which is exactly the case /GS exists for.
+__declspec(safebuffers)
 void Evaluate(void* obj, uint8_t* state, uint8_t* track,
               uint32_t* out, const float* defQuat) {
     const uint32_t  count   = *(const uint32_t*)(track + kT_count);
