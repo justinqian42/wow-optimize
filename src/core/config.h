@@ -410,7 +410,12 @@ namespace Config {
         // allocator has used it, it reserves from the OS again and the low half
         // starts filling as before.
         int  MimallocHighArenaMB = 256;
-        int  MimallocHighArenaMaxMB = 1024;
+        // Must match the default in Config::Load's GetPrivateProfileIntA for
+        // this key. It did not: this read 1024 while the ini default said 2048,
+        // so the ceiling depended on whether Load had run - and the whole point
+        // of this number is that the allocator ran out of arena at 1023 MB and
+        // spent the rest of the session shredding the low 2GB.
+        int  MimallocHighArenaMaxMB = 2048;
         // The box-overlap predicate (sub_78F370) that seventeen culling and
         // pick functions call once per scene node per pass. Six x87 compares,
         // each leaving the FPU through fnstsw and a data-dependent branch,
