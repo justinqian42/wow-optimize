@@ -81,7 +81,22 @@ static bool          g_trusted   = false;
 static bool          g_abandoned = false;
 static constexpr long VERIFY_CALLS = 512;   // each check costs a full second run
 
-static volatile long g_calls = 0;
+// Plain, not Interlocked, and not volatile.
+//
+// This was InterlockedIncrement on every call, and a field session makes
+// 303207008 of them. An uncontended `lock xadd` still takes the bus lock and
+// costs upwards of twenty cycles where a plain add costs one, so three hundred
+// million of them is several seconds of main thread spent counting.
+//
+// Nothing here needs the lock. sub_78F6A0 builds the terrain horizon from the
+// render path and runs on the thread the client draws on, which is the same
+// reason the column-scan counter further down this file has always been a plain
+// `++g_scanCalls`. The two conventions sat in one module.
+//
+// The project's rule is explicit about which to use: plain 32-bit on a hot path,
+// never plain 64-bit, and say in the log that the count is a lower bound. The
+// report does.
+static unsigned long g_calls = 0;
 
 // Project the vertex strip into the client's scratch array, exactly as the
 // original does: fetch by index, add the caller's offset, transform, then divide
@@ -207,7 +222,7 @@ static void BuildHorizon(int xyBase, int zBase, uint32_t* indices, int count,
 
 static void __cdecl Hooked_HorizonBuild(int xyBase, int zBase, uint32_t* indices,
                                         int count, float* offset, int mode) {
-    InterlockedIncrement(&g_calls);
+    ++g_calls;   // plain; see the note on g_calls
 
     if (g_abandoned) {
         orig_HorizonBuild(xyBase, zBase, indices, count, offset, mode);
@@ -545,7 +560,8 @@ void LogStats() {
             "this log.");
         return;
     }
-    Log("[Horizon] %ld calls, %s",
+    Log("[Horizon] %lu calls (a lower bound - the counter is plain, see the note "
+        "on it), %s",
         g_calls,
         g_abandoned ? "abandoned - the client's routine is doing the work"
                     : (g_trusted ? "verified, running ours"
