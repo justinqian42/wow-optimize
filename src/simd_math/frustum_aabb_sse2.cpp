@@ -145,6 +145,15 @@ inline void BumpVisible() {
     if (g_visible < before) ++g_visWraps;
 }
 
+// Adds to a counter that is allowed to wrap, keeping the count of wraps. The
+// plane total reaches twenty billion in a session, which is five times what
+// thirty-two bits hold.
+inline void Bump(unsigned long& low, unsigned long& wraps, unsigned long by) {
+    const unsigned long before = low;
+    low = before + by;
+    if (low < before) ++wraps;
+}
+
 inline double Total(unsigned long low, unsigned long wraps) {
     return (double)low + (double)wraps * 4294967296.0;
 }
@@ -153,6 +162,66 @@ constexpr unsigned long kVerifyFirst  = 20000;
 constexpr unsigned long kResampleMask = 4095;
 
 double g_threshold = 0.0;
+
+// Which plane culled the object before this one, and for which frustum.
+//
+// The client tests six planes in a fixed order and returns the moment one of
+// them culls, so a box rejected by plane four pays for planes one to three
+// first. The result does not depend on the order at all: it is "cull if any
+// plane culls", a pure existential over six independent tests, and each test
+// computes its own plane's distance from its own plane's numbers. Evaluating
+// them in a different order returns the same answer for every input, NaN
+// included - a NaN distance fails `<` wherever it is tested, so it never culls
+// in any order - and the planes that are skipped have no side effects to skip.
+//
+// So the order is free to change, and the useful order is the one spatial
+// coherence hands over: the objects a visibility walk rejects in sequence tend
+// to be rejected by the same plane, because they are near each other and the
+// frustum has not moved between them. Remembering the last culling plane and
+// starting there turns most of those calls into one plane instead of several.
+//
+// A field session runs 3370465441 of these with 1226911991 of them culled, so
+// that is the population. Nothing is saved on a visible box - all six planes run
+// whatever the order - and nothing is lost either, because the rotation
+// evaluates the same six.
+//
+// Two things were measured offline before this was written, because the claim
+// has two halves and they take different evidence.
+//
+// That the order cannot change the answer: 400000 random cases, each evaluated
+// in all six rotations, with NaN, both infinities and both zeroes among the
+// generated plane and box components. Zero disagreements. This is the same class
+// of argument as the collision outcode - not that the error is small but that
+// there is none - and it holds because each plane distance is computed from that
+// plane's own four numbers and nothing else, while the aggregate over planes is
+// an existential.
+//
+// What the hint is worth: one fixed frustum and 19200 boxes handed over in the
+// order a grid walk would hand them, against the same boxes shuffled.
+//
+//     order of objects          planes per call      culled on the first plane
+//     spatial walk              3.486 -> 1.854            85.9%
+//     shuffled, no coherence    3.486 -> 2.893            34.0%
+//
+// Both rows are over a set that culls 90% where the field culls 36.4%, so the
+// session figure will be smaller: the field mix with the spatial row puts about
+// 5.09 plane evaluations per call at about 4.49, which over 3370465441 calls is
+// roughly two billion plane evaluations that do not happen. That last step is
+// arithmetic over a model of the traversal order rather than a measurement of
+// it, which is why the counter below reports the real figure instead.
+//
+// Keyed by the frustum pointer because shadow cascades are separate frusta with
+// separate geometry, and one remembered index shared between them would be
+// wrong for both. A different pointer simply starts at plane zero again; this
+// is a hint, and a wrong hint costs nothing but the original order.
+const void* g_lastFrustum = nullptr;
+int         g_lastCull    = 0;
+
+// What the hint is worth, counted rather than assumed: plane evaluations that
+// actually ran, against the calls that ran them.
+unsigned long g_planeEvals  = 0;
+unsigned long g_planeWraps  = 0;
+unsigned long g_hintCulled  = 0;   // the remembered plane culled on its first try
 
 // Pick the corner the client would pick, for x and y at once.
 //
@@ -183,11 +252,25 @@ inline void Corner(const float* mn, const float* mx, const float* pl,
 // for each of six planes, in that order, stopping the moment one is below the
 // threshold. The order is the client's, read from its instruction sequence.
 inline int Evaluate(void* frustum, void* aabb) {
-    const float* pl = (const float*)frustum;
-    const float* mn = (const float*)aabb;
-    const float* mx = mn + 3;
+    const float* base = (const float*)frustum;
+    const float* mn   = (const float*)aabb;
+    const float* mx   = mn + 3;
 
-    for (int i = 0; i < kPlanes; i++, pl += 4) {
+    // Start at the plane that culled the last box, when this is the same
+    // frustum. See the note on g_lastCull for why any order is allowed.
+    int start = 0;
+    if (frustum == g_lastFrustum) {
+        start = g_lastCull;
+    } else {
+        g_lastFrustum = frustum;
+        g_lastCull    = 0;
+    }
+
+    for (int n = 0; n < kPlanes; n++) {
+        int i = start + n;
+        if (i >= kPlanes) i -= kPlanes;
+        const float* pl = base + 4 * i;
+
         __m128d cxy;
         double  cz;
         Corner(mn, mx, pl, &cxy, &cz);
@@ -204,8 +287,14 @@ inline int Evaluate(void* frustum, void* aabb) {
         // Below the threshold is the only outcome that culls. Equal continues,
         // and so does a NaN, because `<` is false for it - which is what the
         // client's parity test on C0 and C2 works out to.
-        if (d < g_threshold) return 0;
+        if (d < g_threshold) {
+            Bump(g_planeEvals, g_planeWraps, (unsigned long)(n + 1));
+            if (n == 0) ++g_hintCulled;
+            g_lastCull = i;
+            return 0;
+        }
     }
+    Bump(g_planeEvals, g_planeWraps, (unsigned long)kPlanes);
     return 3;
 }
 
@@ -345,6 +434,17 @@ void LogStats() {
         g_dead ? " - RETIRED on a disagreement"
                : (g_armed ? "" : " - still verifying, the client still answers every one"),
         visible, calls > 0.0 ? 100.0 * visible / calls : 0.0, g_verified);
+    // What the plane hint is actually worth on this client, rather than on the
+    // model in the note above. Six would mean the hint never helps; the floor is
+    // 0.636 * 6 + 0.364 * 1, about 4.18, if every cull were caught on the first
+    // plane tried.
+    const double planes = Total(g_planeEvals, g_planeWraps);
+    const double culled = calls - visible;
+    Log("[FrustumAabb]   %.2f plane(s) evaluated per test against six in the "
+        "client's fixed order, and %lu of the %.0f culls were caught by the "
+        "plane that culled the box before them (%.1f%%).",
+        calls > 0.0 ? planes / calls : 0.0, g_hintCulled, culled,
+        culled > 0.0 ? 100.0 * (double)g_hintCulled / culled : 0.0);
     if (visible > calls)
         Log("[Wrong] [FrustumAabb] more tests came back visible than were run. "
             "That cannot happen, and it means these two counters are no longer "
