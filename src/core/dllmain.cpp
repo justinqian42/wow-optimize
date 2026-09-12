@@ -8150,7 +8150,12 @@ static DWORD WINAPI MainThread(LPVOID param) {
     // memset hook - 1108 callers
     bool hotFuncOk = Config::g_settings.OptFastMemsetOpt && InstallHotFunctionOptimizations();
 
-    bool memcpyFastOk = false; // Config::g_settings.OptStrStrSse2 && InstallMemcpyFast();
+    // FastMemcpy stays off. Commit 6d71ec19 disabled it "to prevent
+    // uninitialized object corruptions and crashes in combat", and the reason is
+    // now written at the top of crt_memcpy_fast.cpp as well. The gate it used to
+    // hang off was OptStrStrSse2, which names strstr and not memcpy, so restoring
+    // this line as it stood would also restore a switch reading the wrong key.
+    bool memcpyFastOk = false;
 
     // FrameScript hash dispatch - 18 handlers, O(1) vs O(n)
 #if !TEST_DISABLE_FRAME_SCRIPT_DISPATCH

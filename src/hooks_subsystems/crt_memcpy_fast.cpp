@@ -1,7 +1,28 @@
 // ============================================================================
 // Module: crt_memcpy_fast.cpp
-// Description: SSE2 vectorized replacement for legacy CRT function `crt_memcpy_fast.cpp`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
+// Description: SSE2 replacement for the client's own memcpy at 0x0040CB10.
+//              NOT INSTALLED. It corrupted objects and crashed the game.
+// ============================================================================
+//
+// This module is complete, compiles, and is never installed. The call in
+// dllmain is commented out and the linker drops the whole object, which is why
+// nothing in a field log mentions it.
+//
+// The reason is not that it was abandoned half-written. Commit 6d71ec19 turned
+// it off, and its message says what happened: "Disable W12 AllocWrapper hook
+// and FastMemcpy hook to prevent uninitialized object corruptions and crashes
+// in combat."
+//
+// That is written here because it was not written anywhere a reader of this
+// file would see it. What is below looks finished and plausible, the switch it
+// used to hang off was OptStrStrSse2 - a name belonging to strstr, not to
+// memcpy - and the line in dllmain is a bare `false` with no explanation. Any
+// of those three would invite someone to turn it back on.
+//
+// 0x0040CB10 has 719 xrefs and carries live game objects between allocations.
+// Whatever the defect was, it produced corruption rather than a fault, which is
+// the hardest kind to attribute and the reason this needs a proof rather than a
+// retry. Do not re-enable it without one.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
