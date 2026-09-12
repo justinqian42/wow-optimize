@@ -72,6 +72,7 @@ namespace {
 constexpr long kArmMs   = 60;
 constexpr DWORD kWakeMs = 4;     // how often the watchdog looks
 constexpr DWORD kFastMs = 1;     // how often it samples once armed
+constexpr DWORD kSlowestMs = 64; // the floor on thinning; see the note below
 
 constexpr int kRing = 512;
 
@@ -95,6 +96,7 @@ unsigned long g_caught   = 0;    // frames that armed it
 unsigned long g_samples  = 0;
 unsigned long g_worstMs  = 0;
 unsigned long g_wakes    = 0;
+unsigned long g_thinned  = 0;    // times a stall outlasted the ring
 
 long NowMs() {
     LARGE_INTEGER n;
@@ -120,8 +122,24 @@ DWORD WINAPI WatchdogProc(LPVOID) {
             continue;
         }
 
-        // This frame has already overrun. Sample it until it ends or the ring
-        // fills; the main thread is only suspended from here.
+        // This frame has already overrun. Sample it until it ends; the main
+        // thread is only suspended from here.
+        //
+        // The ring used to end the sampling when it filled, which meant a stall
+        // was described by its first 512 milliseconds and nothing else. That is
+        // 27% of the 1918 ms frame this module was written for and 9% of a 5860
+        // ms loading screen - and the loading screen is the case that matters
+        // most, because a field session reports one with 168 ms inside ReadFile,
+        // no file writes at all, and no account of the other 5.7 seconds.
+        //
+        // So a full ring thins instead of stopping: every other sample is kept,
+        // which leaves 256 spread evenly over the whole elapsed window, and the
+        // interval doubles so the next 256 cover twice as long. Repeating that
+        // describes a stall of any length with a fixed 512 slots, at a
+        // resolution that halves each time. A 5860 ms load thins four times and
+        // ends up sampled about every 16 ms across all of it, instead of every
+        // millisecond across the first twelfth.
+        DWORD interval = kFastMs;
         while (InterlockedCompareExchange(&g_running, 1, 1) &&
                g_frameStartMs == start) {
             const long at = NowMs() - start;
@@ -132,10 +150,26 @@ DWORD WINAPI WatchdogProc(LPVOID) {
                 if (GetThreadContext(g_main, &ctx)) eip = (uintptr_t)ctx.Eip;
                 ResumeThread(g_main);
                 const LONG i = InterlockedIncrement(&g_count) - 1;
-                if (i < kRing && eip) { g_eip[i] = eip; g_atMs[i] = at; }
-                else if (i >= kRing) break;
+                if (i < kRing && eip) {
+                    g_eip[i] = eip;
+                    g_atMs[i] = at;
+                } else if (i >= kRing) {
+                    // Re-check the frame before compacting. OnFrame stamps the
+                    // new frame first and then reads the ring, so this test
+                    // leaves only a window of a few instructions in which both
+                    // could touch it - and the worst that produces is a repeated
+                    // address in one report, never an unsafe read.
+                    if (g_frameStartMs != start) break;
+                    for (int k = 0; k * 2 < kRing; ++k) {
+                        g_eip[k]  = g_eip[k * 2];
+                        g_atMs[k] = g_atMs[k * 2];
+                    }
+                    InterlockedExchange(&g_count, kRing / 2);
+                    if (interval < kSlowestMs) interval *= 2;
+                    ++g_thinned;
+                }
             }
-            Sleep(kFastMs);
+            Sleep(interval);
         }
     }
     return 0;
@@ -165,8 +199,14 @@ void OnFrame() {
         if ((unsigned long)len > g_worstMs) g_worstMs = (unsigned long)len;
 
         const int take = (int)(n < kRing ? n : kRing);
+        // How much of the frame these samples actually cover. Printed because
+        // the ring thins rather than stopping, so the density is not uniform and
+        // the reader should not assume one sample per millisecond.
+        long spanTo = 0;
+        for (int i = 0; i < take; ++i) if (g_atMs[i] > spanTo) spanTo = g_atMs[i];
         Log("[FreezeCatcher] a frame of %ld ms, %d sample(s) of where the main "
-            "thread was while it ran:", len, take);
+            "thread was while it ran, reaching %ld ms into it (%.0f%%):",
+            len, take, spanTo, len > 0 ? 100.0 * (double)spanTo / (double)len : 0.0);
 
         // Group by address without sorting in place - the ring is small and this
         // runs once per caught frame, not per sample.
@@ -259,6 +299,14 @@ void LogStats() {
         "were sampled, %lu samples in total, worst frame %lu ms. Each one is "
         "printed above with the addresses it was caught at.",
         g_frames, g_caught, kArmMs, g_samples, g_worstMs);
+    // Printed whether or not it happened. Zero means every stall fitted in the
+    // ring at full rate; a large number means the stalls are long enough that
+    // the ring is describing them at reduced resolution, which is the intended
+    // behaviour and not a fault.
+    Log("[FreezeCatcher]   the ring was thinned %lu time(s) - each halves the "
+        "samples kept and doubles the interval, down to one every %u ms, so a "
+        "stall longer than the ring is described across all of itself rather "
+        "than across its first half second.", g_thinned, kSlowestMs);
 }
 
 }  // namespace FreezeCatcher
