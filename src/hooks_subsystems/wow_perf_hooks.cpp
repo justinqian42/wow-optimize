@@ -7,6 +7,7 @@
 #include "wow_perf_hooks.h"
 #include "MinHook.h"
 #include "version.h"
+#include "config.h"
 #include <mimalloc.h>
 #include <cstdint>
 #include <cstring>
@@ -520,9 +521,16 @@ namespace WowPerfHooks {
             {(void*)0x0042E3B0, (void*)Hooked_MemStormBlockFree, (void**)&orig_MemStormBlockFree, "P9 memorystorm block free"},
             {(void*)0x004270F0, (void*)Hooked_VirtualDispatch,   (void**)&orig_VirtualDispatch,   "P10 virtual dispatch"},
             {(void*)0x004283D0, (void*)Hooked_DelCSWrapper,      (void**)&orig_DelCSWrapper,      "P11 deleteCS wrapper"},
-            // P12 REMOVED: 0x878760 already hooked by W14 (wow_opt_hooks). P12 uses __cdecl vs W14 __fastcall — wrong CC.
+            // P12 STAYS REMOVED, and the first half of this reason has expired.
+            // W14 is gone - it was one of ten passthroughs deleted from
+            // wow_opt_hooks - so 0x878760 is free now. The second half has not
+            // expired and is the real one: P12 declares __cdecl where the client
+            // function is __fastcall, so installing it corrupts the stack.
             // {(void*)0x00878760, (void*)Hooked_SoundVolumeLookup, (void**)&orig_SoundVolumeLookup, "P12 sound volume lookup"},
-            // P13 REMOVED: 0x878610 already hooked by W16 (wow_opt_hooks). Duplicate = MH_ERROR_ALREADY_CREATED.
+            // P13 STAYS REMOVED. W16 is gone too, so the collision that this
+            // originally cited no longer exists and 0x878610 is free. Nothing
+            // has established that P13 is correct, only that it used to lose a
+            // race; reinstating it needs the same evidence any new hook needs.
             // {(void*)0x00878610, (void*)Hooked_SoundMixUpdate,    (void**)&orig_SoundMixUpdate,    "P13 sound mix update"},
             {(void*)0x008799E0, (void*)Hooked_SoundChannelAlloc, (void**)&orig_SoundChannelAlloc, "P14 sound channel alloc"},
             // P15 REMOVED: 0x879390 already hooked by W17 (wow_opt_hooks). Duplicate = MH_ERROR_ALREADY_CREATED.
@@ -537,6 +545,13 @@ namespace WowPerfHooks {
         };
 
         for (auto& h : hooks) {
+            // P5 is the Lua Type Fast Path the launcher offers under its own
+            // switch. That switch used to gate hot_patch.cpp, which hooks the
+            // same address and therefore always lost to this entry and logged
+            // "MH_CreateHook FAILED" every session. The feature ran regardless,
+            // off OptWowPerfHooks, so the key controlled nothing it named.
+            if (h.addr == (void*)0x0084DEB0 && !Config::g_settings.OptLuaTypeFast)
+                continue;
             if (WineSafe_CreateHook(h.addr, h.hook, h.orig) == MH_OK) {
                 if (MH_EnableHook(h.addr) == MH_OK) {
                     Log("[WowPerf] %s: ACTIVE @ 0x%08X", h.name, (uintptr_t)h.addr);
