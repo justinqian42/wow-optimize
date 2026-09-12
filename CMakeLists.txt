@@ -31,8 +31,27 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 #   -DWO_ENABLE_LTO=ON  ->  /GL (whole-program) + /LTCG (link-time codegen)
 # Default OFF: LTO re-generates code across the whole DLL and can shift the
 # exact codegen we are currently stabilizing crashes against. Turn it on only
-# after the build is confirmed stable in-game. Marginal win on a ~340KB DLL
-# next to wow.exe (which we cannot recompile), but free once stable.
+# after the build is confirmed stable in-game.
+#
+# The gate above stands. What has changed is the size of the prize behind it:
+# "marginal win on a small DLL next to wow.exe" is no longer what the evidence
+# says. Without /GL the compiler cannot inline across translation units, and a
+# sweep of the built objects in 2026-09-12 found that costing real time on paths
+# the field counts in billions:
+#
+#   * lua_getstr and three siblings called LuaOpt::IsReloading and IsSwapping,
+#     each of which calls LoadingDefrag::IsLoadingActive - four call and return
+#     pairs on 11522349178 calls a session, to read three flags. Fixed by hand
+#     with an inline accessor; /GL would have done it for free.
+#   * fast_strncmp and hot_functions called CrashDumper::FeatureHit on all
+#     2.8 billion of their calls, for a counter. Fixed by sampling.
+#   * m2_sort_key_cache's lookup stopped being inlined when it grew, and needed
+#     __forceinline plus a noinline split to come back.
+#
+# Those three were found and fixed one at a time. /GL addresses the whole class,
+# including the instances nobody has looked for yet. So when the build is
+# confirmed stable in-game, this is worth measuring properly rather than
+# dismissing.
 #
 # PROFILE-GUIDED OPTIMIZATION (PGO) is a manual 2-phase process because it
 # needs YOUR gameplay profile (there is no profile to bake in from here):
