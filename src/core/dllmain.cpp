@@ -1273,6 +1273,29 @@ static long g_modHits = 0, g_modMisses = 0;
 static long g_lstrcmpHits = 0, g_lstrcmpFallbacks = 0;
 static long g_mbwcFastHits = 0, g_mbwcFallbacks = 0;
 static long g_wcmbFastHits = 0, g_wcmbFallbacks = 0;
+
+// Why a conversion left the fast path, rather than only that it did.
+//
+// The two directions share a codepage test, a flags test and the same shape of
+// length handling, and a field session has them at 83.6% and 0.1%:
+// MultiByteToWideChar 34975 fast against 6854 fallback, WideCharToMultiByte
+// 1309 against 1189883. Whatever rejects the wide-to-narrow direction cannot be
+// the codepage or the flags, because the other direction passes both, and one
+// counter for every exit cannot say which it is. A hook that runs 1.19 million
+// times and takes its fast path on one call in a thousand is either fixable or
+// pure overhead, and these counters decide which.
+struct ConvBail {
+    long flags;      // dwFlags was not 0
+    long codepage;   // not one of the ASCII-compatible pages
+    long nullIn;     // no input pointer
+    long badLen;     // zero or a negative length other than -1
+    long badOutLen;  // negative output size
+    long nonAscii;   // the content itself had a byte or unit above 0x7F
+    long nullOut;    // a non-zero output size with no buffer
+    long faulted;    // the SEH caught a read
+};
+static ConvBail g_mbwcBail = {};
+static ConvBail g_wcmbBail = {};
 static long g_profHits = 0, g_profMisses = 0;
 static long g_gpaHits = 0, g_gpaMisses = 0, g_gpaEvictions = 0, g_gpaBypasses = 0;
 static long g_envHits = 0, g_envMisses = 0;
@@ -5280,6 +5303,24 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
         Log("[Stats] WideCharToMultiByte: %ld fast, %ld fallback (%.1f%%)",
             g_wcmbFastHits, g_wcmbFallbacks,
            (double)g_wcmbFastHits / (g_wcmbFastHits + g_wcmbFallbacks) * 100.0);
+    // Why each direction left the fast path. One counter for every exit could
+    // not say whether a 0.1% hit rate is a fixable predicate or a hook that
+    // should not be there, and these two lines print whichever reasons fired,
+    // including none.
+    if (g_mbwcFallbacks > 0)
+        Log("[Stats]   MultiByteToWideChar left the fast path: %ld flags, %ld "
+            "codepage, %ld no input, %ld input length, %ld output length, %ld "
+            "non-ASCII content, %ld no output buffer, %ld faulted",
+            g_mbwcBail.flags, g_mbwcBail.codepage, g_mbwcBail.nullIn,
+            g_mbwcBail.badLen, g_mbwcBail.badOutLen, g_mbwcBail.nonAscii,
+            g_mbwcBail.nullOut, g_mbwcBail.faulted);
+    if (g_wcmbFallbacks > 0)
+        Log("[Stats]   WideCharToMultiByte left the fast path: %ld flags, %ld "
+            "codepage, %ld no input, %ld input length, %ld output length, %ld "
+            "non-ASCII content, %ld no output buffer, %ld faulted",
+            g_wcmbBail.flags, g_wcmbBail.codepage, g_wcmbBail.nullIn,
+            g_wcmbBail.badLen, g_wcmbBail.badOutLen, g_wcmbBail.nonAscii,
+            g_wcmbBail.nullOut, g_wcmbBail.faulted);
     if (g_profHits + g_profMisses > 0)
         Log("[Stats] GetPrivateProfile: %ld hits, %ld misses (%.1f%%)",
             g_profHits, g_profMisses,
@@ -10269,11 +10310,11 @@ static int WINAPI hooked_MultiByteToWideChar(
     LPCCH lpMultiByteStr, int cbMultiByte,
     LPWSTR lpWideCharStr, int cchWideChar)
 {
-    if (dwFlags != 0)                        goto mbt_fallback;
-    if (!IsAsciiCompatibleCp(CodePage))      goto mbt_fallback;
-    if (!lpMultiByteStr)                     goto mbt_fallback;
-    if (cbMultiByte == 0 || cbMultiByte < -1) goto mbt_fallback;
-    if (cchWideChar < 0)                     goto mbt_fallback;
+    if (dwFlags != 0)                        { g_mbwcBail.flags++;     goto mbt_fallback; }
+    if (!IsAsciiCompatibleCp(CodePage))      { g_mbwcBail.codepage++;  goto mbt_fallback; }
+    if (!lpMultiByteStr)                     { g_mbwcBail.nullIn++;    goto mbt_fallback; }
+    if (cbMultiByte == 0 || cbMultiByte < -1) { g_mbwcBail.badLen++;   goto mbt_fallback; }
+    if (cchWideChar < 0)                     { g_mbwcBail.badOutLen++; goto mbt_fallback; }
 
     __try {
         size_t inLen;
@@ -10288,7 +10329,7 @@ static int WINAPI hooked_MultiByteToWideChar(
             includeNull = false;
         }
 
-        if (!AllAsciiBytes(lpMultiByteStr, inLen)) goto mbt_fallback;
+        if (!AllAsciiBytes(lpMultiByteStr, inLen)) { g_mbwcBail.nonAscii++; goto mbt_fallback; }
 
         size_t outLen = inLen + (includeNull ? 1 : 0);
 
@@ -10297,7 +10338,7 @@ static int WINAPI hooked_MultiByteToWideChar(
             return (int)outLen;
         }
 
-        if (!lpWideCharStr) goto mbt_fallback;
+        if (!lpWideCharStr) { g_mbwcBail.nullOut++; goto mbt_fallback; }
 
         if ((int)outLen > cchWideChar) {
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
@@ -10312,6 +10353,7 @@ static int WINAPI hooked_MultiByteToWideChar(
         return (int)outLen;
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {
+        g_mbwcBail.faulted++;
     }
 
 mbt_fallback:
@@ -10325,11 +10367,11 @@ static int WINAPI hooked_WideCharToMultiByte(
     LPSTR lpMultiByteStr, int cbMultiByte,
     LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar)
 {
-    if (dwFlags != 0)                         goto wcmb_fallback;
-    if (!IsAsciiCompatibleCp(CodePage))       goto wcmb_fallback;
-    if (!lpWideCharStr)                       goto wcmb_fallback;
-    if (cchWideChar == 0 || cchWideChar < -1) goto wcmb_fallback;
-    if (cbMultiByte < 0)                      goto wcmb_fallback;
+    if (dwFlags != 0)                         { g_wcmbBail.flags++;     goto wcmb_fallback; }
+    if (!IsAsciiCompatibleCp(CodePage))       { g_wcmbBail.codepage++;  goto wcmb_fallback; }
+    if (!lpWideCharStr)                       { g_wcmbBail.nullIn++;    goto wcmb_fallback; }
+    if (cchWideChar == 0 || cchWideChar < -1) { g_wcmbBail.badLen++;    goto wcmb_fallback; }
+    if (cbMultiByte < 0)                      { g_wcmbBail.badOutLen++; goto wcmb_fallback; }
 
     __try {
         size_t inLen;
@@ -10344,7 +10386,7 @@ static int WINAPI hooked_WideCharToMultiByte(
             includeNull = false;
         }
 
-        if (!AllAsciiWide(lpWideCharStr, inLen)) goto wcmb_fallback;
+        if (!AllAsciiWide(lpWideCharStr, inLen)) { g_wcmbBail.nonAscii++; goto wcmb_fallback; }
 
         size_t outLen = inLen + (includeNull ? 1 : 0);
 
@@ -10354,7 +10396,7 @@ static int WINAPI hooked_WideCharToMultiByte(
             return (int)outLen;
         }
 
-        if (!lpMultiByteStr) goto wcmb_fallback;
+        if (!lpMultiByteStr) { g_wcmbBail.nullOut++; goto wcmb_fallback; }
 
         if ((int)outLen > cbMultiByte) {
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
@@ -10370,6 +10412,7 @@ static int WINAPI hooked_WideCharToMultiByte(
         return (int)outLen;
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {
+        g_wcmbBail.faulted++;
     }
 
 wcmb_fallback:
