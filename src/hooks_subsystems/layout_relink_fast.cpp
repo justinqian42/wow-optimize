@@ -207,6 +207,11 @@ double        g_rejectWalked   = 0.0;
 // candidate is the match whatever order the global list is in, so this is the
 // number that says whether the found path is worth answering from the index too.
 unsigned long g_oneQualifier   = 0;
+// Of the single-qualifier calls, the ones where that frame is actually in the
+// global list. That is the population a found-path shortcut could serve, and it
+// is smaller than g_oneQualifier by however many frames hold an anchor while
+// unlinked.
+unsigned long g_oneQualifierLinked = 0;
 unsigned long g_manyQualifiers = 0;
 
 unsigned long g_scanSample   = 0;
@@ -477,6 +482,24 @@ uint32_t* __fastcall Hooked_RelinkBody(void* self, void* edx) {
                 g_rejectWalked += (double)ds.entries;
             } else if (ds.qualifying == 1) {
                 ++g_oneQualifier;
+                // Is that one frame in the list the client is about to walk?
+                //
+                // The client's own membership test is in this function's
+                // not-found tail: before unlinking itself it does `if (*result)`
+                // on `result = frame + dword_AC1018`, so a non-zero first link
+                // word is what "in the list" means here. It is one load.
+                //
+                // This is read-only and counts only. With exactly one frame in
+                // the index carrying an anchor the scan would accept, and that
+                // frame in the list, the client's loop must stop at it whatever
+                // order the list is in - which is the case a found-path shortcut
+                // would answer. Whether that case is common enough to be worth
+                // the pointer surgery is what this counts, and the surgery is
+                // not written until it says so: this module crashed the game on
+                // login once already, doing exactly that kind of work on a
+                // premise that had not been measured.
+                const uint32_t linkOff = Rd(kNodeOffsetVar);
+                if (Rd((uintptr_t)ds.only + linkOff) != 0) ++g_oneQualifierLinked;
             } else {
                 ++g_manyQualifiers;
             }
@@ -667,6 +690,11 @@ void LogStats() {
         "the first of those two numbers is what answering the found path from "
         "the index would be worth.",
         g_oneQualifier, g_manyQualifiers);
+    Log("[LayoutRelink]   %lu of those single candidates were themselves in the "
+        "global list, which is the population a found-path shortcut could serve. "
+        "The client's own test for that is `if (*result)` on frame+dword_AC1018 "
+        "in its not-found tail, so this is the same question it asks.",
+        g_oneQualifierLinked);
     if (g_scansSeen > 0) {
         double avgLen   = g_nodesTotal / (double)g_scansSeen;
         unsigned long matched = g_scansSeen - g_scanNoMatch;
