@@ -209,6 +209,7 @@ static bool __fastcall Hooked_DbcGetRow(void* store, void* /* edx */, int record
     }
 
     DbcRowEntry* e = (way >= 0) ? &g_cache[base + way] : nullptr;
+    int tagWay = -1;   // the way whose tag this call may publish; see the insert
     if (!e) goto miss;
 
     // Optimistic lock-free read using Sequence Lock.
@@ -286,8 +287,7 @@ miss:
                                 ++g_evictedWay;
                             }
                             e = &g_cache[base + pick];
-                            g_tags[base + pick].storeLow = (uint32_t)storeKey;
-                            g_tags[base + pick].recordId = (uint32_t)recordId;
+                            tagWay = pick;
                         }
                         uint32_t s = e->seq.load(std::memory_order_relaxed);
                         if ((s & 1) == 0) {
@@ -315,6 +315,22 @@ miss:
                                     wrote = false;
                                 }
                                 e->valid = wrote;
+                                // The tag is published last, and only for a
+                                // write that happened.
+                                //
+                                // Writing it when the way was chosen would name
+                                // this record on a way that still holds the
+                                // previous one whenever the compare-exchange
+                                // below fails or the copy faults. Every later
+                                // lookup for this record would then match the
+                                // tag, read the sequence, fail the real check
+                                // and fall through - correct, but paying a probe
+                                // to learn nothing. Published here, a tag never
+                                // names a record its entry does not hold.
+                                if (wrote && tagWay >= 0) {
+                                    g_tags[base + tagWay].storeLow = (uint32_t)storeKey;
+                                    g_tags[base + tagWay].recordId = (uint32_t)recordId;
+                                }
                                 e->seq.store(s + 2, std::memory_order_release); // Even: write complete (or aborted)
                             }
                         }
