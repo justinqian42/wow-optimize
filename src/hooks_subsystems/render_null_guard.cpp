@@ -86,16 +86,33 @@ static volatile LONG64 g_noParamTable = 0;   // D43020 set but D43024 null
 static volatile LONG64 g_noGxDevice   = 0;   // C5DF88 null
 static volatile LONG64 g_deviceNotReady = 0; // D3D9 device missing or vtable bad
 
-static bool IsDeviceReady() {
-    uintptr_t pGxDevice = *(uintptr_t*)0x00C5DF88;
+// The last D3D9 device whose vtable word was checked and found sane.
+//
+// Not a cache of the answer - a cache of the last step of it. The walk from the
+// global to the vtable is three dependent loads, and this hook takes 1097427112
+// calls in a field session and has suppressed none of them, so all three run a
+// billion times to reach the same conclusion.
+//
+// Keyed on the device pointer itself, so a device that is torn down and replaced
+// is checked again. That is no weaker than checking every time: if the object at
+// that address were freed and the address reused, the unconditional version
+// would read the recycled memory and range-check whatever it found, and pass as
+// well.
+static uintptr_t g_lastGoodDevice = 0;
+
+// Takes the CGxDevice the caller has already loaded rather than reading the
+// global a second time. It was read two lines above the call.
+static bool IsDeviceReady(uintptr_t pGxDevice) {
     if (pGxDevice < 0x10000 || pGxDevice > 0xFFE00000) return false;
 
-    uintptr_t pD3d9Device = *(uintptr_t*)(pGxDevice + 0x397C);
+    const uintptr_t pD3d9Device = *(uintptr_t*)(pGxDevice + 0x397C);
     if (pD3d9Device < 0x10000 || pD3d9Device > 0xFFE00000) return false;
+    if (pD3d9Device == g_lastGoodDevice) return true;
 
-    uintptr_t pVtable = *(uintptr_t*)pD3d9Device;
+    const uintptr_t pVtable = *(uintptr_t*)pD3d9Device;
     if (pVtable < 0x10000 || pVtable > 0xFFE00000) return false;
 
+    g_lastGoodDevice = pD3d9Device;
     return true;
 }
 
@@ -111,11 +128,12 @@ static int __cdecl Hooked_873060(int a1, int a2)
         ++g_noParamTable; ++g_suppressed;
         return 1;
     }
-    if (!*C5DF88) {
+    const uintptr_t gx = *(uintptr_t*)C5DF88;
+    if (!gx) {
         ++g_noGxDevice; ++g_suppressed;
         return 1;
     }
-    if (!IsDeviceReady()) {
+    if (!IsDeviceReady(gx)) {
         ++g_deviceNotReady; ++g_suppressed;
         return 1;
     }
