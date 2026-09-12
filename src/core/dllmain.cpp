@@ -5568,6 +5568,15 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
     STAT_TIME("CombatLogFilter::LogStats", CombatLogFilter::LogStats());
     STAT_TIME("EventCoalescer::LogStats", EventCoalescer::LogStats());
+    // Three whole subsystems whose counters were dumped only from their own
+    // ShutdownAll, which this DLL never reaches. Between them that is around
+    // twenty installed hooks on client functions - W1 to W16 among them -
+    // that have never shown a single number in a field log. Some of those
+    // hooks do work and some are passthroughs that only count, and without
+    // these lines there is no way to tell which is which.
+    STAT_TIME("WowOptHooks::DumpStats", WowOptHooks::DumpStats());
+    STAT_TIME("WowExtendedHooks::DumpStats", WowExtendedHooks::DumpStats());
+    STAT_TIME("HotPatch::DumpStats", HotPatch::DumpStats());
     STAT_TIME("LuaThisCache_LogStats", LuaThisCache_LogStats());
     STAT_TIME("LuaAllocCensus::LogStats", LuaAllocCensus::LogStats());
 
