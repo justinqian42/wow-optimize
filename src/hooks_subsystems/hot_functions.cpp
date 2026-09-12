@@ -60,8 +60,13 @@ static bool g_abSubject = false;
 static void* __cdecl Hooked_memsetBody(void* dest, int Val, size_t Size) {
     if (!dest || Size == 0) return dest;
 
+    // Sampled off the counter this function already keeps. A field session runs
+    // this 1139961470 times and every one of them was paying a cross-module call
+    // into CrashDumper::FeatureHit - a call, a bounds test and a store into a
+    // shared static array - to record something a sample answers just as well.
+    // The token carries the stride, so the report multiplies it back.
     g_memset_calls++;
-    CrashDumper::FeatureHit(g_featureToken);
+    if ((g_memset_calls & 8191u) == 0u) CrashDumper::FeatureHit(g_featureToken);
 
     unsigned char* p = (unsigned char*)dest;
     unsigned char  v = (unsigned char)Val;
@@ -139,7 +144,7 @@ bool InstallHotFunctionOptimizations() {
         return false;
     }
     
-    g_featureToken = CrashDumper::FeatureTokenForCounting("HotFunctions");
+    g_featureToken = CrashDumper::FeatureTokenForCounting("HotFunctions", 8192);
     SamplingProfiler::RegisterSelfSymbol("memset_SSE2", (const void*)&Hooked_memset);
     g_abSubject = AbTest::IsSubject("FastMemsetOpt", &g_abSubject);
     if (g_abSubject) {

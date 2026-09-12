@@ -26,6 +26,23 @@ static int g_featureToken = -1;
 typedef int (__cdecl *strcmp_t)(const char*, const char*);
 static strcmp_t g_orig_strcmp = nullptr;
 
+// Calls, kept only to sample the feature counter off.
+//
+// A field session runs this 1658683076 times - the largest count of anything in
+// the feature report - and it used to take a cross-module call into
+// CrashDumper::FeatureHit on every one of them, which is a call, a bounds test
+// and a store into a shared static array. That is a real fraction of the work a
+// short string comparison does, and it is the mistake this project has already
+// found twice: once in the SSE2 matrix-vector hook and once in the DBC row
+// cache, which both now sample instead.
+//
+// One in 8192 still leaves two hundred thousand samples in a session, and the
+// counter token carries that stride so the report multiplies it back and says
+// so. Plain and unsynchronised on purpose: two threads racing here cost a lost
+// sample out of two hundred thousand, which is nothing next to a lock on this
+// path.
+static unsigned long g_strnicmpCalls = 0;
+
 static inline unsigned char to_lower_ascii(unsigned char c) {
     if (c >= 'A' && c <= 'Z') {
         return c | 0x20;
@@ -49,7 +66,7 @@ int __stdcall Hooked_strnicmp(const char* s1, const char* s2, size_t n) {
     if (!s2) return 1;
     if (n == 0) return 0;
     if (s1 == s2) return 0;
-    CrashDumper::FeatureHit(g_featureToken);
+    if ((++g_strnicmpCalls & 8191u) == 0u) CrashDumper::FeatureHit(g_featureToken);
 
     const unsigned char* p1 = (const unsigned char*)s1;
     const unsigned char* p2 = (const unsigned char*)s2;
@@ -123,7 +140,7 @@ bool InstallFastStrncmp() {
         return false;
     }
 
-    g_featureToken = CrashDumper::FeatureTokenForCounting("FastStrncmp");
+    g_featureToken = CrashDumper::FeatureTokenForCounting("FastStrncmp", 8192);
     SamplingProfiler::RegisterSelfSymbol("strnicmp_fast", (const void*)&Hooked_strnicmp);
     Log("[FastStrnicmp] Installed: _strnicmp replacement (1013 callers)");
     return true;
