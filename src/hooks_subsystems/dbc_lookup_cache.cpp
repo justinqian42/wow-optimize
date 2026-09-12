@@ -65,10 +65,24 @@ extern "C" void Log(const char* fmt, ...);
 // The two field sessions miss at 16.8% and 37.3%, which lands between the first
 // and third rows. The model and the logs agree without either being fitted to
 // the other.
-static constexpr int CACHE_SETS = 4096;
-static constexpr int CACHE_WAYS = 4;
-static constexpr int CACHE_SIZE = CACHE_SETS * CACHE_WAYS;
-static constexpr int CACHE_SET_MASK = CACHE_SETS - 1;
+// The set count is decided at install time, not here, because 11.4 MB is only
+// affordable in one half of the address space.
+//
+// MEM_TOP_DOWN is a hint and nothing more. A field session has the low 2GB at
+// 1576 MB of private memory plus 137 MB mapped and 226 MB of images - about 95%
+// full, with 85 MB of it one NVIDIA module - and that is the half whose
+// exhaustion garbles SavedVariables names. Growing this table from 2.85 MB to
+// 11.4 MB is worth it above 2GB and is a straight regression below it, so the
+// install checks where the allocation actually landed and falls back to the old
+// footprint at the full geometry's associativity rather than taking four times
+// the space from the half that cannot spare it.
+static constexpr int CACHE_WAYS      = 4;
+static constexpr int CACHE_SETS_HIGH = 4096;   // 16384 entries, 11.4 MB
+static constexpr int CACHE_SETS_LOW  = 1024;   // 4096 entries, 2.85 MB - what it
+                                               // used to cost, now 4-way
+static int CACHE_SETS     = CACHE_SETS_HIGH;
+static int CACHE_SIZE     = CACHE_SETS_HIGH * CACHE_WAYS;
+static int CACHE_SET_MASK = CACHE_SETS_HIGH - 1;
 
 // Which set a record belongs to. Knuth's multiplicative constant, taking the
 // high bits, so ids that differ by a multiple of the set count land apart -
@@ -77,7 +91,7 @@ static inline uint32_t DbcSetOf(uintptr_t storeKey, int recordId) {
     uint32_t h = (uint32_t)recordId * 2654435761u;
     h ^= (uint32_t)(storeKey >> 4) * 2246822519u;
     h ^= h >> 15;
-    return (h >> 8) & CACHE_SET_MASK;
+    return (h >> 8) & (uint32_t)CACHE_SET_MASK;
 }
 
 struct DbcRowEntry {
@@ -322,9 +336,28 @@ bool InstallDbcLookupCache()
         // a field session reports at a 5 MB largest free block. Nothing about
         // the table changes, only where it lands. The size matters more now
         // than it did at 2.7 MB, and so does the flag.
+        // Ask for the large geometry first, and keep it only if it landed in
+        // the half that can afford it.
         g_cache = (DbcRowEntry*)VirtualAlloc(nullptr, sizeof(DbcRowEntry) * CACHE_SIZE,
                                              MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
                                              PAGE_READWRITE);
+        if (g_cache && (uintptr_t)g_cache < 0x80000000u) {
+            VirtualFree(g_cache, 0, MEM_RELEASE);
+            g_cache = nullptr;
+            CACHE_SETS     = CACHE_SETS_LOW;
+            CACHE_SIZE     = CACHE_SETS_LOW * CACHE_WAYS;
+            CACHE_SET_MASK = CACHE_SETS_LOW - 1;
+            Log("[DbcLookupCache] the large table landed below 2GB, so it was "
+                "given back and this is the %d-entry one instead. The low half "
+                "is the half the client allocates from and a field session has "
+                "it about 95%% full; four times the footprint is worth having "
+                "above 2GB and is a regression below it. The index and the four "
+                "ways are unchanged, so this is still better than the table "
+                "this replaced - only smaller.", CACHE_SIZE);
+            g_cache = (DbcRowEntry*)VirtualAlloc(nullptr, sizeof(DbcRowEntry) * CACHE_SIZE,
+                                                 MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
+                                                 PAGE_READWRITE);
+        }
         if (!g_cache) {
             Log("[DbcLookupCache] Could not commit %zu KB for the row cache - disabled",
                 (sizeof(DbcRowEntry) * CACHE_SIZE) / 1024);
@@ -390,11 +423,12 @@ bool InstallDbcLookupCache()
     g_featureToken = CrashDumper::FeatureTokenForCounting("DbcLookupCache", 1024);
     SamplingProfiler::RegisterSelfSymbol("dbc_lookup_cache", (const void*)&Hooked_DbcGetRow);
     Log("[DbcLookupCache] Installed at 0x4CFD20: %d sets of %d ways, %d entries, "
-        "%zu KB committed above 2GB. The previous table was %d entries indexed by "
-        "the record number alone, which collided hard enough to cost a third of "
-        "the lookups in one field session.",
+        "%zu KB at 0x%08X (%s 2GB). The previous table was 4096 entries indexed "
+        "by the record number alone, which collided hard enough to cost a third "
+        "of the lookups in one field session.",
         CACHE_SETS, CACHE_WAYS, CACHE_SIZE,
-        (sizeof(DbcRowEntry) * CACHE_SIZE) / 1024, 4096);
+        (sizeof(DbcRowEntry) * CACHE_SIZE) / 1024, (unsigned)(uintptr_t)g_cache,
+        (uintptr_t)g_cache >= 0x80000000u ? "above" : "BELOW");
     return true;
 }
 
