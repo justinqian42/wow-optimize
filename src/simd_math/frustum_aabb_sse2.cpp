@@ -300,12 +300,27 @@ inline int Evaluate(void* frustum, void* aabb) {
 
 }  // namespace
 
-int __fastcall Hooked_IsVisibleBody(void* frustum, void* edx, void* aabb) {
-    BumpCalls();
-    if (g_dead || !frustum || !aabb) return orig_IsVisible(frustum, edx, aabb);
-
-
-    if (!g_armed || (g_calls & kResampleMask) == 0) {
+// The checked path, kept out of line so the hook itself carries no exception
+// frame.
+//
+// A __try region costs a prologue on every call into the function that contains
+// one, whether or not that call goes anywhere near it. This hook runs 3370465441
+// times in a field session and the branch below is taken 20000 times and then
+// one call in 4096 - so almost all of those three billion prologues were pushed
+// for a region the call never entered.
+//
+// The guard moves in here with the work it guards. What is left in the caller is
+// the armed path, which now runs Evaluate with no frame at all.
+//
+// That is safe for the same reason it is in the matrix hooks. Evaluate reads the
+// frustum's six planes and the box's two corners; when the guard fired, control
+// went to orig_IsVisible with the same two pointers, and the client's routine
+// reads the same planes and the same box. It cannot succeed where ours faulted.
+// And unlike the matrix hooks this needs no new proving phase - arming already
+// means 20000 evaluations ran under the guard and none of them faulted, and the
+// resample keeps one call in 4096 running under it for the rest of the session.
+__declspec(noinline)
+static int VerifyAgainstClient(void* frustum, void* edx, void* aabb) {
         // The verification already runs both halves on the same input. Timing
         // it is the only paired comparison this project gets without asking a
         // tester to configure anything.
@@ -339,15 +354,19 @@ int __fastcall Hooked_IsVisibleBody(void* frustum, void* edx, void* aabb) {
         }
         if (theirs) BumpVisible();
         return theirs;
-    }
+}
 
-    __try {
-        int r = Evaluate(frustum, aabb);
-        if (r) BumpVisible();
-        return r;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return orig_IsVisible(frustum, edx, aabb);
-    }
+int __fastcall Hooked_IsVisibleBody(void* frustum, void* edx, void* aabb) {
+    BumpCalls();
+    if (g_dead || !frustum || !aabb) return orig_IsVisible(frustum, edx, aabb);
+
+    if (!g_armed || (g_calls & kResampleMask) == 0)
+        return VerifyAgainstClient(frustum, edx, aabb);
+
+    // No exception frame on this path. See the note above VerifyAgainstClient.
+    const int r = Evaluate(frustum, aabb);
+    if (r) BumpVisible();
+    return r;
 }
 
 // The detour proper, kept apart from the body above for one reason: the
