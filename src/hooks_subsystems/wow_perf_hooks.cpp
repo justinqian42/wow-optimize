@@ -569,21 +569,21 @@ namespace WowPerfHooks {
     }
 
     void DumpStats() {
-        // Several entries below are commented out of the install table above,
-        // so their counters can only ever read 0/0. A zero here means "not
-        // hooked" and not "hooked and idle"; the ACTIVE lines at startup say
-        // which ones were installed.
+        // Seven lines for seven installed hooks.
+        //
+        // This printed nineteen counter pairs, twelve of which belong to
+        // entries commented out of the install table and can only ever read
+        // 0/0. That was harmless while this function ran only from ShutdownAll,
+        // which the DLL never reaches. It now runs from the periodic report, so
+        // twelve permanent zeroes would be repeated every five minutes for the
+        // length of a session. The reasons those twelve are not installed stay
+        // where they are, beside the table.
         Log("[WowPerf] hits/calls below are plain counters on hooked client "
             "functions and are lower bounds.");
-        Log("[WowPerf] PushStr: %d/%d | FreeWrap: %d/%d | MallocWrap: %d/%d | DsLookup: %d/%d",
-            g_p1Hits, g_p1Calls, g_p2Hits, g_p2Calls, g_p3Fast, g_p3Calls, g_p4Cached, g_p4Calls);
-        Log("[WowPerf] LuaType: %d/%d | ObjDestroy: %d/%d | SoundPlay: %d/%d | MemStorm: %d/%d",
-            g_p5Fast, g_p5Calls, g_p6Prefetched, g_p6Calls, g_p7Skipped, g_p7Calls, g_p8Batched, g_p8Calls);
-        Log("[WowPerf] BlockFree: %d/%d | VirtDisp: %d/%d | DelCS: %d/%d | VolLookup: %d/%d",
-            g_p9Inline, g_p9Calls, g_p10Cached, g_p10Calls, g_p11Fast, g_p11Calls, g_p12Coalesced, g_p12Calls);
-        Log("[WowPerf] ChanAlloc: %d/%d | Stop: %d/%d | Ambient: %d/%d",
-            g_p14Cached, g_p14Calls, g_p15Fast, g_p15Calls, g_p16Deduped, g_p16Calls);
-        Log("[WowPerf] MusicSel: %d/%d | SfxPrio: %d/%d | KitLookup: %d/%d",
-            g_p17Prefetched, g_p17Calls, g_p18Inline, g_p18Calls, g_p19Cached, g_p19Calls);
+        Log("[WowPerf] PushStr: %d/%d | LuaType: %d/%d | MemStorm: %d/%d",
+            g_p1Hits, g_p1Calls, g_p5Fast, g_p5Calls, g_p8Batched, g_p8Calls);
+        Log("[WowPerf] BlockFree: %d/%d | VirtDisp: %d/%d | DelCS: %d/%d | ChanAlloc: %d/%d",
+            g_p9Inline, g_p9Calls, g_p10Cached, g_p10Calls,
+            g_p11Fast, g_p11Calls, g_p14Cached, g_p14Calls);
     }
 }
