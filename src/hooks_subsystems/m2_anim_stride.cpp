@@ -106,6 +106,24 @@ constexpr uintptr_t kTailAddr    = 0x0082F420;   // the jbe, for the signature
 constexpr uintptr_t kRunAddr     = 0x0082F41D;   // mov [ebp+arg_10],edi ; jbe
 constexpr uintptr_t kHoldAddr    = 0x008302A3;   // where the client's own jbe goes
 
+// The x87 TOP field on entry to the decision, and how often it came back
+// different.
+//
+// This module shares its five bytes and its destination with m2_anim_reuse, so
+// it shares the trap. Three instructions before the cut the client runs
+// `fst [ebp+var_98]` - fst, not fstp - leaving one value live on the x87 stack,
+// and the tail at 0x008302B4 pops it with `fstp st`. Jumping there with an empty
+// stack is a masked underflow: no fault, an indefinite value written, the tag
+// word left wrong, and every float in the rest of the frame quietly wrong.
+//
+// Nothing between the cut and the jump may touch the x87 stack. Nothing does
+// today - the built object contains zero x87 instructions - but that holds only
+// until a float appears somewhere in the decision, which the compiler will
+// answer with the x87 stack and no warning. So the thunk checks instead of
+// trusting, and a decision that moved the stack refuses to hold.
+unsigned short g_topBefore = 0;
+unsigned long  g_fpuMoved  = 0;
+
 // Read by the naked thunk, so plain addresses rather than a struct.
 void* g_retRun  = (void*)kRunAddr;
 void* g_retHold = (void*)kHoldAddr;
@@ -207,9 +225,25 @@ namespace {
 __declspec(naked) void Thunk() {
     __asm {
         pushad
+        // TOP, bits 11..13 of the status word. Inside pushad, so ax is free.
+        fnstsw ax
+        and  ax, 3800h
+        mov  word ptr [g_topBefore], ax
+
         push esi
         call M2AnimStride_Decide
         add  esp, 4
+
+        // If the decision moved the x87 stack, the tail's fstp would pop the
+        // wrong thing. Refuse to hold rather than hand back a frame of
+        // indefinite floats.
+        fnstsw ax
+        and  ax, 3800h
+        cmp  ax, word ptr [g_topBefore]
+        je   top_unchanged
+        mov  byte ptr [g_m2StrideHold], 0
+        inc  dword ptr [g_fpuMoved]
+    top_unchanged:
         popad
 
         cmp  byte ptr [g_m2StrideHold], 0
@@ -328,6 +362,13 @@ void LogStats() {
         "yards and never eligible, %lu had no readable world position.",
         g_held, g_calls, 100.0 * (double)g_held / (double)g_calls,
         g_nearKept, kNearYd, g_noPos);
+    // Printed whether or not it fired, because zero is the answer that says the
+    // decision path is still free of x87 and the hold is safe to take.
+    Log("[M2Stride]   the x87 stack depth was unchanged across the decision on "
+        "every call but %lu. The tail pops a value the client left on the stack, "
+        "so a non-zero figure here means something in the decision now uses the "
+        "FPU and those calls refused to hold rather than corrupt the frame.",
+        g_fpuMoved);
     Log("[M2Stride]   held by band: %lu at %.0f-%.0f yd (1 frame in %u), %lu at "
         "%.0f-%.0f (1 in %u), %lu past %.0f (1 in %u).",
         g_bandHeld[0], kNearYd, kMidYd, kStrideMid,
