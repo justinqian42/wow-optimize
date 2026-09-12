@@ -626,6 +626,27 @@ void LogStats() {
         return;
     }
 
+    // The frame clock, printed before anything that depends on it.
+    //
+    // A repeat here is defined as the same tuple in a LATER frame, so every
+    // number below is multiplied by whether g_frames advances. When this module
+    // was on MainThreadPump's clock it reported 2 repeats in 454627333 calls
+    // against the census's 91.6% on the same workload, and nothing in the report
+    // could tell "these arguments never repeat" from "the clock that decides
+    // what a repeat is never moved". Six field sessions read the first when the
+    // truth was the second.
+    if (g_frames == 0) {
+        Log("[Wrong] [M2AnimReuse] the bone loop ran %lu time(s) and the frame "
+            "counter is still zero. A repeat is defined as a later frame, so "
+            "nothing below can ever be non-zero. OnFrame is not being called.",
+            g_calls);
+    } else {
+        Log("[M2AnimReuse] %lu frame(s) seen, %.1f call(s) per frame. A repeat "
+            "below means a later frame, so this is the clock the rest of these "
+            "numbers are measured against.",
+            g_frames, (double)g_calls / (double)g_frames);
+    }
+
     const double heldBones =
         (double)g_heldBones + (double)g_heldBoneWraps * 4294967296.0;
 

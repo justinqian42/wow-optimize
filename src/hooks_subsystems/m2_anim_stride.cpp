@@ -153,6 +153,12 @@ unsigned long g_frame = 0;
 float g_camera[3] = {};
 bool  g_cameraOk = false;
 unsigned long g_cameraFrames = 0;
+// Every frame boundary, whether or not the camera was readable on it. Without
+// this, a clock that never ticks and a camera that never reads produce the same
+// report line - "the camera was readable for only 0 frames" - and the first of
+// those two is not the camera's fault. The sibling module spent six field
+// sessions being read the wrong way for exactly this reason.
+unsigned long g_frames       = 0;
 
 // Plain, main thread only. Lower bounds if that ever stops being true.
 unsigned long g_calls = 0;
@@ -331,6 +337,7 @@ void OnPresent() {
 
 void OnFrame() {
     if (!g_patched) return;
+    ++g_frames;
     float c[3];
     if (WowWorld::StreamCentre(c)) {
         g_camera[0] = c[0];
@@ -358,6 +365,18 @@ void LogStats() {
             "reached.");
         return;
     }
+    // The frame clock, printed before anything that depends on it. The sibling
+    // module reported 2 repeats in 454 million calls purely because this counter
+    // was being advanced by something that is not a frame, and no line in its
+    // report could say so.
+    if (g_frames == 0) {
+        Log("[Wrong] [M2Stride] the bone loop ran %lu time(s) and the frame "
+            "counter is still zero. The stride bands are counted in frames, so "
+            "nothing below can be right. OnFrame is not being called.", g_calls);
+    } else {
+        Log("[M2Stride] %lu frame(s) seen, %.1f call(s) per frame.",
+            g_frames, (double)g_calls / (double)g_frames);
+    }
     Log("[M2Stride] %lu of %lu bone loops held (%.1f%%). %lu were inside %.0f "
         "yards and never eligible, %lu had no readable world position.",
         g_held, g_calls, 100.0 * (double)g_held / (double)g_calls,
@@ -374,6 +393,11 @@ void LogStats() {
         g_bandHeld[0], kNearYd, kMidYd, kStrideMid,
         g_bandHeld[1], kMidYd, kFarYd, kStrideFar,
         g_bandHeld[2], kFarYd, kStrideVeryFar);
+    if (g_frames > 0 && g_cameraFrames == 0) {
+        Log("[M2Stride]   the frame boundary was reached %lu time(s) and the "
+            "camera was readable on none of them, so no distance was ever "
+            "available. That is the camera, not the clock.", g_frames);
+    }
     if (g_cameraFrames < kWarmupFrames) {
         Log("[M2Stride]   the camera was readable for only %lu frames, under the "
             "%u this waits for, so most of the session held nothing whatever the "
