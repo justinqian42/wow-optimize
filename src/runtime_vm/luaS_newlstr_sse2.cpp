@@ -20,10 +20,29 @@ static constexpr uintptr_t ADDR_luaS_newlstr = 0x00856C80;
 
 typedef void* (__cdecl *luaS_newlstr_t)(void* L, const char* str, size_t l);
 static luaS_newlstr_t orig_luaS_newlstr = nullptr;
+static bool g_installed = false;
 
-static uint32_t g_newlstr_calls = 0;
-static uint32_t g_newlstr_fast_hits = 0;
+// Plain 32-bit with a wrap counter beside each.
+//
+// These were bare uint32_t, and this hook sits on luaS_newlstr - every string
+// the client interns, which is every push, every concatenation and every table
+// key. Nothing in the project knows how often that is, because of the second
+// problem below, but four billion is not a safe assumption to make about it. A
+// wrapped numerator over an unwrapped denominator is how frustum_aabb came to
+// print a hit rate of 73322%.
+static uint32_t g_newlstr_calls = 0,     g_newlstr_callWraps = 0;
+static uint32_t g_newlstr_fast_hits = 0, g_newlstr_hitWraps = 0;
 static uint32_t g_newlstr_dead = 0;
+
+static inline void BumpWrap(uint32_t& low, uint32_t& wraps) {
+    const uint32_t before = low;
+    low = before + 1;
+    if (low < before) ++wraps;
+}
+
+static inline double TotalOf(uint32_t low, uint32_t wraps) {
+    return (double)low + (double)wraps * 4294967296.0;
+}
 
 static inline bool CompareStringInline(const char* s1, const char* s2, size_t len) {
     if (len == 0) return true;
@@ -41,7 +60,7 @@ static inline bool CompareStringInline(const char* s1, const char* s2, size_t le
 }
 
 void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
-    g_newlstr_calls++;
+    BumpWrap(g_newlstr_calls, g_newlstr_callWraps);
     
     // Bounds check string length and validate pointer
     if (l >= (1 << 30) || !str || (uintptr_t)str < 0x10000 || (uintptr_t)str >= 0xFFE00000) {
@@ -100,7 +119,7 @@ void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
                         g_newlstr_dead++;
                         *(uint8_t*)(tstring + 9) = (uint8_t)(marked ^ 3);
                     }
-                    g_newlstr_fast_hits++;
+                    BumpWrap(g_newlstr_fast_hits, g_newlstr_hitWraps);
                     return (void*)tstring;
                 }
             }
@@ -134,19 +153,43 @@ namespace LuaSNewlstr {
             return false;
         }
         
+        g_installed = true;
         Log("[luaS_newlstr] ACTIVE (Hooked at 0x%08X)", ADDR_luaS_newlstr);
         return true;
+    }
+
+    // Printed from the periodic report, not from Shutdown.
+    //
+    // Everything this module measures used to be printed from Shutdown() alone,
+    // and the DLL leaves through TerminateProcess, so it has never once reported
+    // in a field session. The project writes that rule down and this module was
+    // breaking it: the reason nothing here knows how often luaS_newlstr is
+    // called is that nothing was ever told.
+    //
+    // That matters beyond bookkeeping. The fast path here is wrapped in SEH, and
+    // whether taking that off is worth the risk is a question about call volume
+    // that could not be asked.
+    void LogStats() {
+        if (!g_installed) {
+            Log("[luaS_newlstr] not measured: the hook is not installed.");
+            return;
+        }
+        const double calls = TotalOf(g_newlstr_calls, g_newlstr_callWraps);
+        const double hits  = TotalOf(g_newlstr_fast_hits, g_newlstr_hitWraps);
+        if (calls == 0.0) {
+            Log("[luaS_newlstr] measured and zero: installed, and no string was "
+                "interned through it.");
+            return;
+        }
+        Log("[luaS_newlstr] %.0f call(s), %.0f answered from the string table "
+            "inline (%.1f%%), %u string(s) resurrected that the collector had "
+            "marked dead. Counts are lower bounds.",
+            calls, hits, 100.0 * hits / calls, g_newlstr_dead);
     }
 
     void Shutdown() {
         if (orig_luaS_newlstr) {
             MH_DisableHook((void*)ADDR_luaS_newlstr);
-        }
-        if (g_newlstr_calls > 0) {
-            Log("[luaS_newlstr] Stats: Calls %u, Fast Hits %u (%.1f%%), "
-                "resurrected %u string(s) the collector had marked dead", 
-                g_newlstr_calls, g_newlstr_fast_hits, 
-                100.0 * g_newlstr_fast_hits / g_newlstr_calls, g_newlstr_dead);
         }
     }
 }

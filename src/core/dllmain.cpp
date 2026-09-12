@@ -5582,6 +5582,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaGetTableSafety_LogStats", LuaGetTableSafety_LogStats());
     STAT_TIME("LuaNewKeySafety_LogStats", LuaNewKeySafety_LogStats());
     STAT_TIME("LuaGetStrInline_LogStats", LuaGetStrInline_LogStats());
+    STAT_TIME("LuaSNewlstr::LogStats", LuaSNewlstr::LogStats());
     STAT_TIME("LuaRawGetInline_LogStats", LuaRawGetInline_LogStats());
     STAT_TIME("LuaRawGetIInline_LogStats", LuaRawGetIInline_LogStats());
     STAT_TIME("LuaTobooleanInline_LogStats", LuaTobooleanInline_LogStats());
