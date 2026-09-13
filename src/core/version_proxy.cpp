@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Module: version_proxy.cpp
 // Description: Proxy wrapper for standard version.dll exports. Intercepts game boot calls and schedules the initialization thread after process setup.
 // Safety & Threading: Loader lock safe. Export ordinals must match native dll to boot.
@@ -9,6 +9,7 @@
 #endif
 #include <windows.h>
 #include <cstdio>
+#include <cstdlib>
 
 // ================================================================
 // Real version.dll function pointers
@@ -78,6 +79,76 @@ static bool LoadRealVersionDll() {
 
     return true;
 }
+
+// ================================================================
+// Proxy log
+// ================================================================
+// This was fopen on a relative path, which resolves against the process working
+// directory. A shortcut with a different "Start in", or anything that starts the
+// game from another folder, put the one record of whether the payload loaded
+// where nobody looks, and what comes back is "no logs appeared". The path is now
+// built from this DLL's own location, which is the folder the game loaded it
+// from.
+//
+// Raw Win32 rather than the CRT, so the attach line can be written from inside
+// DllMain while the loader lock is held.
+static void ProxyLogPath(HMODULE hSelf, char* out, size_t cap) {
+    out[0] = '\0';
+
+    char dir[MAX_PATH];
+    DWORD n = GetModuleFileNameA(hSelf, dir, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+
+    char* lastSlash = strrchr(dir, '\\');
+    if (!lastSlash) return;
+    *(lastSlash + 1) = '\0';
+
+    const size_t tail = sizeof("Logs\\wow_optimize_proxy.log");
+    size_t base = strlen(dir);
+    if (base + tail > cap || base + tail > MAX_PATH) return;
+
+    strcat_s(dir, MAX_PATH, "Logs");
+    CreateDirectoryA(dir, NULL);
+
+    strcpy_s(out, cap, dir);
+    strcat_s(out, cap, "\\wow_optimize_proxy.log");
+}
+
+static void ProxyLog(HMODULE hSelf, const char* text, bool startFresh) {
+    char logPath[MAX_PATH];
+    ProxyLogPath(hSelf, logPath, MAX_PATH);
+    if (logPath[0] == '\0') return;
+
+    HANDLE h = CreateFileA(logPath, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           NULL, startFresh ? CREATE_ALWAYS : OPEN_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+
+    DWORD written = 0;
+    WriteFile(h, text, (DWORD)strlen(text), &written, NULL);
+    CloseHandle(h);
+}
+
+// Written before anything in this DLL can fail, so a folder our proxy never
+// reached and a proxy that ran and could not load the payload stop looking the
+// same from outside.
+static void ProxyLogAttach(HMODULE hSelf) {
+    char host[MAX_PATH];
+    if (GetModuleFileNameA(NULL, host, MAX_PATH) == 0) strcpy_s(host, MAX_PATH, "<unknown>");
+
+    char self[MAX_PATH];
+    if (GetModuleFileNameA(hSelf, self, MAX_PATH) == 0) strcpy_s(self, MAX_PATH, "<unknown>");
+
+    char line[MAX_PATH * 2 + 64];
+    strcpy_s(line, sizeof(line), "ATTACH: proxy loaded into ");
+    strcat_s(line, sizeof(line), host);
+    strcat_s(line, sizeof(line), "\r\nProxy file: ");
+    strcat_s(line, sizeof(line), self);
+    strcat_s(line, sizeof(line), "\r\n");
+
+    ProxyLog(hSelf, line, true);
+}
+
 
 // ================================================================
 // Forwarded exports
@@ -186,28 +257,36 @@ static DWORD WINAPI LoaderThread(LPVOID param) {
 
     DWORD attrib = GetFileAttributesA(dllPath);
     if (attrib == INVALID_FILE_ATTRIBUTES) {
-        CreateDirectoryA("Logs", NULL);
-        FILE* f = fopen("Logs\\wow_optimize_proxy.log", "w");
-        if (f) {
-            fprintf(f, "ERROR: wow_optimize.dll not found at: %s\n", dllPath);
-            fprintf(f, "Place wow_optimize.dll in the same folder as Wow.exe\n");
-            fclose(f);
-        }
+        char msg[MAX_PATH + 128];
+        strcpy_s(msg, sizeof(msg), "ERROR: wow_optimize.dll not found at: ");
+        strcat_s(msg, sizeof(msg), dllPath);
+        strcat_s(msg, sizeof(msg), "\r\nPlace wow_optimize.dll in the same folder as Wow.exe\r\n");
+        ProxyLog(hSelf, msg, false);
         return 1;
     }
 
     HMODULE hOptDll = LoadLibraryA(dllPath);
 
-    CreateDirectoryA("Logs", NULL);
-    FILE* f = fopen("Logs\\wow_optimize_proxy.log", "w");
-    if (f) {
-        if (hOptDll)
-            fprintf(f, "OK: wow_optimize.dll loaded from: %s\n", dllPath);
-        else
-            fprintf(f, "ERROR: Failed to load wow_optimize.dll (error %lu)\nPath: %s\n",
-                    GetLastError(), dllPath);
-        fclose(f);
+    // Read here and not at the point of printing. The old code called
+    // GetLastError after CreateDirectoryA and fopen had both run, so the number
+    // in the log was whatever those left behind.
+    DWORD loadErr = hOptDll ? 0 : GetLastError();
+
+    char msg[MAX_PATH + 128];
+    if (hOptDll) {
+        strcpy_s(msg, sizeof(msg), "OK: wow_optimize.dll loaded from: ");
+        strcat_s(msg, sizeof(msg), dllPath);
+        strcat_s(msg, sizeof(msg), "\r\n");
+    } else {
+        char code[16];
+        _ultoa_s(loadErr, code, sizeof(code), 10);
+        strcpy_s(msg, sizeof(msg), "ERROR: Failed to load wow_optimize.dll (error ");
+        strcat_s(msg, sizeof(msg), code);
+        strcat_s(msg, sizeof(msg), ")\r\nPath: ");
+        strcat_s(msg, sizeof(msg), dllPath);
+        strcat_s(msg, sizeof(msg), "\r\n");
     }
+    ProxyLog(hSelf, msg, false);
 
     return hOptDll ? 0 : 1;
 }
@@ -219,7 +298,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
     switch (reason) {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hModule);
-            if (!LoadRealVersionDll()) return FALSE;
+            if (!HostIsOneOfOurs()) ProxyLogAttach(hModule);
+            if (!LoadRealVersionDll()) {
+                if (!HostIsOneOfOurs())
+                    ProxyLog(hModule, "ERROR: the system version.dll could not be loaded\r\n", false);
+                return FALSE;
+            }
             CloseHandle(CreateThread(NULL, 0, LoaderThread, (LPVOID)hModule, 0, NULL));
             break;
 
