@@ -5,7 +5,6 @@
 // ============================================================================
 
 #include "addon_dispatcher.h"
-#include "hot_patch.h"
 #include "MinHook.h"
 #include "lua_optimize.h"
 #include <cstdio>

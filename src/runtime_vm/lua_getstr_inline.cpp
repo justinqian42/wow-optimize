@@ -14,7 +14,6 @@
 #include <emmintrin.h>
 #include "MinHook.h"
 #include "lua_getstr_inline.h"
-#include "hot_patch.h"
 #include "lua_optimize.h"
 #include "crash_dumper.h"
 #include "version.h"
