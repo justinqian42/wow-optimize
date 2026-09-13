@@ -12,6 +12,41 @@ extern "C" void Log(const char* fmt, ...);
 
 namespace DXVKBridge {
 
+// The three version-info entry points, resolved from the system copy.
+//
+// See the note at the call site: importing these normally would make this DLL
+// depend on the version.dll we ourselves place beside the client, and a
+// mismatched pair then fails to load with nothing in any log.
+struct VersionApi {
+    DWORD (WINAPI* getSize)(LPCSTR, LPDWORD);
+    BOOL  (WINAPI* get)(LPCSTR, DWORD, DWORD, LPVOID);
+    BOOL  (WINAPI* query)(LPCVOID, LPCSTR, LPVOID*, PUINT);
+    bool  tried;
+    bool  ok;
+};
+
+static bool ResolveVersionApi(VersionApi& api) {
+    if (api.tried) return api.ok;
+    api.tried = true;
+
+    char sys[MAX_PATH];
+    UINT n = GetSystemDirectoryA(sys, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH - 16) return false;
+    lstrcatA(sys, "\version.dll");
+
+    HMODULE v = LoadLibraryA(sys);
+    if (!v) return false;
+
+    api.getSize = (DWORD (WINAPI*)(LPCSTR, LPDWORD))
+                  GetProcAddress(v, "GetFileVersionInfoSizeA");
+    api.get     = (BOOL (WINAPI*)(LPCSTR, DWORD, DWORD, LPVOID))
+                  GetProcAddress(v, "GetFileVersionInfoA");
+    api.query   = (BOOL (WINAPI*)(LPCVOID, LPCSTR, LPVOID*, PUINT))
+                  GetProcAddress(v, "VerQueryValueA");
+    api.ok = (api.getSize && api.get && api.query);
+    return api.ok;
+}
+
 static volatile LONG g_active = 0;
 static const char*   g_reason = "not detected";
 
@@ -60,14 +95,37 @@ static const char* CheckD3D9Metadata() {
     HMODULE h = GetModuleHandleA("d3d9.dll");
     if (!h) { g_metaWhyNot = "d3d9.dll is not loaded yet"; return nullptr; }
 
+
     char path[MAX_PATH];
     if (!GetModuleFileNameA(h, path, sizeof(path))) {
         g_metaWhyNot = "d3d9.dll is loaded but its path could not be read";
         return nullptr;
     }
 
+    // The version-info functions are resolved by hand, from the copy in the
+    // system directory, and this is the whole reason this file exists in the
+    // shape it does.
+    //
+    // Calling them directly puts version.dll in this DLL's import table, and
+    // version.dll is the file we replace beside the client. The loader then has
+    // to satisfy wow_optimize.dll's imports out of our own proxy, so the DLL
+    // loads only when the proxy exports exactly what it asks for. A player who
+    // updates wow_optimize.dll and keeps an older version.dll gets a silent
+    // load failure: no log file, no Lua globals, nothing to look at. That has
+    // been reported.
+    //
+    // Loading the system copy by full path rather than by name is deliberate as
+    // well. A bare LoadLibraryA("version.dll") finds the proxy in the game
+    // folder, or the already-loaded proxy, which is the dependency this is
+    // removing.
+    static VersionApi api;
+    if (!ResolveVersionApi(api)) {
+        g_metaWhyNot = "the system version.dll could not be loaded";
+        return nullptr;
+    }
+
     DWORD dummy = 0;
-    DWORD size = GetFileVersionInfoSizeA(path, &dummy);
+    DWORD size = api.getSize(path, &dummy);
     if (size == 0) {
         g_metaWhyNot = "d3d9.dll carries no version resource, or the version.dll "
                        "beside the client did not forward to the system one";
@@ -85,7 +143,7 @@ static const char* CheckD3D9Metadata() {
     }
 
     const char* result = nullptr;
-    if (GetFileVersionInfoA(path, 0, size, buf)) {
+    if (api.get(path, 0, size, buf)) {
         const char* subBlocks[] = {
             "\\StringFileInfo\\040904E4\\ProductName",
             "\\StringFileInfo\\040904B0\\ProductName",
@@ -95,7 +153,7 @@ static const char* CheckD3D9Metadata() {
         for (int i = 0; subBlocks[i]; i++) {
             void* val = nullptr;
             UINT vlen = 0;
-            if (VerQueryValueA(buf, subBlocks[i], &val, &vlen) && val && vlen > 0) {
+            if (api.query(buf, subBlocks[i], &val, &vlen) && val && vlen > 0) {
                 const char* s = (const char*)val;
                 for (UINT j = 0; j + 4 <= vlen; j++) {
                     char a = s[j], b = s[j+1], c = s[j+2], d = s[j+3];
