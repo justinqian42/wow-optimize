@@ -292,6 +292,24 @@ void LogStats() {
         (unsigned)(commit / (1024 * 1024)),
         (unsigned)(g_handed > (SIZE_T)commit
                    ? (g_handed - (SIZE_T)commit) / (1024 * 1024) : 0));
+    // What running out actually costs, which is not obvious from the line above.
+    //
+    // Past the ceiling mimalloc asks the OS directly, and the size of each of
+    // those asks is mi_option_arena_reserve. mimalloc's own default for a
+    // 32-bit build is 128 MiB (MI_DEFAULT_ARENA_RESERVE in options.c, taken
+    // when MI_INTPTR_SIZE is 4), and nothing here overrides it. Those
+    // reservations are placed bottom-up, so every one of them lands in the half
+    // the client allocates from.
+    //
+    // A field session shows what that does: the allocator wanted 1648 MB
+    // against a 1023 MB ceiling, and the 625 MB difference arrived as a handful
+    // of 128 MB reservations into the low 2GB, which ended that session with a
+    // 13 MB largest free block and the client refusing an 8788240 byte model.
+    Log("[HighArena]   past the ceiling the allocator asks the OS directly, and "
+        "each of those asks is %u MB placed bottom-up - into the half the client "
+        "allocates from. That is the cost of the ceiling being too low, and it "
+        "arrives in whole blocks rather than gradually.",
+        (unsigned)(mi_option_get_size(mi_option_arena_reserve) / (1024 * 1024)));
     if (g_growLow || g_growFailed) {
         Log("[HighArena]   %u later reservation(s) came back below 2GB and were "
             "released, %u failed outright. Both mean the allocator went to the "
