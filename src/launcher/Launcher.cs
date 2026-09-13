@@ -465,6 +465,54 @@ namespace WowOptimizeLauncher {
             return Directory.Exists(wtfDir) ? wtfPath : rootPath;
         }
 
+        // version.dll existing is not the same as version.dll being ours.
+        // ReShade and several other mods install their own proxy under that
+        // exact filename, and whichever one is written last wins. Everything
+        // here used to read the file's presence as the optimizer being active,
+        // so a folder whose version.dll belongs to another mod reported ACTIVE
+        // while nothing ever loaded wow_optimize.dll. The marker is a string
+        // only our proxy carries.
+        private const int ProxyUnknown = -1;
+        private const int ProxyForeign = 0;
+        private const int ProxyOurs = 1;
+        private const string ProxyMarker = "wow_optimize_proxy.log";
+
+        private static int ProxyIdentity(string path) {
+            byte[] data;
+            try {
+                data = File.ReadAllBytes(path);
+            } catch {
+                return ProxyUnknown;
+            }
+            byte[] want = Encoding.ASCII.GetBytes(ProxyMarker);
+            int last = data.Length - want.Length;
+            for (int i = 0; i <= last; i++) {
+                int j = 0;
+                while (j < want.Length && data[i + j] == want[j]) j++;
+                if (j == want.Length) return ProxyOurs;
+            }
+            return ProxyForeign;
+        }
+
+        // Our proxy writes this file on every launch of the game, with OK and
+        // the path it loaded or with the Win32 error that stopped it. Nothing
+        // read it, so a payload that failed to load looked from the outside
+        // exactly like the optimizer being switched off.
+        private static string LastProxyResult(string baseDir) {
+            try {
+                string p = Path.Combine(Path.Combine(baseDir, "Logs"), "wow_optimize_proxy.log");
+                if (!File.Exists(p)) return null;
+                string[] lines = File.ReadAllLines(p);
+                for (int i = 0; i < lines.Length; i++) {
+                    string t = lines[i].Trim();
+                    if (t.Length > 0) return t;
+                }
+            } catch {
+            }
+            return null;
+        }
+
+
         public MainForm() {
             // Setup Paths
             iniPath = ResolveIniPath();
@@ -943,17 +991,24 @@ namespace WowOptimizeLauncher {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             bool haveLoader = File.Exists(Path.Combine(baseDir, "version.dll"));
             bool havePayload = File.Exists(Path.Combine(baseDir, "wow_optimize.dll"));
-            bool dllActive = haveLoader && havePayload;
+            int proxyId = haveLoader
+                ? ProxyIdentity(Path.Combine(baseDir, "version.dll"))
+                : ProxyUnknown;
+            bool foreignLoader = (proxyId == ProxyForeign);
+            bool dllActive = haveLoader && havePayload && !foreignLoader;
             string missing;
-            if (dllActive) missing = "";
+            if (haveLoader && havePayload) missing = "";
             else if (!haveLoader && !havePayload) missing = "version.dll and wow_optimize.dll";
             else if (!haveLoader) missing = "version.dll";
             else missing = "wow_optimize.dll";
 
+            string statusText;
+            if (foreignLoader) statusText = "NOT LOADED - version.dll belongs to another mod";
+            else if (!dllActive) statusText = "NOT LOADED - missing " + missing;
+            else statusText = "OPTIMIZER ACTIVE (version.dll)";
+
             Label statusVal = new Label();
-            statusVal.Text = dllActive
-                ? "OPTIMIZER ACTIVE (version.dll)"
-                : "NOT LOADED - missing " + missing;
+            statusVal.Text = statusText;
             statusVal.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             statusVal.ForeColor = dllActive ? Color.FromArgb(0, 230, 118) : Color.FromArgb(255, 82, 82);
             statusVal.AutoSize = true;
@@ -961,14 +1016,25 @@ namespace WowOptimizeLauncher {
             statusVal.BackColor = Color.Transparent;
             statusCard.Controls.Add(statusVal);
 
-            // Where it looked. Without this the message says a file is missing
-            // and leaves the reader to guess which folder it should be in; both
-            // files belong beside WoW.exe, which is where this launcher should
-            // be run from.
-            if (!dllActive) {
+            // The second line carries whatever the first one cannot act on: the
+            // folder that was searched when a file is missing, the collision
+            // when version.dll is someone else's, and otherwise the result the
+            // proxy recorded on the last launch. Both files being present is
+            // not evidence that the payload loaded.
+            string detail;
+            if (foreignLoader) {
+                detail = "that version.dll has no optimizer loader in it - ReShade and other mods use the same filename";
+            } else if (!dllActive) {
+                detail = "looked in " + baseDir;
+            } else {
+                string lastRun = LastProxyResult(baseDir);
+                detail = (lastRun != null && lastRun.StartsWith("ERROR")) ? "last launch: " + lastRun : null;
+            }
+
+            if (detail != null) {
                 statusCard.Size = new Size(btnWidth, 72);
                 Label statusWhere = new Label();
-                statusWhere.Text = "looked in " + baseDir;
+                statusWhere.Text = detail;
                 statusWhere.Font = new Font("Segoe UI", 7f, FontStyle.Regular);
                 statusWhere.ForeColor = Color.FromArgb(150, 163, 178);
                 statusWhere.AutoSize = false;
@@ -979,7 +1045,7 @@ namespace WowOptimizeLauncher {
             }
 
             leftPanel.Controls.Add(statusCard);
-            y += dllActive ? 62 : 80;
+            y += (detail != null) ? 80 : 62;
 
             activeCountLabel = new Label();
             activeCountLabel.Font = new Font("Segoe UI", 8f, FontStyle.Regular);
