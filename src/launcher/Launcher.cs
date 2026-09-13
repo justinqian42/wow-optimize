@@ -931,17 +931,54 @@ namespace WowOptimizeLauncher {
             statusTitle.BackColor = Color.Transparent;
             statusCard.Controls.Add(statusTitle);
 
-            bool dllActive = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.dll"));
+            // Say which file is missing and where it was looked for.
+            //
+            // This tested version.dll alone and, when it was absent, said
+            // "NOT LOADED / MISSING DLLs". A user who has wow_optimize.dll but
+            // not version.dll, or who runs this from anywhere other than the
+            // folder holding WoW.exe, gets a message naming neither the file nor
+            // the directory and has nothing to act on. That is what "the new one
+            // doesn't detect the .dll" looks like from the other side.
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            bool haveLoader = File.Exists(Path.Combine(baseDir, "version.dll"));
+            bool havePayload = File.Exists(Path.Combine(baseDir, "wow_optimize.dll"));
+            bool dllActive = haveLoader && havePayload;
+            string missing;
+            if (dllActive) missing = "";
+            else if (!haveLoader && !havePayload) missing = "version.dll and wow_optimize.dll";
+            else if (!haveLoader) missing = "version.dll";
+            else missing = "wow_optimize.dll";
+
             Label statusVal = new Label();
-            statusVal.Text = dllActive ? "OPTIMIZER ACTIVE (version.dll)" : "NOT LOADED / MISSING DLLs";
+            statusVal.Text = dllActive
+                ? "OPTIMIZER ACTIVE (version.dll)"
+                : "NOT LOADED - missing " + missing;
             statusVal.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             statusVal.ForeColor = dllActive ? Color.FromArgb(0, 230, 118) : Color.FromArgb(255, 82, 82);
             statusVal.AutoSize = true;
             statusVal.Location = new Point(10, 26);
             statusVal.BackColor = Color.Transparent;
             statusCard.Controls.Add(statusVal);
+
+            // Where it looked. Without this the message says a file is missing
+            // and leaves the reader to guess which folder it should be in; both
+            // files belong beside WoW.exe, which is where this launcher should
+            // be run from.
+            if (!dllActive) {
+                statusCard.Size = new Size(btnWidth, 72);
+                Label statusWhere = new Label();
+                statusWhere.Text = "looked in " + baseDir;
+                statusWhere.Font = new Font("Segoe UI", 7f, FontStyle.Regular);
+                statusWhere.ForeColor = Color.FromArgb(150, 163, 178);
+                statusWhere.AutoSize = false;
+                statusWhere.Size = new Size(btnWidth - 20, 28);
+                statusWhere.Location = new Point(10, 42);
+                statusWhere.BackColor = Color.Transparent;
+                statusCard.Controls.Add(statusWhere);
+            }
+
             leftPanel.Controls.Add(statusCard);
-            y += 62;
+            y += dllActive ? 62 : 80;
 
             activeCountLabel = new Label();
             activeCountLabel.Font = new Font("Segoe UI", 8f, FontStyle.Regular);
