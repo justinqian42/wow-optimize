@@ -5567,6 +5567,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
     STAT_TIME("CombatLogFilter::LogStats", CombatLogFilter::LogStats());
     STAT_TIME("EventCoalescer::LogStats", EventCoalescer::LogStats());
+    STAT_TIME("LuaOpt::LogStats", LuaOpt::LogStats());
     // Three whole subsystems whose counters were dumped only from their own
     // ShutdownAll, which this DLL never reaches. Between them that is around
     // twenty installed hooks on client functions - W1 to W16 among them -

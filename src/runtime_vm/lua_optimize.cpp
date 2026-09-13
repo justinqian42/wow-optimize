@@ -906,27 +906,31 @@ static void StepGC(lua_State* L, double frameMs) {
         DWORD nowTick = GetTickCount();
         double memMB = State.luaMemoryKB / 1024.0;
 
-        // Loading mode: aggressive emergency GC (teleport/zone transition safety).
-        // During loading there is no rendering - we can collect hard without affecting FPS.
-        // This prevents M2 model allocation failures when memory is already high.
-        if (Config.isLoading) {
-            // 64 MB step every 2 seconds during loading - clear memory fast.
-            if (!Config.isLoading && memMB > g_lastEmergencyMem + 5.0 && (nowTick - g_lastEmergencyTick) > 10000) {
-                Api.lua_gc(L, LUA_GCSTEP, 16384);  // 16 MB step
-                State.fullCollects++;
-
-                int kb = Api.lua_gc(L, LUA_GCCOUNT, 0);
-                int b  = Api.lua_gc(L, LUA_GCCOUNTB, 0);
-                double afterMB = (kb + (b / 1024.0)) / 1024.0;
-
-                g_lastEmergencyMem = afterMB;
-                g_lastEmergencyTick = nowTick;
-
-                Log("[LuaOpt] EMERGENCY GC (incremental): %.1f MB -> %.1f MB", memMB, afterMB);
-            }
-        }
+        // There used to be a loading-mode branch here and it never ran, for two
+        // separate reasons, so it is gone rather than left looking like cover.
+        //
+        // Its own condition could not be true: inside `if (Config.isLoading)` it
+        // tested `if (!Config.isLoading && ...)`. And StepGC is not reached at
+        // all when a frame runs past 50 ms, which is every frame of a loading
+        // screen, so the branch was unreachable even with the test corrected.
+        //
+        // Its comment said it prevented M2 model allocation failures when memory
+        // is already high. A user has now hit exactly that - M2Shared.cpp line
+        // 267 refusing 8788240 bytes in Icecrown Citadel with the client
+        // reporting 1124989 KB of Lua memory - so the protection that was
+        // supposed to cover it has never existed.
+        //
+        // It is deliberately not revived. Collecting during a loading screen
+        // contradicts LoadingDefrag, which waits the screen out on the grounds
+        // that the client is allocating throughout it, and a manual GC step is
+        // already on record as the one tester crash with this DLL truly on the
+        // stack: the client's traversetable read through a null. Adding more
+        // stepping to the most allocation-heavy moment in the session is the
+        // wrong direction to take on a guess. What the crash needs is the arena
+        // ceiling, which is a separate and already committed change.
+        //
         // Normal/combat/idle mode: moderate emergency GC.
-        else if (memMB > g_lastEmergencyMem + 5.0 && (nowTick - g_lastEmergencyTick) > 10000) {
+        if (memMB > g_lastEmergencyMem + 5.0 && (nowTick - g_lastEmergencyTick) > 10000) {
             // Incremental step: 16 MB per trigger.
             Api.lua_gc(L, LUA_GCSTEP, 16384);  // 16 MB step
             State.fullCollects++;
@@ -2162,6 +2166,40 @@ void Shutdown() {
 
 void SetCombatMode(bool inCombat) {
     Config.inCombat = inCombat;
+}
+
+// Lua memory, from the periodic report.
+//
+// The only place this figure has ever been printed is once at install, as
+// "lua_gc verified OK: Lua memory = %d KB", on a state that has just been
+// created. It reads like a current measurement and is not one: a session that
+// climbs from that to a gigabyte says nothing at any point, and a reader
+// comparing the startup line against a crash dump concludes the two instruments
+// disagree by three orders of magnitude when they are simply hours apart.
+//
+// A user has now been dropped out of Icecrown Citadel by an allocation failure
+// with 1124989 KB of Lua memory in the client's own crash report, and nothing in
+// our log from that session mentions Lua memory at all after the first second.
+void LogStats() {
+    if (!State.initialized) {
+        Log("[LuaOpt] not measured: the Lua optimiser is not initialised.");
+        return;
+    }
+    if (State.luaMemoryKB <= 0.0) {
+        Log("[LuaOpt] Lua memory not measured yet - the periodic sample has not "
+            "run, which needs a frame that was not itself slow.");
+        return;
+    }
+    const double mb = State.luaMemoryKB / 1024.0;
+    Log("[LuaOpt] Lua memory %.1f MB, sampled one frame in 64. The emergency "
+        "collector starts at 300 MB and has run %d time(s) this session.",
+        mb, State.fullCollects);
+    if (mb > 300.0) {
+        Log("[Wrong] [LuaOpt] Lua memory is past the 300 MB mark where the "
+            "client starts failing model allocations. This is addon memory, not "
+            "ours - the figure comes from the client's own lua_gc count - but it "
+            "is what precedes an out-of-memory exit.");
+    }
 }
 
 Stats GetStats() {

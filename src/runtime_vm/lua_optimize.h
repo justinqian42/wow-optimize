@@ -61,6 +61,10 @@ struct Stats {
 
 Stats GetStats();
 
+// Printed from the periodic report. Lua memory used to appear once at install
+// and never again.
+void LogStats();
+
 // Thread-safe swap/reload state queries for worker threads
 bool IsReloading();
 bool IsSwapping();
