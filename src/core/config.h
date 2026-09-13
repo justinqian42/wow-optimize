@@ -477,6 +477,9 @@ namespace Config {
         bool OptMatrixVectorSse2 = false;
         bool OptWorldStateCoalesce = false;
         bool OptD3d9RenderThread = false;
+        // Redundant D3D9 state removal. Inherits from the pair it used to hang
+        // off, so writing no key changes nothing; see Config::Load.
+        bool OptRenderStateDedup = false;
 
         // 10 new features
         // Off by default. It drops events by affiliation, not by subscription, so

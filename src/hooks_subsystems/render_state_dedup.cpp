@@ -51,6 +51,7 @@ static bool  g_samplerValid[SAMPLER_COUNT][SAMPLER_TYPES];
 
 // ---- hook state --------------------------------------------------
 static bool g_deviceHooksInstalled = false;
+static bool g_installed = false;
 
 // ---- original function pointers ----------------------------------
 typedef HRESULT (STDMETHODCALLTYPE *SetRenderState_t)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
@@ -419,9 +420,41 @@ bool InstallRenderStateDedup(void)
         return false;
     }
 
+    g_installed = true;
     Log("[RenderDedup] Direct3DCreate9 hook ACTIVE (cache ready, %d slots, "
         "waiting for device)", RS_CACHE_SIZE);
     return true;
+}
+
+// Printed from the periodic report.
+//
+// Everything this module measures was logged only from ShutdownRenderStateDedup,
+// and the DLL leaves through TerminateProcess, so no session has ever shown how
+// much redundant D3D9 state it removes. That is an unusual thing not to know:
+// every skipped SetRenderState is a driver call that does not happen, and under
+// a translation layer it is a translation that does not happen either. The
+// feature may be worth a great deal or nothing, and the log said neither.
+void RenderStateDedup_LogStats(void)
+{
+    if (!g_installed) {
+        Log("[RenderDedup] not measured: the hooks are not installed.");
+        return;
+    }
+    const LONG64 rs  = g_rs_calls,      rsSk  = g_rs_skipped;
+    const LONG64 tss = g_tss_calls,     tssSk = g_tss_skipped;
+    const LONG64 ss  = g_sampler_calls, ssSk  = g_sampler_skipped;
+    if (rs == 0 && tss == 0 && ss == 0) {
+        Log("[RenderDedup] installed and no state call has reached it yet. "
+            "Measured and zero, not unmeasured.");
+        return;
+    }
+    Log("[RenderDedup] SetRenderState %lld call(s), %lld skipped (%.1f%%); "
+        "SetTextureStageState %lld, %lld skipped (%.1f%%); SetSamplerState "
+        "%lld, %lld skipped (%.1f%%). Every skip is a driver call that did not "
+        "happen.",
+        rs,  rsSk,  rs  ? 100.0 * (double)rsSk  / (double)rs  : 0.0,
+        tss, tssSk, tss ? 100.0 * (double)tssSk / (double)tss : 0.0,
+        ss,  ssSk,  ss  ? 100.0 * (double)ssSk  / (double)ss  : 0.0);
 }
 
 void ShutdownRenderStateDedup(void)

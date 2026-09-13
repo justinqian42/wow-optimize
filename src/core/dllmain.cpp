@@ -5569,6 +5569,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("EventCoalescer::LogStats", EventCoalescer::LogStats());
     STAT_TIME("LuaOpt::LogStats", LuaOpt::LogStats());
     STAT_TIME("StallProbe_LogStats", StallProbe_LogStats());
+    STAT_TIME("RenderStateDedup_LogStats", RenderStateDedup_LogStats());
     // Three whole subsystems whose counters were dumped only from their own
     // ShutdownAll, which this DLL never reaches. Between them that is around
     // twenty installed hooks on client functions - W1 to W16 among them -
@@ -8442,7 +8443,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
 
     Log("--- Render State Deduplication ---");
 #if !TEST_DISABLE_RENDER_STATE_DEDUP
-    bool renderDedupOk = (Config::g_settings.OptVulkanDXVK || Config::g_settings.OptD3d9RenderThread) && InstallRenderStateDedup();
+    bool renderDedupOk = Config::g_settings.OptRenderStateDedup && InstallRenderStateDedup();
 #else
     Log("[RenderDedup] DISABLED via TEST_DISABLE_RENDER_STATE_DEDUP");
     bool renderDedupOk = false;

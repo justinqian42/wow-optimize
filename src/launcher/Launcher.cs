@@ -503,6 +503,7 @@ namespace WowOptimizeLauncher {
                 { "Async Worker Pool", new SettingItem("General", "AsyncWorkerPool", false, null, "Background worker threads used by the async subsystems. Also gated by the Lock-Free Heap Defragmenter until now, for no reason anyone recorded. Inherits that setting when its own key is absent. Forced off under Wine and Rosetta, where the workers blocked the main thread.") },
                 { "Thread Affinity", new SettingItem("General", "ThreadAffinity", false, null, "Pins client threads to cores chosen from the CPU topology. The third thing the Lock-Free Heap Defragmenter used to gate. Inherits that setting when absent, and Compatibility Mode still overrides it off.") },
                 { "D3D9Ex Vulkan DXVK Support", new SettingItem("General", "VulkanDXVK", false, null, "Optimizes DLL hook integration to work cleanly with DXVK (requires placing a d3d9.dll Vulkan wrapper in the game folder).") },
+                { "Skip Redundant Graphics State", new SettingItem("Graphics_Sound", "RenderStateDedup", false, null, "The game sets the same graphics state over and over: the same blend mode, the same texture stage settings, the same sampler filters, thousands of times a frame, most of them changing nothing. Each one is still a call into the graphics driver, and under a Vulkan wrapper it is a translation on top of that. This remembers what the state already is and drops the calls that would not change it. It used to be switched on only if you had ticked DXVK support, which has nothing to do with it, so a player on plain Direct3D could not have it; it has its own switch now and keeps whatever it was doing for you before. The log reports how many calls it removed.") },
                 { "Windows API Caches", new SettingItem("General", "TimingFix", false, null, "Caches the answers to Windows calls the client repeats constantly and that never change during a session: GetProcAddress, the module file name, environment variables, registry reads, system metrics, the OS version, system info and INI reads. Pure lookups, no game code touched.\n\nThis switch used to be called \"High-Precision Timing Fix\" and its description said it redirected GetTickCount and timeGetTime to the performance counter. It does not, and has not for some time - those three timer hooks, and the QPC coalescing cache with them, are compiled out of the build entirely after they were found to cause random stutters under DXVK. What was left behind the switch was these eight caches, which have nothing to do with timing, so a player chasing a timing bug turned off eight caches instead and a player wanting smoothness turned eight caches on. Reported by biship in #50, who read the code and was right about all of it.") },
                 { "Timing CVar Pin", new SettingItem("General", "TimingCvarPin", true, null, "Pins timingMethod to 2 and timingTestError to 0 whatever the client asks for. This has been on for everyone for a long time with no switch, buried inside the CVar safeguard; it now has its own. Leave it on unless you want the client's own timer choice back.") },
                 { "Client Crash Guards", new SettingItem("General", "CvarNullGuard", true, null, "Six guards against known client crashes, not one. It declines CVar writes through an object that looks uninitialised - which is what the option used to be named after - and it also wraps the Lua table read at 0x84x, the GUID type check that crashes on battleground load, the object reaper's null write on unlink, and two more null and bounds checks. Turning it off turns off all six, which the old name did not say. On by default. The timing CVar pin that used to ride along inside this feature has its own switch above.") },
@@ -1568,6 +1569,22 @@ namespace WowOptimizeLauncher {
             InheritIfAbsent(present, "AsyncWorkerPool", "DefragLf");
             InheritIfAbsent(present, "ThreadAffinity", "DefragLf");
             InheritIfAbsent(present, "SimdGeometry", "StrStrSse2");
+            // Render state dedup used to be gated on EITHER of two switches, so
+            // an absent key has to resolve to their OR, exactly as Config::Load
+            // resolves it. InheritIfAbsent assigns rather than ORs, so calling it
+            // twice would let the second parent switch off what the first
+            // switched on, and the first Save would then take the feature away
+            // from everyone who had it through the other one.
+            if (!present.ContainsKey("RenderStateDedup")) {
+                SettingItem dedup = FindByKey("RenderStateDedup");
+                SettingItem dxvk  = FindByKey("VulkanDXVK");
+                SettingItem rthr  = FindByKey("D3d9RenderThread");
+                if (dedup != null && dedup.Ctrl != null) {
+                    bool on = (dxvk != null && dxvk.Ctrl != null && dxvk.Ctrl.Checked)
+                           || (rthr != null && rthr.Ctrl != null && rthr.Ctrl.Checked);
+                    dedup.Ctrl.Checked = on;
+                }
+            }
             InheritIfAbsent(present, "LuaAddonProfile", "SamplingProfiler");
             // UiScriptHandlerCache and UnitApiFastPath used to inherit UIFrameBatch
             // here. Their checkboxes are gone because both gate an install that

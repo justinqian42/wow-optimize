@@ -155,6 +155,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "MatrixVectorSse2", &Settings::OptMatrixVectorSse2 },
     { "Graphics_Sound", "WorldStateCoalesce", &Settings::OptWorldStateCoalesce },
     { "Graphics_Sound", "D3d9RenderThread", &Settings::OptD3d9RenderThread },
+    { "Graphics_Sound", "RenderStateDedup", &Settings::OptRenderStateDedup },
     { "Combat_Net", "CombatLogFilter", &Settings::OptCombatLogFilter },
     { "Graphics_Sound", "SoundVolumeLimit", &Settings::OptSoundVolumeLimit },
     { "Graphics_Sound", "TerrainHeightCache", &Settings::OptTerrainHeightCache },
@@ -693,6 +694,15 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptMatrixVectorSse2  = GetPrivateProfileIntA("Graphics_Sound", "MatrixVectorSse2", 0, iniPath.c_str()) != 0;
         g_settings.OptWorldStateCoalesce  = GetPrivateProfileIntA("Graphics_Sound", "WorldStateCoalesce", 0, iniPath.c_str()) != 0;
         g_settings.OptD3d9RenderThread    = GetPrivateProfileIntA("Graphics_Sound", "D3d9RenderThread", 0, iniPath.c_str()) != 0;
+        // Skipping a SetRenderState that changes nothing has nothing to do with
+        // running under a translation layer, but it was gated on VulkanDXVK or
+        // D3d9RenderThread, so a player on native D3D9 could not have it without
+        // claiming to use something else. It has its own key now and inherits
+        // the pair it used to hang off, so an absent key keeps today's behaviour
+        // exactly.
+        g_settings.OptRenderStateDedup    = GetPrivateProfileIntA("Graphics_Sound", "RenderStateDedup",
+                                              (g_settings.OptVulkanDXVK || g_settings.OptD3d9RenderThread) ? 1 : 0,
+                                              iniPath.c_str()) != 0;
         // HARD-DISABLED regardless of ini: this offloads D3D9 draw/Present/Reset
         // calls to a worker thread, but WoW's device isn't created
         // D3DCREATE_MULTITHREADED, so cross-thread rendering is undefined
