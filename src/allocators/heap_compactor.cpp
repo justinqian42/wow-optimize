@@ -334,9 +334,25 @@ extern "C" void HeapCompactor_RunPendingWork() {
     if (work == 0) return;
 
     if (work == 2) {
-        SIZE_T beforeLow = 0;
-        SIZE_T before = GetLargestFreeBlock(&beforeLow);
-        (void)before;
+        // The "before" figure comes from the monitor thread's last walk, not
+        // from a fresh one on this thread.
+        //
+        // This walk is VirtualQuery over all of user address space. A field
+        // session logs 40 of them at 598.5 ms in total, and seven of those -
+        // 92.3 ms, worst 15.8 ms - ran on a thread other than the monitor,
+        // which means inside a frame. Six of the seven are this function: two
+        // walks per compaction, before and after, and that session's three
+        // compactions recovered 0 KB each.
+        //
+        // The before walk is the one that can go. The monitor is what decided
+        // this pass was needed, and it decided on the strength of its own walk
+        // moments earlier, so its published figure is the same measurement this
+        // one would repeat. Only when the monitor has never run is a walk done
+        // here, and then it is the first and only one.
+        SIZE_T beforeLow = g_lastWalkTick ? g_lastWalkLow : 0;
+        if (!g_lastWalkTick) GetLargestFreeBlock(&beforeLow);
+        const unsigned long beforeAgeMs =
+            g_lastWalkTick ? (unsigned long)(GetTickCount() - g_lastWalkTick) : 0;
 
         // mimalloc runs with purge_decommits off, so a purge resets pages but
         // leaves them committed - physical RAM comes back, address space does not.
@@ -366,9 +382,9 @@ extern "C" void HeapCompactor_RunPendingWork() {
         long long gainedKb = ((long long)afterLow - (long long)beforeLow) / 1024;
         if (gainedKb > 0) g_reclaimedTotalKb += (unsigned long long)gainedKb;
 
-        Log("[HeapCompactor] After compaction: %uMB largest below 2GB (%+lldKB), "
-            "%uMB across all address space",
-            (unsigned)(afterLow / (1024*1024)), gainedKb,
+        Log("[HeapCompactor] After compaction: %uMB largest below 2GB (%+lldKB "
+            "against a before figure %lu ms old), %uMB across all address space",
+            (unsigned)(afterLow / (1024*1024)), gainedKb, beforeAgeMs,
             (unsigned)(after / (1024*1024)));
 
         // A pass that returns almost nothing is pure stall. Back off, and stop
