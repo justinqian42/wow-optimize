@@ -22,6 +22,8 @@ extern volatile LONG g_deviceResetCounter;
 static volatile LONG64 g_rs_calls   = 0;    // SetRenderState calls
 static volatile LONG64 g_rs_skipped = 0;    // redundant calls skipped
 
+static volatile LONG64 g_tex_calls   = 0;   // SetTexture calls
+static volatile LONG64 g_tex_skipped = 0;   // redundant calls skipped
 static volatile LONG64 g_tss_calls   = 0;   // SetTextureStageState calls
 static volatile LONG64 g_tss_skipped = 0;   // redundant calls skipped
 
@@ -49,6 +51,16 @@ static constexpr DWORD SAMPLER_TYPES = 14;
 static DWORD g_samplerCache[SAMPLER_COUNT][SAMPLER_TYPES];
 static bool  g_samplerValid[SAMPLER_COUNT][SAMPLER_TYPES];
 
+// The texture bound to each stage, and whether we know it.
+//
+// Sixteen covers every pixel sampler on this hardware generation. The vertex
+// texture samplers live at D3DVERTEXTEXTURESAMPLER0 (257) and above, and those
+// are passed through untouched rather than folded into the same table, because
+// a stage number that large would otherwise index out of it.
+#define TEX_STAGES 16
+static IDirect3DBaseTexture9* g_texCache[TEX_STAGES];
+static bool                   g_texValid[TEX_STAGES];
+
 // ---- hook state --------------------------------------------------
 static bool g_deviceHooksInstalled = false;
 static bool g_installed = false;
@@ -57,6 +69,8 @@ static bool g_installed = false;
 typedef HRESULT (STDMETHODCALLTYPE *SetRenderState_t)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
 static SetRenderState_t g_orig_SetRenderState = nullptr;
 
+typedef HRESULT (STDMETHODCALLTYPE *SetTexture_t)(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+static SetTexture_t g_orig_SetTexture = nullptr;
 typedef HRESULT (STDMETHODCALLTYPE *SetTextureStageState_t)(IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
 static SetTextureStageState_t g_orig_SetTextureStageState = nullptr;
 
@@ -91,6 +105,50 @@ static HRESULT STDMETHODCALLTYPE Hooked_SetRenderState(
     if (SUCCEEDED(hr) && idx < RS_CACHE_SIZE) {
         g_rsCache[idx] = value;
         g_rsValid[idx] = true;
+    }
+    return hr;
+}
+
+// ================================================================
+// SetTexture — compare-before-set dedup
+// ================================================================
+//
+// The most frequent state call in this renderer and the last one here without
+// dedup. A batch that draws the same material repeatedly rebinds the same
+// texture to the same stage every time, and each of those is a call into the
+// driver; under a Vulkan wrapper it is a descriptor update on top of that.
+//
+// Skipping a rebind of the texture already there is safe, and the reason is
+// D3D9's own reference counting rather than an assumption about the driver.
+// SetTexture adds a reference to the new texture and releases the old one, so a
+// call that binds what is already bound has a net reference change of zero and
+// skipping it leaks nothing and over-releases nothing.
+//
+// The stale-pointer hazard this project warns about does not open here either.
+// A comparison of raw pointers would be wrong if a texture could be freed and
+// another allocated at the same address while the cache still named it - but
+// the runtime holds a reference to every bound texture for exactly as long as
+// it is bound, so the address cannot be reused while this cache says it is
+// there. Nothing here ever dereferences the pointer; it is only compared.
+//
+// NULL is cached like any other value, so repeatedly unbinding a stage that is
+// already empty is skipped too.
+static HRESULT STDMETHODCALLTYPE Hooked_SetTexture(
+    IDirect3DDevice9* device, DWORD stage, IDirect3DBaseTexture9* texture)
+{
+    g_tex_calls++;
+
+    if (stage < TEX_STAGES) {
+        if (g_texValid[stage] && g_texCache[stage] == texture) {
+            g_tex_skipped++;
+            return S_OK;
+        }
+    }
+
+    HRESULT hr = g_orig_SetTexture(device, stage, texture);
+    if (SUCCEEDED(hr) && stage < TEX_STAGES) {
+        g_texCache[stage] = texture;
+        g_texValid[stage] = true;
     }
     return hr;
 }
@@ -260,6 +318,30 @@ static HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(
                     return hr;
                 }
                 g_orig_SetRenderState = origRS;
+
+                // Hook SetTexture (vtable index 65)
+                //
+                // The index is taken from the SDK's own d3d9.h, counted through
+                // DECLARE_INTERFACE_(IDirect3DDevice9, ...), and it agrees with
+                // the three this module already hooks: Reset 16, SetRenderState
+                // 57, SetTextureStageState 67, SetSamplerState 69. GetTexture
+                // sits at 64 and SetTexture at 65.
+                uintptr_t setTex = vtable[65];
+                if (setTex && setTex >= 0x10000 && setTex <= 0xFFE00000) {
+                    SetTexture_t origTex = nullptr;
+                    st = MH_CreateHook(
+                        (void*)setTex,
+                        (void*)Hooked_SetTexture,
+                        (void**)&origTex);
+                    if (st == MH_OK) {
+                        st = MH_EnableHook((void*)setTex);
+                        if (st == MH_OK) {
+                            g_orig_SetTexture = origTex;
+                        } else {
+                            MH_RemoveHook((void*)setTex);
+                        }
+                    }
+                }
 
                 // Hook SetTextureStageState (vtable index 67)
                 uintptr_t setTSS = vtable[67];
@@ -443,11 +525,15 @@ void RenderStateDedup_LogStats(void)
     const LONG64 rs  = g_rs_calls,      rsSk  = g_rs_skipped;
     const LONG64 tss = g_tss_calls,     tssSk = g_tss_skipped;
     const LONG64 ss  = g_sampler_calls, ssSk  = g_sampler_skipped;
-    if (rs == 0 && tss == 0 && ss == 0) {
+    if (rs == 0 && tss == 0 && ss == 0 && g_tex_calls == 0) {
         Log("[RenderDedup] installed and no state call has reached it yet. "
             "Measured and zero, not unmeasured.");
         return;
     }
+    const LONG64 tex = g_tex_calls, texSk = g_tex_skipped;
+    Log("[RenderDedup] SetTexture %lld call(s), %lld skipped (%.1f%%) - the most "
+        "frequent of these and the one added last.",
+        tex, texSk, tex ? 100.0 * (double)texSk / (double)tex : 0.0);
     Log("[RenderDedup] SetRenderState %lld call(s), %lld skipped (%.1f%%); "
         "SetTextureStageState %lld, %lld skipped (%.1f%%); SetSamplerState "
         "%lld, %lld skipped (%.1f%%). Every skip is a driver call that did not "
@@ -498,4 +584,5 @@ void RenderStateDedup_ClearCache(void)
     memset(g_rsValid, 0, sizeof(g_rsValid));
     memset(g_tssValid, 0, sizeof(g_tssValid));
     memset(g_samplerValid, 0, sizeof(g_samplerValid));
+    memset(g_texValid, 0, sizeof(g_texValid));
 }
