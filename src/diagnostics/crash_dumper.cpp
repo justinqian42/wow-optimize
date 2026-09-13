@@ -1403,6 +1403,68 @@ LARGE_INTEGER StallProbeBegin() {
     return t;
 }
 
+// Every stall the probes have seen, kept so a session can report them.
+//
+// StallProbeEnd wrote only to the crash ring, which reaches a log exactly once:
+// in our own crash dump. A user whose client dies through its own error handler,
+// or who simply plays for three hours and reports a stutter, produces no record
+// of main-thread stalls at all, even though nine places measure them.
+//
+// Keyed on the literal's address rather than its text. Every call site passes a
+// string literal, so the pointer identifies the site and costs a compare.
+namespace {
+struct StallSite {
+    const char*   what;
+    unsigned long hits;
+    double        worstMs;
+    double        totalMs;
+};
+constexpr int kMaxStallSites = 16;
+StallSite s_stallSite[kMaxStallSites] = {};
+int       s_stallSiteCount = 0;
+unsigned long s_stallOverflow = 0;   // more distinct sites than the table holds
+
+void NoteStall(const char* what, double ms) {
+    for (int i = 0; i < s_stallSiteCount; ++i) {
+        if (s_stallSite[i].what == what) {
+            ++s_stallSite[i].hits;
+            s_stallSite[i].totalMs += ms;
+            if (ms > s_stallSite[i].worstMs) s_stallSite[i].worstMs = ms;
+            return;
+        }
+    }
+    if (s_stallSiteCount >= kMaxStallSites) { ++s_stallOverflow; return; }
+    StallSite& s = s_stallSite[s_stallSiteCount++];
+    s.what = what; s.hits = 1; s.worstMs = ms; s.totalMs = ms;
+}
+}  // namespace
+
+void StallProbe_LogStats() {
+    if (s_stallSiteCount == 0) {
+        Log("[Stalls] measured and zero: the probes ran and nothing they cover "
+            "went past its threshold.");
+        return;
+    }
+    Log("[Stalls] main-thread work that went past its own threshold, worst "
+        "first. These are cumulative for the session:");
+    bool printed[kMaxStallSites] = {};
+    for (int n = 0; n < s_stallSiteCount; ++n) {
+        int best = -1;
+        for (int i = 0; i < s_stallSiteCount; ++i) {
+            if (printed[i]) continue;
+            if (best < 0 || s_stallSite[i].worstMs > s_stallSite[best].worstMs) best = i;
+        }
+        if (best < 0) break;
+        printed[best] = true;
+        Log("[Stalls]   %-34s %lu time(s), worst %.1f ms, %.1f ms in total",
+            s_stallSite[best].what, s_stallSite[best].hits,
+            s_stallSite[best].worstMs, s_stallSite[best].totalMs);
+    }
+    if (s_stallOverflow)
+        Log("[Stalls]   %lu stall(s) came from more distinct places than this "
+            "table holds and are not broken out.", s_stallOverflow);
+}
+
 void StallProbeEnd(const char* what, const LARGE_INTEGER& start, double thresholdMs) {
     static LARGE_INTEGER freq = {};
     if (freq.QuadPart == 0) {
@@ -1414,6 +1476,7 @@ void StallProbeEnd(const char* what, const LARGE_INTEGER& start, double threshol
     double ms = (double)(end.QuadPart - start.QuadPart) * 1000.0 / (double)freq.QuadPart;
     if (ms >= thresholdMs) {
         CrashDumper::Trace("STALL %s took %.1f ms", what, ms);
+        NoteStall(what, ms);   // so a session can report it, not only a dump
     }
 }
 

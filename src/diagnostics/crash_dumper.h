@@ -154,6 +154,10 @@ private:
 // Same measurement without RAII. MSVC rejects objects requiring unwinding in any
 // function that uses __try, and several of the places worth probing are SEH
 // guarded, so those call StallProbeBegin/End directly.
+// Printed from the periodic report. Stalls used to reach a log only through
+// our own crash dump, so a session that did not crash recorded none.
+void StallProbe_LogStats();
+
 LARGE_INTEGER StallProbeBegin();
 void StallProbeEnd(const char* what, const LARGE_INTEGER& start, double thresholdMs);
 
