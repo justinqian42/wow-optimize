@@ -1620,7 +1620,28 @@ static void LogOpen() {
     CreateDirectoryA("Logs", NULL);
     
     // 1. Standard log (wow_optimize.log) always overwritten to keep latest easy to access
-    g_log = _fsopen("Logs\\wow_optimize.log", "w", _SH_DENYNO);
+    //
+    // Opened deny-write, and when another process already holds it, the next free
+    // numbered name instead. Two clients started from one folder used to open this
+    // file with no sharing restriction and separate write offsets, and wrote over
+    // each other for the whole session: a tester's logs from two accounts came back
+    // as one interleaved file, with one client's closing report at the end of the
+    // other's startup. The numbered names fall outside what PruneSessionLogs
+    // matches and are reused, so they cannot pile up.
+    char logNote[200] = "";
+    g_log = _fsopen("Logs\\wow_optimize.log", "w", _SH_DENYWR);
+    for (int slot = 2; slot <= 8 && !g_log; slot++) {
+        char alt[64];
+        _snprintf(alt, sizeof(alt), "Logs\\wow_optimize.%d.log", slot);
+        alt[sizeof(alt) - 1] = '\0';
+        g_log = _fsopen(alt, "w", _SH_DENYWR);
+        if (g_log) {
+            _snprintf(logNote, sizeof(logNote),
+                      "[Log] another client from this folder holds wow_optimize.log, "
+                      "so this one (PID %lu) writes %s", GetCurrentProcessId(), alt);
+            logNote[sizeof(logNote) - 1] = '\0';
+        }
+    }
     if (!g_log) {
         g_log = fopen("Logs\\wow_optimize.log", "w");
     }
@@ -1638,9 +1659,17 @@ static void LogOpen() {
         _snprintf(sessionPath, sizeof(sessionPath), "Logs\\wow_optimize_%04d-%02d-%02d_%02d-%02d-%02d.log",
                   st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
         sessionPath[sizeof(sessionPath) - 1] = '\0';
-        g_sessionLog = _fsopen(sessionPath, "w", _SH_DENYNO);
+        g_sessionLog = _fsopen(sessionPath, "w", _SH_DENYWR);
         if (!g_sessionLog) {
-            g_sessionLog = fopen(sessionPath, "w");
+            // Two clients started within the same second. The process id goes
+            // after the time, so the name still starts with the date that
+            // PruneSessionLogs sorts on.
+            _snprintf(sessionPath, sizeof(sessionPath),
+                      "Logs\\wow_optimize_%04d-%02d-%02d_%02d-%02d-%02d_pid%lu.log",
+                      st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                      GetCurrentProcessId());
+            sessionPath[sizeof(sessionPath) - 1] = '\0';
+            g_sessionLog = _fsopen(sessionPath, "w", _SH_DENYWR);
         }
         PruneSessionLogs(Config::g_settings.SessionLogsToKeep);
     }
@@ -1658,6 +1687,7 @@ static void LogOpen() {
     g_logShutdown = false;
     g_logEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     g_logThread = CreateThread(NULL, 0, LogThreadProc, NULL, 0, NULL);
+    if (logNote[0]) Log("%s", logNote);
 }
 
 static void LogClose() {
