@@ -142,6 +142,9 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "RayTriangleSse2", &Settings::OptRayTriangleSse2 },
     { "Graphics_Sound", "BoneMatrixUpload", &Settings::OptBoneMatrixUpload },
     { "General", "MimallocHighArena", &Settings::OptMimallocHighArena },
+    { "General", "VaCensus", &Settings::OptVaCensus },
+    { "General", "HighPlacementModules", &Settings::OptHighPlacementModules },
+    { "General", "HighPlacementClient", &Settings::OptHighPlacementClient },
     { "General", "ClientWriteBatch", &Settings::OptClientWriteBatch },
     { "Graphics_Sound", "AabbOverlap", &Settings::OptAabbOverlap },
     { "Graphics_Sound", "AnimQuatUnpack", &Settings::OptAnimQuatUnpack },
@@ -242,6 +245,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         Log("[Config]   [General] AbTestSubject='%s' every %d ms",
             g_settings.AbTestSubject, g_settings.AbTestPeriodMs);
         Log("[Config]   [General] SessionLogsToKeep=%d", g_settings.SessionLogsToKeep);
+        Log("[Config]   [General] HighPlacementMinKB=%d", g_settings.HighPlacementMinKB);
         Log("[Config] %d set in the file, %d left at defaults.", fromFile, defaulted);
 
         // The settings with no tickbox.
@@ -682,6 +686,12 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         if (g_settings.MimallocHighArenaMaxMB < g_settings.MimallocHighArenaMB)
             g_settings.MimallocHighArenaMaxMB = g_settings.MimallocHighArenaMB;
         if (g_settings.MimallocHighArenaMaxMB > 2048) g_settings.MimallocHighArenaMaxMB = 2048;
+        g_settings.OptVaCensus             = GetPrivateProfileIntA("General", "VaCensus", 0, iniPath.c_str()) != 0;
+        g_settings.OptHighPlacementModules = GetPrivateProfileIntA("General", "HighPlacementModules", 0, iniPath.c_str()) != 0;
+        g_settings.OptHighPlacementClient  = GetPrivateProfileIntA("General", "HighPlacementClient", 0, iniPath.c_str()) != 0;
+        g_settings.HighPlacementMinKB      = GetPrivateProfileIntA("General", "HighPlacementMinKB", 1024, iniPath.c_str());
+        if (g_settings.HighPlacementMinKB < 64)    g_settings.HighPlacementMinKB = 64;
+        if (g_settings.HighPlacementMinKB > 65536) g_settings.HighPlacementMinKB = 65536;
         g_settings.OptAabbOverlap         = GetPrivateProfileIntA("Graphics_Sound", "AabbOverlap", 0, iniPath.c_str()) != 0;
         g_settings.OptAnimQuatUnpack      = GetPrivateProfileIntA("Graphics_Sound", "AnimQuatUnpack", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaPoolFast     = GetPrivateProfileIntA("UI_Lua", "LuaPoolFast", 0, iniPath.c_str()) != 0;

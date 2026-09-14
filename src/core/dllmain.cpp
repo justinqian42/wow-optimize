@@ -55,6 +55,7 @@
 #include "m2_anim_stride.h"
 #include "m2_anim_reuse.h"
 #include "mimalloc_high_arena.h"
+#include "high_placement.h"
 #include "client_write_batch.h"
 #include "aabb_overlap_sse2.h"
 #include "anim_quat_unpack_sse2.h"
@@ -5620,6 +5621,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
     STAT_TIME("M2AnimReuse::LogStats", M2AnimReuse::LogStats());
     STAT_TIME("MimallocHighArena::LogStats", MimallocHighArena::LogStats());
+    STAT_TIME("HighPlacement::LogStats", HighPlacement::LogStats());
     STAT_TIME("ClientWriteBatch::LogStats", ClientWriteBatch::LogStats());
     STAT_TIME("AabbOverlap::LogStats", AabbOverlap::LogStats());
     STAT_TIME("AnimQuatUnpack::LogStats", AnimQuatUnpack::LogStats());
@@ -7853,6 +7855,10 @@ static DWORD WINAPI MainThread(LPVOID param) {
 
     if (MH_Initialize() != MH_OK) { Log("FATAL: MinHook initialization failed"); LogClose(); return 1; }
     Log("MinHook initialized");
+
+    // Before the allocator is configured, so its arena reservations and the
+    // pre-warm below are recorded under this tool's name like everyone else's.
+    HighPlacement::Init();
 
     ConfigureMimalloc();
     TryEnableLargePages();

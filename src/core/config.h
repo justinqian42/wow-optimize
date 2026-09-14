@@ -416,6 +416,20 @@ namespace Config {
         // of this number is that the allocator ran out of arena at 1023 MB and
         // spent the rest of the session shredding the low 2GB.
         int  MimallocHighArenaMaxMB = 2048;
+        // Records every private address-space reservation by the module that
+        // asked for it, so the occupancy dump can name who holds the low 2GB
+        // instead of calling it "private". Hooks ntdll's NtAllocateVirtualMemory
+        // and NtFreeVirtualMemory. Off by default and experimental.
+        bool OptVaCensus = false;
+        // MEM_TOP_DOWN for large reservations, by class of caller. Modules is
+        // everything that is neither wow.exe, this tool nor a system DLL: DXVK,
+        // the GPU driver, other injected DLLs. Client is wow.exe itself, whose
+        // handling of pointers above 2GB nobody has verified. Both off by
+        // default and experimental; HighPlacementMinKB is the smallest request
+        // either moves.
+        bool OptHighPlacementModules = false;
+        bool OptHighPlacementClient = false;
+        int  HighPlacementMinKB = 1024;
         // The box-overlap predicate (sub_78F370) that seventeen culling and
         // pick functions call once per scene node per pass. Six x87 compares,
         // each leaving the FPU through fnstsw and a data-dependent branch,

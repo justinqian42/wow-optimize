@@ -3,6 +3,7 @@
 #include "version.h"
 #include "crash_dumper.h"
 #include "mimalloc_high_arena.h"
+#include "high_placement.h"
 #include <psapi.h>
 #include <cstdio>
 #include <cstring>
@@ -207,6 +208,10 @@ void LogLowHalfOccupancy(const char* why) {
         Log("[LowHalf]     0x%08X  %7.1f MB  %s",
             (unsigned)top[i].base, top[i].size / (1024.0 * 1024.0), owner);
     }
+    // The owner of the private figure, which the list above cannot give: it
+    // knows images and mapped files by name and everything else only as
+    // "private". Not measured unless the address space census is on.
+    HighPlacement::LogLiveByCaller(true, "the private figure above");
     Log("[LowHalf]   walk took %.1f ms on the heap monitor thread, not on the "
         "main one.", walkMs);
     Log("[LowHalf] ====================================");

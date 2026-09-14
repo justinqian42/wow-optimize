@@ -59,6 +59,7 @@ extern "C" void mi_collect(bool force);
 #include "crash_dumper.h"
 #include "perf_diagnostics.h"
 #include "mimalloc_high_arena.h"
+#include "high_placement.h"
 
 // Largest free virtual address range, measured twice.
 //
@@ -243,6 +244,11 @@ static DWORD WINAPI MonitorThread(LPVOID) {
         // Here rather than on the main thread because it reserves address
         // space, and this thread already exists to do that kind of work.
         MimallocHighArena::Grow();
+
+        // Keep the census's module list current for DLLs loaded since the last
+        // pass - DXVK's d3d9.dll arrives after install. It takes the loader lock,
+        // which the allocation hook itself must never do.
+        HighPlacement::RefreshModules();
 
         // The low half is what actually runs out, and it is what the trigger
         // reads now.
