@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using System.Reflection;
+using Microsoft.Win32;
 
 namespace WowOptimizeLauncher {
 
@@ -512,6 +513,46 @@ namespace WowOptimizeLauncher {
             return null;
         }
 
+        // Windows compatibility settings on an executable in this folder.
+        //
+        // The README has said for a long time that "Disable fullscreen
+        // optimizations" on Wow.exe stops the proxy from loading. A user found
+        // that only after moving every other mod out of the folder, because
+        // nothing here looked. Windows keeps those settings per executable path
+        // under AppCompatFlags\Layers, in the user's hive and in the machine's.
+        // Every exe in this folder is matched rather than Wow.exe alone, because
+        // private-server clients get renamed.
+        private static string CompatLayersInFolder(string baseDir) {
+            const string layersKey = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+            string dir = baseDir.TrimEnd('\\', '/');
+            RegistryHive[] hives = new RegistryHive[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine };
+            RegistryView[] views = new RegistryView[] { RegistryView.Registry64, RegistryView.Registry32 };
+            foreach (RegistryHive hive in hives) {
+                foreach (RegistryView view in views) {
+                    try {
+                        using (RegistryKey root = RegistryKey.OpenBaseKey(hive, view))
+                        using (RegistryKey key = root.OpenSubKey(layersKey)) {
+                            if (key == null) continue;
+                            foreach (string exe in key.GetValueNames()) {
+                                try {
+                                    if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                                    string exeDir = Path.GetDirectoryName(exe);
+                                    if (exeDir == null) continue;
+                                    if (!string.Equals(exeDir.TrimEnd('\\', '/'), dir, StringComparison.OrdinalIgnoreCase)) continue;
+                                    string flags = key.GetValue(exe) as string;
+                                    if (string.IsNullOrEmpty(flags)) continue;
+                                    return Path.GetFileName(exe) + " (" + flags.Trim() + ")";
+                                } catch {
+                                }
+                            }
+                        }
+                    } catch {
+                    }
+                }
+            }
+            return null;
+        }
+
 
         public MainForm() {
             // Setup Paths
@@ -1002,15 +1043,23 @@ namespace WowOptimizeLauncher {
             else if (!haveLoader) missing = "version.dll";
             else missing = "wow_optimize.dll";
 
+            // A compatibility setting on the client's executable stops the proxy
+            // loading while both files sit exactly where they should, so it is
+            // looked for once they do.
+            string compatLayers = dllActive ? CompatLayersInFolder(baseDir) : null;
+
             string statusText;
             if (foreignLoader) statusText = "NOT LOADED - version.dll belongs to another mod";
             else if (!dllActive) statusText = "NOT LOADED - missing " + missing;
+            else if (compatLayers != null) statusText = "MAY NOT LOAD - compatibility setting";
             else statusText = "OPTIMIZER ACTIVE (version.dll)";
 
             Label statusVal = new Label();
             statusVal.Text = statusText;
             statusVal.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
-            statusVal.ForeColor = dllActive ? Color.FromArgb(0, 230, 118) : Color.FromArgb(255, 82, 82);
+            if (!dllActive) statusVal.ForeColor = Color.FromArgb(255, 82, 82);
+            else if (compatLayers != null) statusVal.ForeColor = Color.FromArgb(255, 193, 7);
+            else statusVal.ForeColor = Color.FromArgb(0, 230, 118);
             statusVal.AutoSize = true;
             statusVal.Location = new Point(10, 26);
             statusVal.BackColor = Color.Transparent;
@@ -1018,14 +1067,17 @@ namespace WowOptimizeLauncher {
 
             // The second line carries whatever the first one cannot act on: the
             // folder that was searched when a file is missing, the collision
-            // when version.dll is someone else's, and otherwise the result the
-            // proxy recorded on the last launch. Both files being present is
-            // not evidence that the payload loaded.
+            // when version.dll is someone else's, the compatibility setting and
+            // where to clear it, and otherwise the result the proxy recorded on
+            // the last launch. Both files being present is not evidence that
+            // the payload loaded.
             string detail;
             if (foreignLoader) {
                 detail = "that version.dll has no optimizer loader in it - ReShade and other mods use the same filename";
             } else if (!dllActive) {
                 detail = "looked in " + baseDir;
+            } else if (compatLayers != null) {
+                detail = compatLayers + " - untick \"Disable fullscreen optimizations\" in its Properties > Compatibility";
             } else {
                 string lastRun = LastProxyResult(baseDir);
                 detail = (lastRun != null && lastRun.StartsWith("ERROR")) ? "last launch: " + lastRun : null;
