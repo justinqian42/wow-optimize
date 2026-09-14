@@ -12,4 +12,13 @@ bool Init();
 void Grow();
 void LogStats();
 
+// How much of the handed-over address space is committed, from a VirtualQuery
+// walk of those blocks alone, and how much was handed over. False when nothing
+// has been handed over, so a caller can say it did not measure rather than
+// print zero.
+bool CommittedInArena(unsigned long long* committed, unsigned long long* handed);
+
+// Whether an address lies inside a block this module handed over.
+bool Contains(const void* addr);
+
 }  // namespace MimallocHighArena

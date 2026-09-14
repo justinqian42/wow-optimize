@@ -2,6 +2,7 @@
 #include "../core/world_position.h"
 #include "version.h"
 #include "crash_dumper.h"
+#include "mimalloc_high_arena.h"
 #include <psapi.h>
 #include <cstdio>
 #include <cstring>
@@ -18,10 +19,6 @@ extern void CrashDumper_DumpHookTrace(int count);
 // question the whole low-address-space investigation turns on is whether those
 // are the client's or ours, and mimalloc can answer it directly.
 extern "C" bool mi_is_in_heap_region(const void* p);
-extern "C" void mi_process_info(size_t* elapsed_msecs, size_t* user_msecs, size_t* system_msecs,
-                                size_t* current_rss, size_t* peak_rss,
-                                size_t* current_commit, size_t* peak_commit,
-                                size_t* page_faults);
 
 namespace PerfDiagnostics {
 
@@ -53,6 +50,18 @@ static void DescribeAllocation(uintptr_t base, DWORD type, char* out, size_t out
     if (type == MEM_MAPPED) { lstrcpynA(out, "mapped file/section", (int)outSize); return; }
     // "private" covers both heaps in this process, and which one it is decides
     // whether the fix is ours to make.
+    //
+    // The high arena's blocks are checked first, by address. This project
+    // reserves them and hands them to mimalloc, but mi_is_in_heap_region answers
+    // from mimalloc's page map, which has no entry for address space it has not
+    // put to use. A stutter snapshot listed seven 256 MB blocks of ours as "the
+    // client's own heap, or something else", which is the one question this
+    // label exists to answer, answered backwards.
+    if (MimallocHighArena::Contains((const void*)base)) {
+        lstrcpynA(out, "reserved - THIS TOOL'S HIGH ARENA (handed to mimalloc)",
+                  (int)outSize);
+        return;
+    }
     bool ours = false;
     __try { ours = mi_is_in_heap_region((const void*)base); }
     __except (EXCEPTION_EXECUTE_HANDLER) { ours = false; }
@@ -156,15 +165,31 @@ void LogLowHalfOccupancy(const char* why) {
         commitPrivate / (1024.0 * 1024.0), commitMapped / (1024.0 * 1024.0),
         commitImage / (1024.0 * 1024.0), reservedOnly / (1024.0 * 1024.0));
 
+    // This used to print "mimalloc holds N MB committed" from mi_process_info,
+    // which on Windows returns the private bytes of the whole process. It told
+    // the reader to compare the low half against this tool's allocator and gave
+    // them the client's own total to compare with. These are the two figures
+    // those words meant.
     {
-        size_t elapsed = 0, userMs = 0, sysMs = 0, rss = 0, peakRss = 0,
-               commit = 0, peakCommit = 0, faults = 0;
-        mi_process_info(&elapsed, &userMs, &sysMs, &rss, &peakRss,
-                        &commit, &peakCommit, &faults);
-        Log("[LowHalf]   mimalloc holds %.0f MB committed across the whole address "
-            "space (peak %.0f MB). If the private figure above is close to it, the "
-            "low half went to this tool's allocator rather than to the client.",
-            commit / (1024.0 * 1024.0), peakCommit / (1024.0 * 1024.0));
+        PROCESS_MEMORY_COUNTERS pmc = {};
+        pmc.cb = sizeof(pmc);
+        if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+            Log("[LowHalf]   the whole process has %.0f MB of private bytes (peak "
+                "%.0f MB), the client and this tool together.",
+                pmc.PagefileUsage / (1024.0 * 1024.0),
+                pmc.PeakPagefileUsage / (1024.0 * 1024.0));
+        } else {
+            Log("[LowHalf]   the process's private bytes could not be read.");
+        }
+        unsigned long long arenaCommitted = 0, arenaHanded = 0;
+        if (MimallocHighArena::CommittedInArena(&arenaCommitted, &arenaHanded)) {
+            Log("[LowHalf]   the high arena has %.0f MB committed of the %.0f MB "
+                "handed to mimalloc above 2GB.",
+                arenaCommitted / (1024.0 * 1024.0), arenaHanded / (1024.0 * 1024.0));
+        } else {
+            Log("[LowHalf]   the high arena is not active, so none of this tool's "
+                "allocator is being kept above 2GB.");
+        }
     }
 
     // The one line this dump exists to produce.
@@ -322,17 +347,23 @@ void LogPerformanceSnapshot(double elapsedMs) {
             (unsigned)top[i].base, top[i].size / (1024.0 * 1024.0), owner);
     }
 
-    // mimalloc's own view. If "reserved-only" above is large and mimalloc's
-    // reserved number accounts for it, the address space went to our allocator,
-    // not to the engine or the D3D9/Vulkan translation layer.
+    // How much of "reserved-only" above is ours. This printed "mimalloc: commit
+    // ..., rss ..." from mi_process_info, which on Windows returns the whole
+    // process's private bytes and working set. In a tester's report its commit
+    // matched the Private Bytes line at the top of the same snapshot to the tenth
+    // of a megabyte, 1511.2 and 1511.2, under a name that said it was the
+    // allocator's.
     {
-        size_t elapsed = 0, userMs = 0, sysMs = 0, rss = 0, peakRss = 0,
-               commit = 0, peakCommit = 0, faults = 0;
-        mi_process_info(&elapsed, &userMs, &sysMs, &rss, &peakRss,
-                        &commit, &peakCommit, &faults);
-        Log("[PerfDiag]   mimalloc: commit %.1f MB (peak %.1f MB), rss %.1f MB (peak %.1f MB)",
-            commit / (1024.0 * 1024.0), peakCommit / (1024.0 * 1024.0),
-            rss / (1024.0 * 1024.0), peakRss / (1024.0 * 1024.0));
+        unsigned long long arenaCommitted = 0, arenaHanded = 0;
+        if (MimallocHighArena::CommittedInArena(&arenaCommitted, &arenaHanded)) {
+            Log("[PerfDiag]   high arena: %.1f MB committed of %.1f MB handed to "
+                "mimalloc, so %.1f MB of the reserved-only figure above is this "
+                "tool's",
+                arenaCommitted / (1024.0 * 1024.0), arenaHanded / (1024.0 * 1024.0),
+                (arenaHanded - arenaCommitted) / (1024.0 * 1024.0));
+        } else {
+            Log("[PerfDiag]   high arena: not active");
+        }
     }
     Log("[PerfDiag]   VA Usable Free (>=1MB blocks): %.1f MB of %.1f MB  (%.0f%% lost to slivers)",
         usableFree / (1024.0 * 1024.0),

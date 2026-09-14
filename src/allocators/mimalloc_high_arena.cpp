@@ -82,6 +82,17 @@ unsigned g_growLow = 0;          // refused because Windows placed it below 2GB
 SIZE_T g_highTotal = 0;          // how much address space exists above 2GB
 SIZE_T g_maxHanded = 0;          // and the most this module will ever take of it
 
+// Every block handed over, so the module can measure how much of them is in use
+// and say whether an address is one of them. The step is clamped to at least
+// 8 MB and the ceiling to at most 2048 MB in Config::Load, so 256 entries cover
+// every configuration. Only ReserveAndHand writes here, and it publishes the
+// count after the entry it covers, so a reader on another thread sees a whole
+// entry or none.
+const LONG kMaxBlocks = 256;
+uintptr_t g_blockBase[kMaxBlocks];
+SIZE_T    g_blockSize[kMaxBlocks];
+volatile LONG g_blockCount = 0;
+
 // One reservation, handed over, with every guard the first one has.
 //
 // Returns the bytes handed to mimalloc, or zero. A block that comes back below
@@ -90,6 +101,7 @@ SIZE_T g_maxHanded = 0;          // and the most this module will ever take of i
 // not running at all.
 SIZE_T ReserveAndHand(SIZE_T want, const char* why) {
     if (want == 0) return 0;
+    if (g_blockCount >= kMaxBlocks) return 0;
     const SIZE_T align = mi_arena_min_alignment();
     if (align > 1) want = (want + align - 1) & ~(align - 1);
 
@@ -119,6 +131,10 @@ SIZE_T ReserveAndHand(SIZE_T want, const char* why) {
             (unsigned)(uintptr_t)base, why);
         return 0;
     }
+    const LONG slot = g_blockCount;
+    g_blockBase[slot] = (uintptr_t)base;
+    g_blockSize[slot] = want;
+    g_blockCount = slot + 1;
     g_handed += want;
     ++g_blocks;
     if (!g_base) { g_base = base; g_size = want; }
@@ -134,29 +150,81 @@ SIZE_T ReserveAndHand(SIZE_T want, const char* why) {
 // and the low half starts filling exactly as before. A tester session ended with
 // 890 MB reserved and never committed, all of it below 2GB, in blocks of 128 MB.
 //
-// So this runs from the heap monitor thread and watches what mimalloc has
-// committed against what it has been handed. Within a block's worth of the end,
-// it reserves another one high and hands that over too. The allocator never has
-// a reason to go to the OS, and the low half stays the client's.
+// So this runs from the heap monitor thread and watches how much of what it has
+// handed over is committed. Within a block's worth of the end, it reserves
+// another one high and hands that over too. The allocator never has a reason to
+// go to the OS, and the low half stays the client's.
+//
+// That figure used to come from mi_process_info, and on Windows it is not
+// mimalloc's. mi_process_info fills current_commit from mimalloc's own
+// statistics and then calls _mi_prim_process_info, which overwrites it with
+// PagefileUsage from GetProcessMemoryInfo - the private bytes of the whole
+// process (mimalloc 3.3.2, src/stats.c and src/prim/windows/prim.c). Every
+// megabyte the client allocated for itself counted as the arena filling up, so
+// this handed over another 256 MB every ten seconds until it hit the ceiling. A
+// tester running two clients reached 1791 MB handed over within eighty seconds
+// of starting, while almost none of it was ever committed. That session's four
+// gigabytes added up to 1490 MB private, 226 MB of images, 141 MB mapped,
+// 2133 MB reserved and never committed, and 106 MB free with a 10 MB largest
+// block, and the client ended itself with an out-of-memory dialog. The
+// reservation meant to keep address space free for the client was what used it
+// up.
+//
+// The figure now comes from the blocks themselves, by VirtualQuery: what is
+// committed inside them. That is the quantity the decision is about, it counts
+// pages mimalloc has reset but still holds, and it cannot see the client's
+// memory.
 //
 // Bounded twice: by the configured maximum and by half of what exists above 2GB.
-// The renderer and the translation layer want space up there as well, and a
-// client that cannot get a texture buffer high is no better off than one that
-// cannot get it low.
+// The renderer, the translation layer and the client's own large-address
+// allocations want space up there as well, and a client that cannot get a
+// texture buffer high is no better off than one that cannot get it low.
+bool CommittedInArena(unsigned long long* committed, unsigned long long* handed) {
+    const LONG count = g_blockCount;
+    if (count <= 0) return false;
+
+    unsigned long long used = 0, total = 0;
+    for (LONG i = 0; i < count; i++) {
+        const uintptr_t base = g_blockBase[i];
+        const uintptr_t end  = base + g_blockSize[i];
+        total += g_blockSize[i];
+
+        uintptr_t addr = base;
+        MEMORY_BASIC_INFORMATION mbi;
+        while (addr < end && VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+            uintptr_t regionEnd = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+            if (regionEnd > end) regionEnd = end;
+            if (regionEnd <= addr) break;
+            if (mbi.State == MEM_COMMIT) used += regionEnd - addr;
+            addr = regionEnd;
+        }
+    }
+    *committed = used;
+    *handed = total;
+    return true;
+}
+
+bool Contains(const void* addr) {
+    const uintptr_t p = (uintptr_t)addr;
+    const LONG count = g_blockCount;
+    for (LONG i = 0; i < count; i++) {
+        if (p >= g_blockBase[i] && p - g_blockBase[i] < g_blockSize[i]) return true;
+    }
+    return false;
+}
+
 void Grow() {
     if (!Config::g_settings.OptMimallocHighArena) return;
     if (g_handed == 0 || g_handed >= g_maxHanded) return;
 
-    size_t elapsed = 0, userMs = 0, sysMs = 0, rss = 0, peakRss = 0,
-           commit = 0, peakCommit = 0, faults = 0;
-    mi_process_info(&elapsed, &userMs, &sysMs, &rss, &peakRss,
-                    &commit, &peakCommit, &faults);
+    unsigned long long committed = 0, handed = 0;
+    if (!CommittedInArena(&committed, &handed)) return;
 
     const SIZE_T step = (SIZE_T)Config::g_settings.MimallocHighArenaMB * 1024 * 1024;
     // The headroom is one step: by the time the allocator is within a block of
     // the end it is about to need the next one, and reserving after it has
     // already gone to the OS would be too late to matter.
-    if ((SIZE_T)commit + step < g_handed) return;
+    if (committed + step < handed) return;
 
     SIZE_T want = step;
     if (g_handed + want > g_maxHanded) want = g_maxHanded - g_handed;
@@ -164,11 +232,11 @@ void Grow() {
                                             "what it has been given");
     if (got) {
         Log("[HighArena] handed over another %u MB above 2GB - %u MB in %u "
-            "block(s) now, against %u MB the allocator has committed. The ceiling "
-            "is %u MB.",
+            "block(s) now, against %u MB committed inside the blocks it already "
+            "had. The ceiling is %u MB.",
             (unsigned)(got / (1024 * 1024)),
             (unsigned)(g_handed / (1024 * 1024)), g_blocks,
-            (unsigned)(commit / (1024 * 1024)),
+            (unsigned)(committed / (1024 * 1024)),
             (unsigned)(g_maxHanded / (1024 * 1024)));
     }
 }
@@ -218,37 +286,30 @@ bool Init() {
     if (want < minSize) want = minSize;
     if (align > 1) want = (want + align - 1) & ~(align - 1);
 
-    // The ceiling, set once: a fraction of what lies above 2GB, or the
-    // configured maximum, whichever is smaller.
+    // The ceiling, set once: half of what lies above 2GB, or the configured
+    // maximum, whichever is smaller.
     //
-    // It used to be half, and half was not enough. Two field sessions say so
-    // exactly. This client is large-address-aware on 64-bit Windows, so it gets
-    // four gigabytes and the region above 2GB is 2047 MB - the arena in those
-    // logs sits at 0xEFCB0000, which is 3.75 GB, so the space is certainly
-    // there. Half of 2047 is the "ceiling 1023 MB" the report kept printing,
-    // while the line beside it read:
+    // It was raised to seven eighths on the strength of a report line that read
     //
     //     1023 MB handed to mimalloc in 4 block(s), ceiling 1023 MB. The
     //     allocator has 1552 MB committed, so it has 0 MB of high address space
     //     left before it would have to ask the OS.
     //
-    // and 1285, and 1434, and 1513, climbing all session. So the allocator ran
-    // out of arena early and spent the rest of the session reserving from the
-    // OS bottom-up, which is the only thing that explains the other number in
-    // the same report: "free 85 MB in 6183 region(s), largest run 9 MB". The
-    // low half was not full, it was shredded, and the shredding was overflow
-    // this module exists to prevent.
+    // and 1552 MB was never the allocator's figure. It came from
+    // mi_process_info, which on Windows reports the private bytes of the whole
+    // process, the client's memory included, so the "measured need" the raise
+    // was sized against was the client and not mimalloc. The same comment said
+    // a higher ceiling cost nothing until the allocator needed it. That held
+    // only while the growth trigger read the right number, and it did not (see
+    // Grow). With both wrong at once, a tester's client handed 1791 MB of the
+    // high half to an allocator that was using almost none of it, and ran out
+    // of address space in under two minutes.
     //
-    // Seven eighths instead. That is 1791 MB of a 2047 MB region, against a
-    // measured need of 1552 MB and rising, and it still leaves 256 MB above 2GB
-    // for anything else that wants to live up there. Nothing is reserved up
-    // front by raising it - blocks are handed over only as the allocator fills
-    // what it already has - so the cost of the higher ceiling is nothing until
-    // the allocator actually needs it.
+    // Half is the ceiling of the build that tester reports as the last one
+    // without these errors. Nothing measured since supports more.
     g_highTotal = (SIZE_T)(top - kLowHalfEnd);
     g_maxHanded = (SIZE_T)Config::g_settings.MimallocHighArenaMaxMB * 1024 * 1024;
-    const SIZE_T ceilingCap = g_highTotal / 8 * 7;
-    if (g_maxHanded > ceilingCap) g_maxHanded = ceilingCap;
+    if (g_maxHanded > g_highTotal / 2) g_maxHanded = g_highTotal / 2;
     if (want > g_maxHanded) want = g_maxHanded;
 
     if (!ReserveAndHand(want, "first block")) {
@@ -276,22 +337,22 @@ void LogStats() {
         Log("[HighArena] not active - the reason is at the top of this log");
         return;
     }
-    // What mimalloc has done with it is not directly queryable; the figure that
-    // answers the question is the low half, which the heap monitor reports and
-    // the occupancy dump breaks down by owner.
-    size_t elapsed = 0, userMs = 0, sysMs = 0, rss = 0, peakRss = 0,
-           commit = 0, peakCommit = 0, faults = 0;
-    mi_process_info(&elapsed, &userMs, &sysMs, &rss, &peakRss,
-                    &commit, &peakCommit, &faults);
+    // How much of it is in use is measured from the blocks, the same way Grow
+    // decides. The low half, which the heap monitor reports and the occupancy
+    // dump breaks down by owner, is still what says whether any of this helped.
+    unsigned long long committed = 0, handed = 0;
+    if (!CommittedInArena(&committed, &handed)) {
+        Log("[HighArena] no block recorded as handed over, so nothing to measure");
+        return;
+    }
     Log("[HighArena] %u MB handed to mimalloc in %u block(s), first at 0x%08X, "
-        "ceiling %u MB. The allocator has %u MB committed, so it has %u MB of "
+        "ceiling %u MB. %u MB of it is committed, so the allocator has %u MB of "
         "high address space left before it would have to ask the OS.",
-        (unsigned)(g_handed / (1024 * 1024)), g_blocks,
+        (unsigned)(handed / (1024 * 1024)), g_blocks,
         (unsigned)(uintptr_t)g_base,
         (unsigned)(g_maxHanded / (1024 * 1024)),
-        (unsigned)(commit / (1024 * 1024)),
-        (unsigned)(g_handed > (SIZE_T)commit
-                   ? (g_handed - (SIZE_T)commit) / (1024 * 1024) : 0));
+        (unsigned)(committed / (1024 * 1024)),
+        (unsigned)((handed - committed) / (1024 * 1024)));
     // What running out actually costs, which is not obvious from the line above.
     //
     // Past the ceiling mimalloc asks the OS directly, and the size of each of
