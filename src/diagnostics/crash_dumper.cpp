@@ -641,13 +641,67 @@ static void __cdecl Hooked_WowAssert(const char* msg, int arg1, int arg2) {
 typedef BOOL (WINAPI *TerminateProcess_fn)(HANDLE hProcess, UINT uExitCode);
 static TerminateProcess_fn orig_TerminateProcess = nullptr;
 
+// The client's own fatal-error reporter, sub_771D10.
+//
+// It formats its dialog into the global buffer at 0x00CADBE0, shows it with
+// MessageBoxA, and then calls TerminateProcess itself at 0x0077263F, returning
+// to 0x00772645. Every formatting call in it is bounded by the end pointer held
+// at 0x00ADE880. A tester's client ran out of address space, showed that dialog
+// for thirteen seconds, and this hook reported the exit as a "silent kill" and
+// printed hook calls from twenty-five seconds earlier. The text it had just
+// shown the player, which names the error, was in memory the whole time.
+static constexpr uintptr_t kClientFatalErrorFn         = 0x00771D10;
+static constexpr uintptr_t kClientFatalErrorFnEnd      = 0x00771D10 + 0x946;
+static constexpr uintptr_t kClientFatalErrorText       = 0x00CADBE0;
+static constexpr uintptr_t kClientFatalErrorTextEndPtr = 0x00ADE880;
+
+static void LogClientFatalErrorText() {
+    __try {
+        const uintptr_t end = *(uintptr_t*)kClientFatalErrorTextEndPtr;
+        SIZE_T cap = 4096;
+        if (end > kClientFatalErrorText && end - kClientFatalErrorText < cap)
+            cap = (SIZE_T)(end - kClientFatalErrorText);
+
+        const char* text = (const char*)kClientFatalErrorText;
+        char line[512];
+        SIZE_T n = 0;
+        unsigned printed = 0;
+        for (SIZE_T i = 0; i < cap && text[i] != '\0' && printed < 40; i++) {
+            const char c = text[i];
+            if (c == '\r') continue;
+            if (c != '\n') {
+                line[n++] = c;
+                if (n < sizeof(line) - 1) continue;
+            }
+            line[n] = '\0';
+            if (n > 0) { Log("!!!   | %s", line); printed++; }
+            n = 0;
+        }
+        if (n > 0 && printed < 40) {
+            line[n] = '\0';
+            Log("!!!   | %s", line);
+            printed++;
+        }
+        if (printed == 0) Log("!!!   the client's error text buffer was empty");
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        Log("!!!   the client's error text could not be read");
+    }
+}
+
 static BOOL WINAPI Hooked_TerminateProcess(HANDLE hProcess, UINT uExitCode) {
     __try {
         // Only log if it's our own process being terminated
         if (hProcess == GetCurrentProcess() || (hProcess && GetProcessId(hProcess) == GetCurrentProcessId())) {
             LogFlushImmediate();
-            Log("!!! TERMINATE PROCESS (code=%u) — silent kill detected !!!", uExitCode);
-            Log("!!!   TID=%lu  Caller=0x%08X", GetCurrentThreadId(), (unsigned)(uintptr_t)_ReturnAddress());
+            const uintptr_t caller = (uintptr_t)_ReturnAddress();
+            if (caller >= kClientFatalErrorFn && caller < kClientFatalErrorFnEnd) {
+                Log("!!! TERMINATE PROCESS (code=%u) from the client's own fatal-error "
+                    "handler, after its error dialog. The dialog said:", uExitCode);
+                LogClientFatalErrorText();
+            } else {
+                Log("!!! TERMINATE PROCESS (code=%u) - silent kill detected !!!", uExitCode);
+            }
+            Log("!!!   TID=%lu  Caller=0x%08X", GetCurrentThreadId(), (unsigned)caller);
 
             // Log last hook calls for context
             LONG hpos = InterlockedCompareExchange(&s_hookTracePos, 0, 0);
