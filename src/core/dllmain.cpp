@@ -387,14 +387,26 @@ static void FreezeDumpOtherThreads(DWORD mainTid) {
 // twelve-instruction leaf that cannot hang. The thread was running Lua the
 // whole time.
 //
-// Two hundred samples tell the two apart on their own. All landing in one place
-// means blocked. Spread across a range means spinning, and the spread names the
-// loop. Neither needs a debugger, which is what makes it useful to hand to
-// someone who cannot get symbols for the client.
+// Two hundred samples name where the thread is. Whether it is waiting there or
+// running there is a separate question, and the samples cannot answer it: this
+// used to call two or three distinct addresses "spinning", and a tester's client
+// that sat in its own out-of-memory dialog for thirteen seconds was reported as
+// a busy loop in win32u. A thread inside a modal MessageBoxA wakes for every
+// window message and lands on a handful of addresses while using no CPU at all.
+// So the thread's own CPU time across the window decides, and the address count
+// only describes the spread. Neither needs a debugger, which is what makes it
+// useful to hand to someone who cannot get symbols for the client.
 static void SampleFrozenThread(DWORD mainTid) {
     if (mainTid == 0) return;
-    HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, mainTid);
+    HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
+                          THREAD_QUERY_LIMITED_INFORMATION, FALSE, mainTid);
     if (!h) return;
+
+    FILETIME createT, exitT, kernel0, user0, kernel1, user1;
+    const bool haveCpu0 = GetThreadTimes(h, &createT, &exitT, &kernel0, &user0) != 0;
+    LARGE_INTEGER qpcFreq, qpc0, qpc1;
+    QueryPerformanceFrequency(&qpcFreq);
+    QueryPerformanceCounter(&qpc0);
 
     constexpr int kSamples = 200;
     uintptr_t eips[kSamples];
@@ -406,8 +418,22 @@ static void SampleFrozenThread(DWORD mainTid) {
         ResumeThread(h);
         Sleep(5);                       // one second of wall clock in total
     }
+
+    QueryPerformanceCounter(&qpc1);
+    const bool haveCpu = haveCpu0 &&
+        GetThreadTimes(h, &createT, &exitT, &kernel1, &user1) != 0;
     CloseHandle(h);
     if (got < 8) return;
+
+    auto hundredNs = [](const FILETIME& f) {
+        return ((ULONGLONG)f.dwHighDateTime << 32) | (ULONGLONG)f.dwLowDateTime;
+    };
+    const double wallMs = (double)(qpc1.QuadPart - qpc0.QuadPart) * 1000.0 /
+                          (double)qpcFreq.QuadPart;
+    const double cpuMs = haveCpu
+        ? (double)((hundredNs(kernel1) + hundredNs(user1)) -
+                   (hundredNs(kernel0) + hundredNs(user0))) / 10000.0
+        : 0.0;
 
     // Distinct addresses first: that number alone answers the question.
     uintptr_t uniq[kSamples]; int uniqN = 0, counts[kSamples] = {};
@@ -417,11 +443,19 @@ static void SampleFrozenThread(DWORD mainTid) {
         if (j == uniqN) { uniq[uniqN] = eips[i]; counts[uniqN] = 1; uniqN++; }
     }
 
-    Log("!!! %d samples over one second landed on %d distinct addresses. %s",
-        got, uniqN,
-        uniqN <= 2 ? "That is a blocked thread: it is not executing."
-                   : "That is a running thread: it is spinning, not blocked, and "
-                     "the addresses below are the loop.");
+    if (haveCpu && wallMs > 0.0) {
+        const double pct = 100.0 * cpuMs / wallMs;
+        Log("!!! %d samples over %.0f ms landed on %d distinct addresses, and the "
+            "thread used %.0f ms of CPU in that time (%.0f%% of one core). %s",
+            got, wallMs, uniqN, cpuMs, pct,
+            pct < 10.0  ? "It is waiting, not running: the addresses below are where it waits."
+          : pct >= 50.0 ? "It is running: the addresses below are the loop."
+                        : "It is partly running, so the addresses below mix a loop and a wait.");
+    } else {
+        Log("!!! %d samples landed on %d distinct addresses. The thread's CPU time "
+            "could not be read, so this does not say whether it was waiting or "
+            "running.", got, uniqN);
+    }
 
     // Top five, largest first.
     for (int shown = 0; shown < 5; shown++) {
