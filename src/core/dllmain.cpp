@@ -56,6 +56,7 @@
 #include "m2_anim_reuse.h"
 #include "mimalloc_high_arena.h"
 #include "high_placement.h"
+#include "camera_replay.h"
 #include "client_write_batch.h"
 #include "aabb_overlap_sse2.h"
 #include "anim_quat_unpack_sse2.h"
@@ -5693,6 +5694,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("DbcLookupCache_LogStats", DbcLookupCache_LogStats());
     STAT_TIME("LuaCompileCensus::LogStats", LuaCompileCensus::LogStats());
     STAT_TIME("FlightRecorder::LogStats", FlightRecorder::LogStats());
+    STAT_TIME("CameraReplay::LogStats", CameraReplay::LogStats());
     STAT_TIME("AbTest::LogStats", AbTest::LogStats());
     STAT_TIME("AnimCensus::LogStats", AnimCensus::LogStats());
     STAT_TIME("PredictivePrefetch::LogStats", PredictivePrefetch::LogStats());
@@ -5997,6 +5999,7 @@ extern "C" void WowOpt_OnFrameBoundary() {
     // frame apart by construction, which is the resolution the ring is for.
     FlightRecorder::OnFrame();
     FlightRecorder::PollHotkey();
+    CameraReplay::OnFrame();
     AbTest::OnFrame();
 
     // A presented frame is the honest proof that the main thread is alive.
@@ -8379,6 +8382,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("--- M2 Animation Stride ---");
     M2AnimStride::Install();
     M2AnimReuse::Init();
+    CameraReplay::Init();
     AabbOverlap::Init();
     AnimQuatUnpack::Init();
     AnimVec3Track::Init();

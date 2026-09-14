@@ -234,6 +234,8 @@ add_library(wow_optimize SHARED
     src/diagnostics/perf_diagnostics.h
     src/diagnostics/frame_bench.cpp
     src/diagnostics/frame_bench.h
+    src/diagnostics/camera_replay.cpp
+    src/diagnostics/camera_replay.h
     src/runtime_vm/lua_xpcall_fast.cpp
     src/runtime_vm/lua_xpcall_fast.h
     src/runtime_vm/lua_getmetafield_fast.cpp

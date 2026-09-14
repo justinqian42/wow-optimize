@@ -64,6 +64,7 @@ static const BoolSetting kBoolSettings[] = {
     { "General", "CompatMode", &Settings::OptCompatMode },
     { "General", "NoClientPatches", &Settings::OptNoClientPatches },
     { "General", "FlightRecorder", &Settings::OptFlightRecorder },
+    { "General", "CameraReplay", &Settings::OptCameraReplay },
     { "General", "AbTest", &Settings::OptAbTest },
     { "Graphics_Sound", "SimdGeometry", &Settings::OptSimdGeometry },
     { "General", "AsyncWorkerPool", &Settings::OptAsyncWorkerPool },
@@ -242,6 +243,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
 
         Log("[Config]   [General] SleepPrecisionValue=%d", g_settings.SleepPrecisionValue);
         Log("[Config]   [General] FlightRecorderKey=0x%02X", g_settings.FlightRecorderKey);
+        Log("[Config]   [General] CameraReplayKey=0x%02X", g_settings.CameraReplayKey);
         Log("[Config]   [General] AbTestSubject='%s' every %d ms",
             g_settings.AbTestSubject, g_settings.AbTestPeriodMs);
         Log("[Config]   [General] SessionLogsToKeep=%d", g_settings.SessionLogsToKeep);
@@ -569,6 +571,10 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         // works on a loading screen and at character select, where no addon is
         // running and where two of the open defects appear.
         g_settings.FlightRecorderKey      = GetPrivateProfileIntA("General", "FlightRecorderKey", 0x91, iniPath.c_str());
+        g_settings.OptCameraReplay        = GetPrivateProfileIntA("General", "CameraReplay", 0, iniPath.c_str()) != 0;
+        g_settings.CameraReplayKey        = GetPrivateProfileIntA("General", "CameraReplayKey", 0x13, iniPath.c_str());
+        if (g_settings.CameraReplayKey < 1 || g_settings.CameraReplayKey > 0xFE)
+            g_settings.CameraReplayKey = 0x13;
         // HARD-DISABLED regardless of ini: in tester logs the arena was active
         // on machines with zero fragmentation (2GB+ largest free block), so it
         // used ~0.2MB of its 64MB and delivered no benefit - while still routing

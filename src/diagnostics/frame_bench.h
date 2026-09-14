@@ -80,4 +80,13 @@ double MedianMs();
 // call an uncapped session capped.
 double SessionP95Ms();
 
+// A measured stretch inside the session, for a benchmark run. Every frame from
+// BeginWindow to EndWindow is reported as its own distribution under `name`,
+// without touching the session figures or the periodic report's interval. The
+// same exclusions apply: loading screens and gaps are left out and counted.
+void BeginWindow(const char* name);
+// Logs the window and closes it. False when no window was open.
+bool EndWindow();
+bool WindowOpen();
+
 } // namespace FrameBench

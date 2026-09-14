@@ -131,6 +131,12 @@ namespace Config {
         // clock read a frame.
         bool OptFlightRecorder = true;
         int  FlightRecorderKey = 0x91;   // VK_SCROLL
+        // Records the camera's view values every frame on one key press and plays
+        // them back on another, with FrameBench measuring the playback as its own
+        // window, so two builds or two settings are compared over the same camera
+        // motion from the same spot. Hooks one wow.exe function; off by default.
+        bool OptCameraReplay = false;
+        int  CameraReplayKey = 0x13;     // VK_PAUSE: press to play, Shift+press to record
         // Frustum culling and quaternion normalise, in SSE2. These used to hang
         // off OptStrStrSse2 - a switch named after a string search - so anyone who
         // left "SSE2 Boyer-Moore strstr" off, which is its default, silently lost

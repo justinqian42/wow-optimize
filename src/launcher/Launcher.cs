@@ -56,7 +56,7 @@ namespace WowOptimizeLauncher {
             "AbTest", "SamplingProfiler", "AddonProfiler", "LuaAddonProfile",
             "LuaAllocCensus", "LuaCompileCensus", "LuaTableCensus", "AnimCensus",
             "DrawCensus", "ShadowStateProbe", "LockSpinHooks", "NoClientPatches",
-            "VaCensus",
+            "VaCensus", "CameraReplay",
         };
         private static readonly string[] LogKeys = new string[] {
             "SessionLogs", "FlightRecorder", "NetDiag", "CpuTopology",
@@ -107,7 +107,7 @@ namespace WowOptimizeLauncher {
             "AbTest", "SamplingProfiler", "AddonProfiler", "LuaAddonProfile",
             "LuaAllocCensus", "LuaCompileCensus", "LuaTableCensus", "AnimCensus",
             "DrawCensus", "ShadowStateProbe", "LockSpinHooks", "NoClientPatches",
-            "VaCensus",
+            "VaCensus", "CameraReplay",
 
             // Buys frames by making the game look or sound different. That is a
             // real trade and it is the player's to make, not this button's. A
@@ -616,6 +616,7 @@ namespace WowOptimizeLauncher {
                 { "Catch Freezes", new SettingItem("General", "FreezeCatcher", false, null, "The game sometimes stops for a moment - a tester session has a frame that took nearly two seconds, and a hundred and forty over a tenth of a second - and nothing in the log can say what it was doing. The recorder tracks file reads, archive opens and network traffic, and during that two-second frame not one of them moved, so whatever it was, it was the processor working on something nobody is watching. The full profiler could answer it but costs too much to leave on, and one reporter traced longer loading screens to having it enabled. This watches instead: a background thread glances at the clock a few times a millisecond and does nothing at all unless the frame already in progress has run past a sixteenth of a second. Only then does it start looking, and only until that frame ends. A frame that behaves costs nothing. Turn it on if you get freezes and send the log.", true) },
                 { "No Client Patches (diagnostic)", new SettingItem("General", "NoClientPatches", false, null, "Writes nothing into WoW.exe, which turns every optimization off. Fixes the WoWCircle disconnects: two players ran it and the drops stopped. It is a trade, not a fix - you keep your connection and lose the performance work.", true) },
                 { "Flight Recorder (mark a moment)", new SettingItem("General", "FlightRecorder", true, null, "Keeps the last 512 frames and writes 240 of them to the log when you press Scroll Lock. Press it the moment you see something wrong. Nothing is written until you do, and it also marks itself for a disconnect, a freeze and a bad SavedVariables filename. Change the key with FlightRecorderKey in wow_opt.ini.") },
+                { "Camera Replay Benchmark", new SettingItem("General", "CameraReplay", false, null, "Measurement only. Stand still somewhere, press Shift+Pause, move the camera around, and press Shift+Pause again: the camera's motion is saved. Press Pause to play it back while the log measures every frame of the playback on its own. Run it once per build or setting from the same spot, facing the same way, with vsync off, and compare the BENCHMARK WINDOW blocks. Only the camera is replayed; other players and NPCs still move, so repeat each side. Hooks one wow.exe function, so leave it off on servers that kick for client patches. Change the key with CameraReplayKey in wow_opt.ini.", true) },
                 { "A/B Test a Feature", new SettingItem("General", "AbTest", false, null, "Turns one feature on and off in stints while you play and compares the two halves. It can only measure features you have switched on. Tick the features you want compared as well, or it has nothing to measure. Play at least 45 minutes.", true) },
 
                 // UI & Lua
