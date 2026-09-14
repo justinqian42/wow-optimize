@@ -42,6 +42,7 @@ extern "C" void ReleaseLoadingArena();
 #include "heap_compactor.h"
 
 extern bool g_isMultiClient;
+extern DWORD g_mainThreadId;
 extern "C" void Log(const char* fmt, ...);
 
 // ================================================================
@@ -2180,20 +2181,58 @@ void SetCombatMode(bool inCombat) {
 // A user has now been dropped out of Icecrown Citadel by an allocation failure
 // with 1124989 KB of Lua memory in the client's own crash report, and nothing in
 // our log from that session mentions Lua memory at all after the first second.
+//
+// The figure it went on to print was not live either. State.luaMemoryKB is
+// refreshed inside StepGC, below the gcOptimized test at its top, and only
+// OptimizeGC sets gcOptimized. The install and the first swap call it; every
+// later swap clears it and does not, and entering the world from the login
+// screen is a later swap. A tester's two clients both logged "Subsequent swap"
+// at world entry and then "Lua memory 1.6 MB" with ElvUI and Cell loaded at
+// every report until they closed, beside a collection count that had stopped
+// at world entry and was described as runs of the emergency collector. That
+// count is fullCollects: completed incremental cycles, plus emergency and
+// loading-screen steps.
+//
+// So the count is read here, on the main thread the periodic report runs on,
+// and the line says whether it is fresh and whether this module is stepping the
+// collector at all.
 void LogStats() {
     if (!State.initialized) {
         Log("[LuaOpt] not measured: the Lua optimiser is not initialised.");
         return;
     }
+
+    bool fresh = false;
+    if (Api.L && Api.lua_gc && g_mainThreadId != 0 &&
+        GetCurrentThreadId() == g_mainThreadId &&
+        !g_isSwapping.load(std::memory_order_acquire) &&
+        !g_isReloading.load(std::memory_order_acquire)) {
+        __try {
+            RefreshLuaMemoryKB(Api.L);
+            fresh = true;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            fresh = false;
+        }
+    }
+
     if (State.luaMemoryKB <= 0.0) {
-        Log("[LuaOpt] Lua memory not measured yet - the periodic sample has not "
-            "run, which needs a frame that was not itself slow.");
+        Log("[LuaOpt] Lua memory not measured: no sample exists and this report "
+            "could not take one.");
         return;
     }
     const double mb = State.luaMemoryKB / 1024.0;
-    Log("[LuaOpt] Lua memory %.1f MB, sampled one frame in 64. The emergency "
-        "collector starts at 300 MB and has run %d time(s) this session.",
-        mb, State.fullCollects);
+    Log("[LuaOpt] Lua memory %.1f MB (%s). Manual GC stepping is %s. Collection "
+        "counter %d (completed incremental cycles plus emergency and "
+        "loading-screen steps); the emergency collector starts at 300 MB and "
+        "runs only while stepping is on.",
+        mb,
+        fresh ? "read by this report"
+              : "last sample - this report could not read it",
+        State.gcOptimized
+            ? "running"
+            : "OFF: the lua_State changed and nothing turns it back on, so only "
+              "the client's own collector runs",
+        State.fullCollects);
     if (mb > 300.0) {
         Log("[Wrong] [LuaOpt] Lua memory is past the 300 MB mark where the "
             "client starts failing model allocations. This is addon memory, not "
