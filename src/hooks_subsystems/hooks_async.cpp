@@ -712,16 +712,8 @@ bool InstallAsyncHooks(void) {
 
     Log("[AsyncHooks] Worker pool: %d threads, %d task slots", ASYNC_POOL_WORKERS, TASK_QUEUE_SIZE);
 
-    // 0x007D9A20 is claimed by async_terrain_loader.cpp as well, which is a whole
-    // terrain feature built around it rather than the single prefetch hook here.
-    // Whichever initialised first used to win and the other logged a duplicate, so
-    // which of the two a player got depended on link order. The dedicated module
-    // wins by name now.
     #if !TEST_DISABLE_ADT_PREFETCH
-    if (ADDR_ADT_CHUNK_LOAD && Config::g_settings.OptAsyncTerrainLoader) {
-        Log("[AsyncHooks] ADT prefetcher: leaving 0x%08X to AsyncTerrainLoader, "
-            "which owns this function", ADDR_ADT_CHUNK_LOAD);
-    } else if (ADDR_ADT_CHUNK_LOAD) {
+    if (ADDR_ADT_CHUNK_LOAD) {
         if (WineSafe_CreateHook((void*)ADDR_ADT_CHUNK_LOAD, (void*)Hooked_sub_7D9A20, (void**)&orig_AdtChunkLoad) == MH_OK) {
             if (WO_EnableHook((void*)ADDR_ADT_CHUNK_LOAD) == MH_OK) {
                 Log("[AsyncHooks] Hook installed: ADT prefetcher (0x%08X)", ADDR_ADT_CHUNK_LOAD);

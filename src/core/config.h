@@ -171,7 +171,6 @@ namespace Config {
         bool OptLuaGetTimeFast = false;
         bool OptSimdMatrixTransform = false;
         bool OptAsyncTexLoader = false;
-        bool OptAsyncTerrainLoader = false;
         bool OptRcuObjMgr = false;
         bool OptObjMgrEnumFast = false;
         bool OptFreezeCatcher = false;
@@ -511,7 +510,6 @@ namespace Config {
 
         bool OptTextureUnloadDelay = false;
         bool OptM2MatrixSimd = false;
-        bool OptMpqAsyncDecompress = false;
         bool OptSpellEffectCulling = false;
         // Read-only watch on the client's own shadow state, for the flicker seen
         // below extShadowQuality 5. Not our bug - a tester reproduced it with

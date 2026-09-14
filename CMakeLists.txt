@@ -108,16 +108,12 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/combatlog_buffer.h
     src/threading/addon_dispatcher.cpp
     src/threading/addon_dispatcher.h
-    src/hooks_subsystems/mpq_async_decompress.cpp
-    src/hooks_subsystems/mpq_async_decompress.h
     src/hooks_subsystems/obj_vis_cache.cpp
     src/hooks_subsystems/obj_vis_cache.h
     src/hooks_subsystems/rcu_obj_mgr.cpp
     src/hooks_subsystems/objmgr_enum_fast.cpp
     src/hooks_subsystems/mpq_open_census.cpp
     src/hooks_subsystems/rcu_obj_mgr.h
-    src/hooks_subsystems/async_terrain_loader.cpp
-    src/hooks_subsystems/async_terrain_loader.h
     src/hooks_subsystems/nameplate_batch.cpp
     src/hooks_subsystems/nameplate_batch.h
     src/hooks_subsystems/ui_cache.cpp

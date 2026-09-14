@@ -89,7 +89,6 @@ static const BoolSetting kBoolSettings[] = {
     // was inert: whatever you set, the DLL read the absent-key default of off and
     // neither feature could be turned on by anyone.
     { "Graphics_Sound", "AsyncTexLoader", &Settings::OptAsyncTexLoader },
-    { "UI_Lua", "AsyncTerrainLoader", &Settings::OptAsyncTerrainLoader },
     { "UI_Lua", "RcuObjMgr", &Settings::OptRcuObjMgr },
     { "UI_Lua", "ObjMgrEnumFast", &Settings::OptObjMgrEnumFast },
     { "General", "FreezeCatcher", &Settings::OptFreezeCatcher },
@@ -165,7 +164,6 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "TerrainHeightCache", &Settings::OptTerrainHeightCache },
     { "Graphics_Sound", "TextureUnloadDelay", &Settings::OptTextureUnloadDelay },
     { "Graphics_Sound", "M2MatrixSimd", &Settings::OptM2MatrixSimd },
-    { "General", "MpqAsyncDecompress", &Settings::OptMpqAsyncDecompress },
     { "Graphics_Sound", "SimdMatrixTransform", &Settings::OptSimdMatrixTransform },
     { "Graphics_Sound", "SpellEffectCulling", &Settings::OptSpellEffectCulling },
     { "Graphics_Sound", "RenderNullGuard", &Settings::OptRenderNullGuard },
@@ -265,8 +263,8 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         // missing from here is the defect the check exists to catch.
         Log("[Config] Settings with no launcher entry, set by hand in the ini "
             "and now preserved when the launcher saves: AddonDispatcher, "
-            "AsyncTerrainLoader, CrtMimalloc, D3d9RenderThread, MimallocLarge, "
-            "MpqAsyncDecompress, NameplateMT, PacketOffload, RcuObjMgr, "
+            "CrtMimalloc, D3d9RenderThread, MimallocLarge, "
+            "NameplateMT, PacketOffload, RcuObjMgr, "
             "SavedVarsAsync, UnitAuraFast, VaArena, WorldStateCoalesce. "
             "MimallocLarge has a known heap crash and D3d9RenderThread moves "
             "draw submission off the main thread; the rest are off because "
@@ -477,7 +475,6 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
             WritePrivateProfileStringA("UI_Lua", "LuaJIT", "0", iniPath.c_str());
             WritePrivateProfileStringA("UI_Lua", "LuaGetTimeFast", "0", iniPath.c_str());
             WritePrivateProfileStringA("Graphics_Sound", "AsyncTexLoader", "0", iniPath.c_str());
-            WritePrivateProfileStringA("UI_Lua", "AsyncTerrainLoader", "0", iniPath.c_str());
             WritePrivateProfileStringA("UI_Lua", "RcuObjMgr", "0", iniPath.c_str());
             WritePrivateProfileStringA("Graphics_Sound", "MipBiasGovernor", "0", iniPath.c_str());
 
@@ -510,7 +507,6 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
 
             WritePrivateProfileStringA("Graphics_Sound", "TextureUnloadDelay", "0", iniPath.c_str());
             WritePrivateProfileStringA("Graphics_Sound", "M2MatrixSimd", "0", iniPath.c_str());
-            WritePrivateProfileStringA("General", "MpqAsyncDecompress", "0", iniPath.c_str());
             WritePrivateProfileStringA("Graphics_Sound", "SimdMatrixTransform", "0", iniPath.c_str());
             WritePrivateProfileStringA("Graphics_Sound", "SpellEffectCulling", "0", iniPath.c_str());
             WritePrivateProfileStringA("General", "CrtMimalloc", "0", iniPath.c_str());
@@ -601,7 +597,6 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptLuaGcCoalesce       = GetPrivateProfileIntA("UI_Lua", "LuaGcCoalesce", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaGetTimeFast      = GetPrivateProfileIntA("UI_Lua", "LuaGetTimeFast", 0, iniPath.c_str()) != 0;
         g_settings.OptAsyncTexLoader      = GetPrivateProfileIntA("Graphics_Sound", "AsyncTexLoader", 0, iniPath.c_str()) != 0;
-        g_settings.OptAsyncTerrainLoader  = GetPrivateProfileIntA("UI_Lua", "AsyncTerrainLoader", 0, iniPath.c_str()) != 0;
         g_settings.OptRcuObjMgr           = GetPrivateProfileIntA("UI_Lua", "RcuObjMgr", 0, iniPath.c_str()) != 0;
         g_settings.OptObjMgrEnumFast      = GetPrivateProfileIntA("UI_Lua", "ObjMgrEnumFast", 0, iniPath.c_str()) != 0;
         g_settings.OptFreezeCatcher       = GetPrivateProfileIntA("General", "FreezeCatcher", 0, iniPath.c_str()) != 0;
@@ -737,7 +732,6 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         // Parse Features 31-50
         g_settings.OptTextureUnloadDelay = GetPrivateProfileIntA("Graphics_Sound", "TextureUnloadDelay", 0, iniPath.c_str()) != 0;
         g_settings.OptM2MatrixSimd = GetPrivateProfileIntA("Graphics_Sound", "M2MatrixSimd", 0, iniPath.c_str()) != 0;
-        g_settings.OptMpqAsyncDecompress = GetPrivateProfileIntA("General", "MpqAsyncDecompress", 0, iniPath.c_str()) != 0;
         g_settings.OptSimdMatrixTransform = GetPrivateProfileIntA("Graphics_Sound", "SimdMatrixTransform", 0, iniPath.c_str()) != 0;
         g_settings.OptSpellEffectCulling = GetPrivateProfileIntA("Graphics_Sound", "SpellEffectCulling", 0, iniPath.c_str()) != 0;
         g_settings.OptRenderNullGuard = GetPrivateProfileIntA("Graphics_Sound", "RenderNullGuard", 1, iniPath.c_str()) != 0;

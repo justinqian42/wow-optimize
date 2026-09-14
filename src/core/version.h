@@ -608,7 +608,6 @@
 // removed in v3.16.3 for breaking server connections ("unable to connect"). The
 // opt-in large-allocation redirect (OptMimallocLarge) is the safe replacement.
 #define TEST_DISABLE_CRT_MIMALLOC               1  // disabled: CRT Allocator Redirect (connection breaker)
-#define TEST_DISABLE_MPQ_ASYNC_DECOMPRESS       0  // enabled: Asynchronous MPQ File Decompressor
 #define TEST_DISABLE_RCU_OBJ_MGR                0  // enabled: Lock-Free Read-Copy-Update (RCU) Object Manager
 #define TEST_DISABLE_D3D9_VB_CACHE              1  // disabled: D3D9 VB Shadow Cache
 #define TEST_DISABLE_ADDON_TICK_GOVERNOR        0  // enabled: Addon Tick Governor
@@ -619,7 +618,6 @@
 #define TEST_DISABLE_MIP_BIAS_GOVERNOR          0  // enabled: Dynamic Mipmap Bias Governor
 #define TEST_DISABLE_SPATIAL_CULLING            0  // enabled: Spatial Culling Grid
 #define TEST_DISABLE_PERF_DIAGNOSTICS           0  // enabled: Performance Diagnostics Monitor
-#define TEST_DISABLE_ASYNC_TERRAIN              0  // enabled: Asynchronous Terrain Loader
 
 // DEAD FLAG — not referenced by any #if anywhere in src/. The G1/G2/G2AL/
 // G2AI/G2B/G2C/G3 sub-flags below are the actual, independent gates for

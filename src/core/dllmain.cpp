@@ -692,7 +692,6 @@ static void StopFreezeWatchdog() {
 #include "combatlog_optimize.h"
 #include "combatlog_buffer.h"
 #include "addon_dispatcher.h"
-#include "mpq_async_decompress.h"
 #include "obj_vis_cache.h"
 #include "nameplate_batch.h"
 #include "addon_preload.h"
@@ -820,7 +819,6 @@ void ClearCombatLogCache();
 #include "rcu_obj_mgr.h"
 #include "objmgr_enum_fast.h"
 #include "mpq_open_census.h"
-#include "async_terrain_loader.h"
 
 #include "d3d9_state_manager.h"
 #include "dxvk_bridge.h"
@@ -5711,7 +5709,6 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("VertexBufferPrealloc::LogStats", VertexBufferPrealloc::LogStats());
     STAT_TIME("LuaBytecodeCache::LogStats", LuaBytecodeCache::LogStats());
     STAT_TIME("CombatLogBuffer::LogStats", CombatLogBuffer::LogStats());
-    STAT_TIME("MpqAsyncDecompress::LogStats", MpqAsyncDecompress::LogStats());
 
     // Last, so it covers everything above it. The report is the only thing in
     // this DLL that reliably costs the player a visible pause, and it costs it
@@ -8943,10 +8940,6 @@ static DWORD WINAPI MainThread(LPVOID param) {
 #endif
 
     Log("");
-    Log("--- Memory-Mapped MPQ VFS & Parallel Decompressor ---");
-    if (Config::g_settings.OptMpqAsyncDecompress) MpqAsyncDecompress::Init();
-
-    Log("");
     Log("--- Object Visibility Cache ---");
 #if TEST_DISABLE_OBJ_VIS_CACHE
     // Compiled out, so the launcher no longer offers a checkbox for it. It had
@@ -9477,10 +9470,6 @@ static DWORD WINAPI MainThread(LPVOID param) {
     if (Config::g_settings.OptRcuObjMgr) RcuObjMgr::Init();
     ObjMgrEnumFast::Init();
     MpqOpenCensus::Init();
-
-    Log("");
-    Log("--- Asynchronous Terrain Mesh Loader ---");
-    if (Config::g_settings.OptAsyncTerrainLoader && !RunningUnderTranslation()) AsyncTerrainLoader::Init();
 
     Log("");
     Log("--- M2 LOD Bias Control ---");
@@ -11499,7 +11488,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             RcuObjMgr::Shutdown();
             ObjMgrEnumFast::Shutdown();
             MpqOpenCensus::Shutdown();
-            AsyncTerrainLoader::Shutdown();
             AsyncTexLoader::Shutdown();
             MipBiasGovernor::Shutdown();
             PerfDiagnostics::Shutdown();
