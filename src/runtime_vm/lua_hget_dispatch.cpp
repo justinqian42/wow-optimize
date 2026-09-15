@@ -156,16 +156,29 @@ inline void* Evaluate(void* t, const void* key) {
 
 }  // namespace
 
-void* __cdecl Hooked_HGetBody(void* t, const void* key) {
-    g_calls++;
-    if (g_dead || !t || !key) return orig_HGet(t, key);
+// Faults the guard caught, while verifying or after. The guard's fallback is
+// the client's own lookup, which reads the same table and key, so a fault here
+// is one the fallback would take too; the armed path therefore runs without an
+// exception frame once kVerifyFirst lookups have run guarded and this is still
+// zero. If it ever is not, every lookup stays guarded.
+static unsigned long g_caught = 0;
 
+static __declspec(noinline) void* HGetGuarded(void* t, const void* key) {
+    __try {
+        return Evaluate(t, key);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_caught;
+        return orig_HGet(t, key);
+    }
+}
 
-    if (!g_armed || (g_calls & kResampleMask) == 0) {
+static __declspec(noinline) void* HGetVerify(void* t, const void* key) {
+    {
         void* mine;
         __try {
             mine = Evaluate(t, key);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
+            ++g_caught;
             return orig_HGet(t, key);
         }
         void* theirs = orig_HGet(t, key);
@@ -190,12 +203,14 @@ void* __cdecl Hooked_HGetBody(void* t, const void* key) {
         }
         return theirs;
     }
+}
 
-    __try {
-        return Evaluate(t, key);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return orig_HGet(t, key);
-    }
+void* __cdecl Hooked_HGetBody(void* t, const void* key) {
+    g_calls++;
+    if (g_dead || !t || !key) return orig_HGet(t, key);
+    if (!g_armed || (g_calls & kResampleMask) == 0) return HGetVerify(t, key);
+    if (g_caught) return HGetGuarded(t, key);
+    return Evaluate(t, key);
 }
 
 // The detour proper, kept apart from the body above for one reason: the
@@ -269,6 +284,10 @@ void LogStats() {
     if (!Config::g_settings.OptLuaHGetDispatch) return;
     if (!g_installed) { Log("[LuaHGet] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[LuaHGet] installed but never called"); return; }
+    Log("[LuaHGet]   exception guard: %lu fault(s) caught; the armed path runs %s.",
+        g_caught, !g_armed ? "guarded, still verifying"
+                  : (g_caught ? "guarded, because the guard has caught something"
+                              : "without an exception frame"));
 
     Log("[LuaHGet] %lu lookups%s: %lu integer keys, %lu string keys, %lu left to "
         "the client's general path, %lu verified against it. Counts are lower "

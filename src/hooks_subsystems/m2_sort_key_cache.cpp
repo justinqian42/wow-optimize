@@ -253,16 +253,30 @@ inline int Compare(void* a, void* b) {
 
 }  // namespace
 
-int __stdcall Hooked_CompareBody(void* a, void* b) {
-    g_calls++;
-    if (g_dead || !a || !b) return orig_Compare(a, b);
+// Faults the guard caught, while verifying or after. The fallback is the
+// client's own comparator, which reads the same two objects and the same
+// descriptor chain, so a fault here is one the fallback would take too; the
+// armed path runs without an exception frame once kVerifyFirst comparisons
+// have run guarded and this is still zero. If it ever is not, every comparison
+// stays guarded.
+static unsigned long g_caught = 0;
 
+static __declspec(noinline) int CompareGuarded(void* a, void* b) {
+    __try {
+        return Compare(a, b);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_caught;
+        return orig_Compare(a, b);
+    }
+}
 
-    if (!g_armed || (g_calls & kResampleMask) == 0) {
+static __declspec(noinline) int CompareVerify(void* a, void* b) {
+    {
         int mine;
         __try {
             mine = Compare(a, b);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
+            ++g_caught;
             return orig_Compare(a, b);
         }
         int theirs = orig_Compare(a, b);
@@ -308,12 +322,14 @@ int __stdcall Hooked_CompareBody(void* a, void* b) {
         }
         return theirs;
     }
+}
 
-    __try {
-        return Compare(a, b);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return orig_Compare(a, b);
-    }
+int __stdcall Hooked_CompareBody(void* a, void* b) {
+    g_calls++;
+    if (g_dead || !a || !b) return orig_Compare(a, b);
+    if (!g_armed || (g_calls & kResampleMask) == 0) return CompareVerify(a, b);
+    if (g_caught) return CompareGuarded(a, b);
+    return Compare(a, b);
 }
 
 // The detour proper, kept apart from the body above for one reason: the
@@ -400,6 +416,10 @@ void LogStats() {
     if (!Config::g_settings.OptM2SortKey) return;
     if (!g_installed) { Log("[M2SortKey] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[M2SortKey] installed but never called"); return; }
+    Log("[M2SortKey]   exception guard: %lu fault(s) caught; the armed path runs %s.",
+        g_caught, !g_armed ? "guarded, still verifying"
+                  : (g_caught ? "guarded, because the guard has caught something"
+                              : "without an exception frame"));
 
     unsigned long looked = g_hits + g_misses;
     Log("[M2SortKey] %lu comparisons%s, %lu verified against the client. Key "

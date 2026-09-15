@@ -221,12 +221,28 @@ int Evaluate(const float* box, const float* start, const float* end) {
 
 }  // namespace
 
-int __cdecl Hooked_TestBody(const float* box, const float* start, const float* end) {
-    Bump(g_calls, g_callWraps);
-    if (g_dead || !box || !start || !end) return orig_Test(box, start, end);
+// Faults the guard caught, while verifying or after. The fallback is the
+// client's own test, which reads the same box and segment, so a fault here is
+// one the fallback would take too; the armed path runs without an exception
+// frame once kVerifyFirst tests have run guarded and this is still zero. If it
+// ever is not, every test stays guarded.
+static unsigned long g_caught = 0;
 
+static __declspec(noinline) int TestGuarded(const float* box, const float* start,
+                                            const float* end) {
+    __try {
+        int r = Evaluate(box, start, end);
+        if (r) Bump(g_hits, g_hitWraps);
+        return r;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_caught;
+        return orig_Test(box, start, end);
+    }
+}
 
-    if (!g_armed || (g_calls & kResampleMask) == 0) {
+static __declspec(noinline) int TestVerify(const float* box, const float* start,
+                                           const float* end) {
+    {
         // The verification already runs both halves on the same input. Timing
         // it is the only paired comparison this project gets without asking a
         // tester to configure anything.
@@ -235,6 +251,7 @@ int __cdecl Hooked_TestBody(const float* box, const float* start, const float* e
         __try {
             mine = Evaluate(box, start, end);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
+            ++g_caught;
             return orig_Test(box, start, end);
         }
         const uint64_t tB = SelfBench::Now();
@@ -261,14 +278,16 @@ int __cdecl Hooked_TestBody(const float* box, const float* start, const float* e
         if (theirs) Bump(g_hits, g_hitWraps);
         return theirs;
     }
+}
 
-    __try {
-        int r = Evaluate(box, start, end);
-        if (r) Bump(g_hits, g_hitWraps);
-        return r;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return orig_Test(box, start, end);
-    }
+int __cdecl Hooked_TestBody(const float* box, const float* start, const float* end) {
+    Bump(g_calls, g_callWraps);
+    if (g_dead || !box || !start || !end) return orig_Test(box, start, end);
+    if (!g_armed || (g_calls & kResampleMask) == 0) return TestVerify(box, start, end);
+    if (g_caught) return TestGuarded(box, start, end);
+    int r = Evaluate(box, start, end);
+    if (r) Bump(g_hits, g_hitWraps);
+    return r;
 }
 
 // The detour proper, kept apart from the body above for one reason: the
@@ -349,6 +368,10 @@ void LogStats() {
     if (!Config::g_settings.OptSegmentAabb) return;
     if (!g_installed) { Log("[SegmentAabb] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[SegmentAabb] installed but never called"); return; }
+    Log("[SegmentAabb]   exception guard: %lu fault(s) caught; the armed path runs %s.",
+        g_caught, !g_armed ? "guarded, still verifying"
+                  : (g_caught ? "guarded, because the guard has caught something"
+                              : "without an exception frame"));
 
     const double callsTotal = Total(g_calls, g_callWraps);
     const double hitsTotal  = Total(g_hits, g_hitWraps);
