@@ -1900,6 +1900,65 @@ static void InvalidateAllCaches() {
     g_psValid = false;
 }
 
+// Which module an address belongs to, by file name, for the log.
+static HMODULE ModuleOfAddress(uintptr_t addr, char* name, int cap) {
+    HMODULE h = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)addr, &h) || !h) {
+        lstrcpynA(name, "no module (allocated memory)", cap);
+        return nullptr;
+    }
+    char path[MAX_PATH];
+    if (!GetModuleFileNameA(h, path, MAX_PATH)) {
+        lstrcpynA(name, "an unnamed module", cap);
+        return h;
+    }
+    const char* leaf = path;
+    for (const char* p = path; *p; ++p) {
+        if (*p == '\\' || *p == '/') leaf = p + 1;
+    }
+    lstrcpynA(name, leaf, cap);
+    return h;
+}
+
+// The two exports ReShade's own add-on header (include/reshade.hpp) uses to find
+// the ReShade module among the loaded ones.
+static bool IsReShadeModule(HMODULE h) {
+    return h && GetProcAddress(h, "ReShadeRegisterAddon") &&
+           GetProcAddress(h, "ReShadeUnregisterAddon");
+}
+
+// Whose device table this module is about to write into.
+//
+// A player with ReShade installed could not enter the world, could with ReShade
+// removed, and No Client Patches did not help - which it cannot, because the
+// device table lives in whatever module implements the device, not in wow.exe.
+// The log said "vtable: 6A88B604" and nothing about whose that is. The client's
+// device pointer is whatever the renderer stack handed it: DXVK's device, or a
+// wrapper around it that another program put in between. Named here, before
+// anything is patched, so the slots still hold the originals.
+static void LogDeviceOwnership(uintptr_t* vtable) {
+    char vtName[MAX_PATH], presentName[MAX_PATH], rsName[MAX_PATH];
+    const HMODULE vtMod = ModuleOfAddress((uintptr_t)vtable, vtName, MAX_PATH);
+    const HMODULE prMod = ModuleOfAddress(vtable[17], presentName, MAX_PATH);
+    const HMODULE rsMod = ModuleOfAddress(vtable[57], rsName, MAX_PATH);
+    Log("[D3D9State] the device function table at %p is in %s; Present comes from "
+        "%s and SetRenderState from %s.", vtable, vtName, presentName, rsName);
+
+    const HMODULE reshade = IsReShadeModule(vtMod) ? vtMod
+                          : IsReShadeModule(prMod) ? prMod
+                          : IsReShadeModule(rsMod) ? rsMod : nullptr;
+    if (reshade) {
+        char rsFile[MAX_PATH];
+        ModuleOfAddress((uintptr_t)reshade, rsFile, MAX_PATH);
+        Log("[D3D9State] %s is ReShade (it exports ReShadeRegisterAddon), so every "
+            "hook below sits on ReShade's own layer over the device. If the game "
+            "misbehaves with ReShade installed and not without it, turn off D3D9 "
+            "Render State Dedup: that removes all of them.", rsFile);
+    }
+}
+
 static bool TryFindAndPatchDevice() {
     // Always patch, even under DXVK: this is what installs the Reset hook that
     // FontGlyphCache/TextureUnloadDelay/D3D9StateCache rely on for invalidation
@@ -1920,6 +1979,7 @@ static bool TryFindAndPatchDevice() {
     uintptr_t* vtable = *(uintptr_t**)pDevice;
     if (!vtable || !IsReadable((uintptr_t)vtable)) return false;
 
+    LogDeviceOwnership(vtable);
     return PatchDeviceVTable(pDevice);
 }
 
