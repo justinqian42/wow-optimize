@@ -5577,6 +5577,8 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     if (g_priorityWatchdogRestores > 0)
         Log("[Stats] Priority watchdog: %ld restorations", (long)g_priorityWatchdogRestores);
 
+    LogLockTuningStats();
+
     Log("[Stats] ====================================");
 
 #if !TEST_DISABLE_SAMPLING_PROFILER
@@ -8079,9 +8081,12 @@ static DWORD WINAPI MainThread(LPVOID param) {
 #else
     Log("[HeapRedirect] DISABLED via TEST_DISABLE_HEAP_REDIRECT");
 #endif
-    // Retrofits spin counts onto fifteen of the client's critical sections and
-    // hooks InitializeCriticalSection. Took no setting until 3.18.2.
-    if (Config::g_settings.OptLockTuning) InstallLockTuning();   // self-logs
+    // Retrofits spin counts onto fifteen of the client's critical sections and,
+    // on its own switch, hooks InitializeCriticalSection. Took no setting until
+    // 3.18.2.
+    if (Config::g_settings.OptLockTuning || Config::g_settings.OptLockTuningInitHook)
+        InstallLockTuning(Config::g_settings.OptLockTuning,
+                          Config::g_settings.OptLockTuningInitHook);   // self-logs
     Log("--- Texture Cache Budget ---");
     if (Config::g_settings.OptMemoryPressure) {
         InitTexCacheTuning();  // self-logs; single-client only

@@ -36,6 +36,9 @@ static const uintptr_t ENGINE_LOCKS[] = {
 
 static unsigned g_retrofitted  = 0;
 static unsigned g_runtimeTuned = 0;
+static bool     g_retrofitRan         = false;
+static bool     g_initHookRequested   = false;
+static bool     g_initHookInstalled   = false;
 
 typedef void (WINAPI *InitCS_fn)(LPCRITICAL_SECTION);
 static InitCS_fn g_origInitCS = nullptr;
@@ -74,41 +77,73 @@ static void WINAPI Hooked_InitializeCriticalSection(LPCRITICAL_SECTION cs) {
         ++g_runtimeTuned;
 }
 
-bool InstallLockTuning() {
-    // 1. Retrofit the already-created CRT locks (the heap lock #4 is the prize).
-    __try {
-        for (int n = 0; n < CRT_LOCK_SPAN; ++n) {
-            LPCRITICAL_SECTION* slot = (LPCRITICAL_SECTION*)(CRT_LOCKTABLE + (uintptr_t)n * 4);
-            LPCRITICAL_SECTION cs = *slot;   // runtime-populated; NULL if lock n unused
-            if (cs && TuneCS(cs))
-                ++g_retrofitted;
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("[LockTuning] CRT lock-table sweep faulted (skipped)");
-    }
-
-    // 2. Retrofit WoW's startup engine locks (missed by the hook below).
+// The two halves reach different code. The retrofit writes a spin count into
+// critical sections that belong to wow.exe and nothing else. The hook patches
+// the kernel32 export, which the loader resolves to ntdll's
+// RtlInitializeCriticalSection, so every module in the process passes through
+// it whenever it creates a lock: overlays, ReShade, DXVK, and anything else a
+// player has injected. It is also outside wow.exe, so No Client Patches does not
+// stop it. A tester running ReShade could not enter the world until this whole
+// switch was off, while No Client Patches changed nothing. Which half is
+// responsible is not established, so the hook has its own switch, inheriting
+// this one, to let the next session tell them apart.
+bool InstallLockTuning(bool retrofit, bool hookInitCS) {
     unsigned engineTuned = 0;
-    for (uintptr_t addr : ENGINE_LOCKS) {
-        if (TuneCS((LPCRITICAL_SECTION)addr)) ++engineTuned;
+    if (retrofit) {
+        g_retrofitRan = true;
+
+        // 1. Retrofit the already-created CRT locks (the heap lock #4 is the prize).
+        __try {
+            for (int n = 0; n < CRT_LOCK_SPAN; ++n) {
+                LPCRITICAL_SECTION* slot = (LPCRITICAL_SECTION*)(CRT_LOCKTABLE + (uintptr_t)n * 4);
+                LPCRITICAL_SECTION cs = *slot;   // runtime-populated; NULL if lock n unused
+                if (cs && TuneCS(cs))
+                    ++g_retrofitted;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("[LockTuning] CRT lock-table sweep faulted (skipped)");
+        }
+
+        // 2. Retrofit WoW's startup engine locks (missed by the hook below).
+        for (uintptr_t addr : ENGINE_LOCKS) {
+            if (TuneCS((LPCRITICAL_SECTION)addr)) ++engineTuned;
+        }
+        g_retrofitted += engineTuned;
     }
-    g_retrofitted += engineTuned;
 
     // 3. Blanket future critical sections via the kernel32 export.
-    bool hookOk = false;
-    if (MH_CreateHook((void*)&InitializeCriticalSection,
+    g_initHookRequested = hookInitCS;
+    if (hookInitCS &&
+        MH_CreateHook((void*)&InitializeCriticalSection,
                       (void*)Hooked_InitializeCriticalSection,
                       (void**)&g_origInitCS) == MH_OK &&
         MH_EnableHook((void*)&InitializeCriticalSection) == MH_OK) {
-        hookOk = true;
+        g_initHookInstalled = true;
     }
 
-    Log("[LockTuning] ACTIVE: spin=%u, locks retrofitted=%u (CRT heap #4 + %u engine), InitCS hook=%s",
-        SPIN_COUNT, g_retrofitted, engineTuned, hookOk ? "ON" : "FAILED");
-    return g_retrofitted > 0 || hookOk;
+    Log("[LockTuning] ACTIVE: spin=%u, client locks retrofitted=%s%u (CRT + %u engine), "
+        "InitializeCriticalSection hook for every module=%s",
+        SPIN_COUNT, retrofit ? "" : "off, ", g_retrofitted, engineTuned,
+        !hookInitCS ? "OFF by its switch" : g_initHookInstalled ? "ON" : "FAILED");
+    return g_retrofitted > 0 || g_initHookInstalled;
 }
 
-void GetLockTuningStats(unsigned* retrofitted, unsigned* runtimeTuned) {
-    if (retrofitted)  *retrofitted  = g_retrofitted;
-    if (runtimeTuned) *runtimeTuned = g_runtimeTuned;
+// Nothing called the old accessor, so no log ever said what either half did.
+void LogLockTuningStats() {
+    if (!g_retrofitRan && !g_initHookRequested) {
+        Log("[LockTuning] not measured: both halves are switched off.");
+        return;
+    }
+    if (g_retrofitRan)
+        Log("[LockTuning] %u of the client's own locks were given a spin count at startup.",
+            g_retrofitted);
+    else
+        Log("[LockTuning] the client's own locks were left alone: switched off.");
+    if (g_initHookInstalled)
+        Log("[LockTuning] InitializeCriticalSection hook: %u lock(s) created since it went in, "
+            "by any module in the process, were given a spin count. A plain counter "
+            "incremented from many threads, so a lower bound.", g_runtimeTuned);
+    else
+        Log("[LockTuning] InitializeCriticalSection hook: not installed (%s).",
+            g_initHookRequested ? "the hook failed to go in" : "switched off");
 }

@@ -78,6 +78,10 @@ namespace Config {
         // run, so they default on, and turning them off is what the vanilla
         // button needs in order to mean anything.
         bool OptLockTuning        = true;   // retrofits spin counts onto 15 client locks
+        // The InitializeCriticalSection hook that used to ride on LockTuning.
+        // It patches ntdll for every module in the process, so it has its own
+        // switch; the key inherits LockTuning when absent.
+        bool OptLockTuningInitHook = true;
         bool OptAsyncMpqIo        = true;   // spawns a background I/O worker thread
         bool OptThreadIdCache     = true;   // hooks GetCurrentThreadId
         bool OptPriorityGuard     = true;   // hooks SetPriorityClass to block downgrades
