@@ -20,6 +20,7 @@ static strstr_fn orig_strstr = nullptr;
 static volatile LONG64 g_calls = 0, g_fast = 0;
 
 static const char* __cdecl Hooked_strstr(const char* haystack, const char* needle) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_strstr(haystack, needle);
     if (!haystack || !needle) return nullptr;
     if (!*needle) return haystack;
 

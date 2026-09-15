@@ -860,6 +860,33 @@ static inline bool WowOpt_InsideClientImage(const void* addr) {
     return a >= base && a < end;
 }
 
+// Who called a hooked system function. A hook on a kernel32, user32, advapi32
+// or CRT export sits in front of every module in the process, not only the
+// client: ReShade, DXVK, overlays, drivers. Most of these hooks cache an answer
+// or change what the function does, and none has a measured gain for any caller
+// but the client. A tester running ReShade could not enter the world until one
+// of them, the InitializeCriticalSection hook, was switched off.
+//
+// So a hook answers in its own way only when the return address lies in
+// wow.exe or in this DLL, and calls the real function for everyone else. Both
+// ranges are filled in at DLL_PROCESS_ATTACH, before any hook exists; until
+// then the sizes are zero and every caller counts as foreign. Nothing here may
+// call an API a hook is on, which is why it does not use the lazy lookup above:
+// the GetModuleHandleA hook itself asks this question.
+extern uintptr_t g_wowOptClientLo, g_wowOptClientSize, g_wowOptSelfLo, g_wowOptSelfSize;
+extern bool      g_wowOptSystemHooksClientOnly;
+
+static inline bool WowOpt_CallerIsForeign(const void* ret) {
+    if (!g_wowOptSystemHooksClientOnly) return false;
+    uintptr_t a = (uintptr_t)ret;
+    if (a - g_wowOptClientLo < g_wowOptClientSize) return false;
+    if (a - g_wowOptSelfLo < g_wowOptSelfSize) return false;
+    return true;
+}
+
+// Expanded inside the hook, where _ReturnAddress() is the caller of the API.
+#define WOWOPT_FOREIGN_CALLER() WowOpt_CallerIsForeign(_ReturnAddress())
+
 // The same refusal for a write this project performs itself rather than through
 // MinHook. Returns true when the write may go ahead. Call it with the address
 // about to be written and a name for the log; a patch site that does not ask is

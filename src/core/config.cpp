@@ -47,6 +47,7 @@ static const BoolSetting kBoolSettings[] = {
     { "General", "WowSubsystemHooks", &Settings::OptWowSubsystemHooks },
     { "General", "LockTuning", &Settings::OptLockTuning },
     { "General", "LockTuningInitHook", &Settings::OptLockTuningInitHook },
+    { "General", "SystemHooksClientOnly", &Settings::OptSystemHooksClientOnly },
     { "General", "AsyncMpqIo", &Settings::OptAsyncMpqIo },
     { "General", "ThreadIdCache", &Settings::OptThreadIdCache },
     { "General", "PriorityGuard", &Settings::OptPriorityGuard },
@@ -535,6 +536,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptWowSubsystemHooks  = GetPrivateProfileIntA("General", "WowSubsystemHooks", 1, iniPath.c_str()) != 0;
         g_settings.OptLockTuning         = GetPrivateProfileIntA("General", "LockTuning", 1, iniPath.c_str()) != 0;
         g_settings.OptLockTuningInitHook = GetPrivateProfileIntA("General", "LockTuningInitHook", 0, iniPath.c_str()) != 0;
+        g_settings.OptSystemHooksClientOnly = GetPrivateProfileIntA("General", "SystemHooksClientOnly", 1, iniPath.c_str()) != 0;
         g_settings.OptAsyncMpqIo         = GetPrivateProfileIntA("General", "AsyncMpqIo", 1, iniPath.c_str()) != 0;
         g_settings.OptThreadIdCache      = GetPrivateProfileIntA("General", "ThreadIdCache", 1, iniPath.c_str()) != 0;
         g_settings.OptPriorityGuard      = GetPrivateProfileIntA("General", "PriorityGuard", 1, iniPath.c_str()) != 0;

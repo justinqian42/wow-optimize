@@ -127,6 +127,10 @@ static volatile bool  g_freezeWatchdogActive = false;
 static HANDLE         g_freezeWatchdogThread = NULL;
 DWORD          g_mainThreadId = 0;
 bool           g_processExiting = false;
+// The two images whose calls system hooks still answer; see version.h.
+uintptr_t      g_wowOptClientLo = 0, g_wowOptClientSize = 0;
+uintptr_t      g_wowOptSelfLo = 0, g_wowOptSelfSize = 0;
+bool           g_wowOptSystemHooksClientOnly = true;
 
 // Forward-declared here because the watchdog (below) is defined before
 // lua_optimize.h is included; definitions match that header.
@@ -2255,6 +2259,7 @@ extern "C" void WowOpt_MainThreadPump() {
 
 
 static void WINAPI hooked_Sleep(DWORD ms) {
+    if (WOWOPT_FOREIGN_CALLER()) { orig_Sleep(ms); return; }
     if (g_mainThreadId != 0 && GetCurrentThreadId() == g_mainThreadId) {
         MainThreadPump();
 
@@ -2404,6 +2409,7 @@ static void OptimizeSocket(SOCKET s, const char* trigger) {
 }
 
 static int WINAPI hooked_connect(SOCKET s, const struct sockaddr* name, int namelen) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_connect(s, name, namelen);
     int result = orig_connect(s, name, namelen);
     int savedError = WSAGetLastError();
 
@@ -2419,6 +2425,7 @@ static int WINAPI hooked_connect(SOCKET s, const struct sockaddr* name, int name
 }
 
 static int WINAPI hooked_send(SOCKET s, const char* buf, int len, int flags) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_send(s, buf, len, flags);
     if (RemovePendingSocket(s)) {
         int savedError = WSAGetLastError();
         OptimizeSocket(s, "send");
@@ -2450,6 +2457,7 @@ static unsigned long g_WSARecvBytesWraps = 0;
 static long g_WSARecvWouldBlock = 0;
 
 static int WINAPI hooked_recv(SOCKET s, char* buf, int len, int flags) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_recv(s, buf, len, flags);
     int result = orig_recv(s, buf, len, flags);
     if (result > 0) {
         g_recvCalls++;
@@ -2468,6 +2476,7 @@ static int WINAPI hooked_recv(SOCKET s, char* buf, int len, int flags) {
 static int WINAPI hooked_WSARecv(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                                   LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags,
                                   LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_WSARecv(s, lpBuffers, dwBufferCount, lpNumberOfBytesRecvd, lpFlags, lpOverlapped, lpCompletionRoutine);
     int result = orig_WSARecv(s, lpBuffers, dwBufferCount, lpNumberOfBytesRecvd,
                                lpFlags, lpOverlapped, lpCompletionRoutine);
     if (result == 0 && lpNumberOfBytesRecvd) {
@@ -3320,6 +3329,7 @@ static LARGE_INTEGER g_qpcFreq, g_qpcStart;
 static DWORD g_tickStart;
 
 static DWORD WINAPI hooked_GetTickCount(void) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetTickCount();
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     double elapsed = (double)(now.QuadPart - g_qpcStart.QuadPart) / g_qpcFreq.QuadPart;
@@ -3346,6 +3356,7 @@ typedef DWORD (WINAPI* timeGetTime_fn)(void);
 static timeGetTime_fn orig_timeGetTime = nullptr;
 
 static DWORD WINAPI hooked_timeGetTime(void) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_timeGetTime();
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     double elapsed = (double)(now.QuadPart - g_qpcStart.QuadPart) / g_qpcFreq.QuadPart;
@@ -3376,6 +3387,7 @@ static EnterCS_fn orig_EnterCS = nullptr;
 static long g_csSpinHits = 0;
 
 static void WINAPI hooked_InitCS(LPCRITICAL_SECTION lpCS) {
+    if (WOWOPT_FOREIGN_CALLER()) { orig_InitCS(lpCS); return; }
 #if CRASH_TEST_DISABLE_CS_SPIN
     InitializeCriticalSection(lpCS);
 #else
@@ -3385,6 +3397,7 @@ static void WINAPI hooked_InitCS(LPCRITICAL_SECTION lpCS) {
 
 #if !CRASH_TEST_DISABLE_CS_ENTER
 static void WINAPI hooked_EnterCS(LPCRITICAL_SECTION lpCS) {
+    if (WOWOPT_FOREIGN_CALLER()) { orig_EnterCS(lpCS); return; }
     if (TryEnterCriticalSection(lpCS)) {
         InterlockedIncrement(&g_csSpinHits);
         return;
@@ -3447,6 +3460,7 @@ static void EnableLFH(HANDLE hHeap) {
 }
 
 static HANDLE WINAPI hooked_HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
     HANDLE h = orig_HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
     if (h && dwMaximumSize == 0) {
         // LFH only works on growable heaps (dwMaximumSize == 0)
@@ -3632,6 +3646,7 @@ static OutputDebugStringA_fn orig_OutputDebugStringA = nullptr;
 static long g_debugStringSkipped = 0;
 
 static void WINAPI hooked_OutputDebugStringA(LPCSTR lpOutputString) {
+    if (WOWOPT_FOREIGN_CALLER()) { orig_OutputDebugStringA(lpOutputString); return; }
     if (!IsDebuggerPresent()) {
         InterlockedIncrement(&g_debugStringSkipped);
         return;
@@ -3686,6 +3701,7 @@ static long g_compareFallbacks = 0;
 static int WINAPI hooked_CompareStringA(LCID Locale, DWORD dwCmpFlags,
     LPCSTR lpString1, int cchCount1, LPCSTR lpString2, int cchCount2)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_CompareStringA(Locale, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2);
     // Only fast-path for simple flags: none, case-insensitive, or string sort
     if ((dwCmpFlags & ~(NORM_IGNORECASE | SORT_STRINGSORT)) != 0)
         goto cmp_fallback;
@@ -3781,6 +3797,7 @@ static uint32_t HashPathCI(const char* path) {
 }
 
 static DWORD WINAPI hooked_GetFileAttributesA(LPCSTR lpFileName) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetFileAttributesA(lpFileName);
     if (!lpFileName) return orig_GetFileAttributesA(lpFileName);
 
     // Strictly limit cache to Interface and Data directories (guaranteed static).
@@ -3991,6 +4008,7 @@ static IsBadWritePtr_fn orig_IsBadWritePtr = nullptr;
 static long g_badPtrFastChecks = 0;
 
 static BOOL WINAPI hooked_IsBadReadPtr(const void* lp, UINT_PTR ucb) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_IsBadReadPtr(lp, ucb);
     if (!lp) return TRUE;
     if (ucb == 0) return FALSE;
     if ((uintptr_t)lp < 0x10000) return TRUE;
@@ -4005,6 +4023,7 @@ static BOOL WINAPI hooked_IsBadReadPtr(const void* lp, UINT_PTR ucb) {
 }
 
 static BOOL WINAPI hooked_IsBadWritePtr(void* lp, UINT_PTR ucb) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_IsBadWritePtr(lp, ucb);
     if (!lp) return TRUE;
     if (ucb == 0) return FALSE;
     if ((uintptr_t)lp < 0x10000) return TRUE;
@@ -4058,6 +4077,7 @@ static __declspec(thread) DWORD t_cachedThreadId = 0;
 static long g_threadIdCacheHits = 0;
 
 static DWORD WINAPI hooked_GetCurrentThreadId(void) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetCurrentThreadId();
     DWORD id = t_cachedThreadId;
     if (id == 0) {
         id = orig_GetCurrentThreadId();
@@ -4067,6 +4087,7 @@ static DWORD WINAPI hooked_GetCurrentThreadId(void) {
 }
 
 static HANDLE WINAPI hooked_GetCurrentThread(void) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetCurrentThread();
     return (HANDLE)(LONG_PTR)-2;  // constant pseudo-handle
 }
 
@@ -4095,6 +4116,7 @@ static long g_qpcCacheMisses = 0;
 static uint64_t g_rdtscThreshold = 0;
 
 static BOOL WINAPI hooked_QPC(LARGE_INTEGER* lpPerformanceCount) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_QPC(lpPerformanceCount);
     if (!lpPerformanceCount)
         return orig_QPC(lpPerformanceCount);
 
@@ -4339,6 +4361,7 @@ static void NoteSavedVariablesWrite(const char* path) {
 static HANDLE WINAPI hooked_CreateFileA(LPCSTR lpFileName, DWORD dwAccess, DWORD dwShare,
     LPSECURITY_ATTRIBUTES lpSA, DWORD dwDisposition, DWORD dwFlags, HANDLE hTemplate)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_CreateFileA(lpFileName, dwAccess, dwShare, lpSA, dwDisposition, dwFlags, hTemplate);
     bool isMPQ = false;
     if (lpFileName && (dwAccess & GENERIC_READ)) {
         // Strip trailing backslash (folder paths like patch-Sunlight.MPQ\)
@@ -4403,6 +4426,7 @@ static HANDLE WINAPI hooked_CreateFileA(LPCSTR lpFileName, DWORD dwAccess, DWORD
 static HANDLE WINAPI hooked_CreateFileW(LPCWSTR lpFileName, DWORD dwAccess, DWORD dwShare,
     LPSECURITY_ATTRIBUTES lpSA, DWORD dwDisposition, DWORD dwFlags, HANDLE hTemplate)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_CreateFileW(lpFileName, dwAccess, dwShare, lpSA, dwDisposition, dwFlags, hTemplate);
     bool isMPQ = false;
     if (lpFileName && (dwAccess & GENERIC_READ)) {
         const wchar_t* ext = wcsrchr(lpFileName, L'.');
@@ -7000,6 +7024,7 @@ static Memcpy_fn orig_Memcpy = nullptr;
 long g_tvalueMemcpyHits = 0;
 
 static void* __cdecl hooked_Memcpy_TValue(void* dst, const void* src, size_t n) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_Memcpy(dst, src, n);
     if (n == 16) {
         uint64_t* d = (uint64_t*)dst;
         const uint64_t* s = (const uint64_t*)src;
@@ -7038,6 +7063,7 @@ static bool g_sysInfoCached = false;
 long g_sysInfoHits = 0;
 
 static void WINAPI hooked_GetSystemInfo(LPSYSTEM_INFO lpSI) {
+    if (WOWOPT_FOREIGN_CALLER()) { orig_GetSystemInfo(lpSI); return; }
     if (g_sysInfoCached && lpSI) {
         memcpy(lpSI, &g_cachedSysInfo, sizeof(SYSTEM_INFO));
         InterlockedIncrement(&g_sysInfoHits);
@@ -7078,6 +7104,7 @@ long g_regCacheHits = 0, g_regCacheMisses = 0;
 static LONG WINAPI hooked_RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved,
     LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_RegQueryValueExA(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
     if (!lpValueName || !lpType || !lpcbData) goto fallback;
 
     uint32_t hash = 0x811C9DC5;
@@ -7140,6 +7167,7 @@ static inline bool IsScreenDimMetric(int idx) {
 }
 
 static int WINAPI hooked_GetSystemMetrics(int nIndex) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetSystemMetrics(nIndex);
     if (nIndex >= 0 && nIndex < 128 && !IsScreenDimMetric(nIndex)) {
         if (g_smInited[nIndex]) {
             return g_smCache[nIndex];
@@ -7180,7 +7208,7 @@ static IsDebuggerPresent_fn orig_IsDebuggerPresent = nullptr;
 // fix. It is not a performance hook, it never was, and it is not evidence of one
 // - said plainly so the next reader does not have to guess, and so nobody counts
 // it among the optimizations.
-static BOOL WINAPI hooked_IsDebuggerPresent() { return FALSE; }
+static BOOL WINAPI hooked_IsDebuggerPresent() { if (WOWOPT_FOREIGN_CALLER()) return orig_IsDebuggerPresent(); return FALSE; }
 
 static bool InstallNoDebuggerPresent() {
     void* p = (void*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsDebuggerPresent");
@@ -7199,6 +7227,7 @@ static OSVERSIONINFOA g_cachedVersion = {};
 static bool g_verCached = false;
 
 static BOOL WINAPI hooked_GetVersionExA(LPOSVERSIONINFOA lpVI) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetVersionExA(lpVI);
     if (g_verCached && lpVI) {
         DWORD sz = lpVI->dwOSVersionInfoSize;
         if (sz > sizeof(OSVERSIONINFOA)) sz = sizeof(OSVERSIONINFOA);
@@ -7231,6 +7260,7 @@ static Memcmp_fn orig_Memcmp = nullptr;
 static long g_memcmpFast = 0;
 
 static int __cdecl hooked_Memcmp_Fast(const void* a, const void* b, size_t n) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_Memcmp(a, b, n);
     if (n == 4) {
         uint32_t va = *(const uint32_t*)a, vb = *(const uint32_t*)b;
         InterlockedIncrement(&g_memcmpFast);
@@ -7300,6 +7330,7 @@ static WaitForMultipleObjects_fn orig_WFMO = nullptr;
 static long g_wfmoFast = 0;
 
 static DWORD WINAPI hooked_WFMO(DWORD nCount, const HANDLE* lpHandles, BOOL bWaitAll, DWORD dwMs) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_WFMO(nCount, lpHandles, bWaitAll, dwMs);
     if (nCount == 1 && !bWaitAll) {
         InterlockedIncrement(&g_wfmoFast);
         return WaitForSingleObject(lpHandles[0], dwMs);
@@ -7379,6 +7410,7 @@ static LARGE_INTEGER g_gstaftBase = {};
 static bool g_gstaftInit = false;
 
 static void WINAPI hooked_GSTAFT(LPFILETIME lpFT) {
+    if (WOWOPT_FOREIGN_CALLER()) { orig_GSTAFT(lpFT); return; }
     // Return cached QPC-based time with 1ms refresh
     if (!g_gstaftInit) {
         QueryPerformanceFrequency(&g_gstaftFreq);
@@ -7404,6 +7436,7 @@ static GetACP_fn orig_GetACP = nullptr;
 static UINT g_cachedACP = 0;
 
 static UINT WINAPI hooked_GetACP() {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetACP();
     if (!g_cachedACP) g_cachedACP = orig_GetACP();
     return g_cachedACP;
 }
@@ -7414,6 +7447,7 @@ static GetUserDefaultLangID_fn orig_GetUDLI = nullptr;
 static LANGID g_cachedLang = 0;
 
 static LANGID WINAPI hooked_GetUDLI() {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetUDLI();
     if (!g_cachedLang) g_cachedLang = orig_GetUDLI();
     return g_cachedLang;
 }
@@ -7424,6 +7458,7 @@ static GetProcessHeap_fn orig_GetProcessHeap = nullptr;
 static HANDLE g_cachedHeap = NULL;
 
 static HANDLE WINAPI hooked_GetProcessHeap() {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetProcessHeap();
     if (!g_cachedHeap) g_cachedHeap = orig_GetProcessHeap();
     return g_cachedHeap;
 }
@@ -7433,6 +7468,7 @@ typedef char* (WINAPI* CharUpperA_fn)(char*);
 static CharUpperA_fn orig_CharUpperA = nullptr;
 
 static char* WINAPI hooked_CharUpperA(char* str) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_CharUpperA(str);
     if (str) {
         for (char* p = str; *p; p++)
             if (*p >= 'a' && *p <= 'z') *p -= 32;
@@ -7445,6 +7481,7 @@ typedef char* (WINAPI* CharLowerA_fn)(char*);
 static CharLowerA_fn orig_CharLowerA = nullptr;
 
 static char* WINAPI hooked_CharLowerA(char* str) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_CharLowerA(str);
     if (str) {
         for (char* p = str; *p; p++)
             if (*p >= 'A' && *p <= 'Z') *p += 32;
@@ -7462,6 +7499,7 @@ static MapVirtualKeyA_fn orig_MapVirtualKeyA = nullptr;
 static UINT g_mvkCache[256][4] = {};  // [code][mapType]
 
 static UINT WINAPI hooked_MapVirtualKeyA(UINT code, UINT mapType) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_MapVirtualKeyA(code, mapType);
     if (code < 256 && mapType < 4) {
         UINT& cached = g_mvkCache[code][mapType];
         if (!cached) cached = orig_MapVirtualKeyA(code, mapType);
@@ -7476,6 +7514,7 @@ static GetThreadPriority_fn orig_GetThreadPriority = nullptr;
 static int g_threadPrio[256] = {};  // simple per-handle cache
 
 static int WINAPI hooked_GetThreadPriority(HANDLE h) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetThreadPriority(h);
     DWORD idx = (DWORD)(uintptr_t)h & 255;
     int& c = g_threadPrio[idx];
     if (c) return c;
@@ -7533,17 +7572,18 @@ static bool InstallBatchOpt10() {
 // #11: GetOEMCP
 typedef UINT (WINAPI* GetOEMCP_fn)();
 static GetOEMCP_fn orig_GetOEMCP = nullptr; static UINT g_oemcp = 0;
-static UINT WINAPI hooked_GetOEMCP() { if (!g_oemcp) g_oemcp = orig_GetOEMCP(); return g_oemcp; }
+static UINT WINAPI hooked_GetOEMCP() { if (WOWOPT_FOREIGN_CALLER()) return orig_GetOEMCP(); if (!g_oemcp) g_oemcp = orig_GetOEMCP(); return g_oemcp; }
 
 // #12: GetDoubleClickTime
 typedef UINT (WINAPI* GetDoubleClickTime_fn)();
 static GetDoubleClickTime_fn orig_GetDoubleClickTime = nullptr; static UINT g_dct = 0;
-static UINT WINAPI hooked_GetDoubleClickTime() { if (!g_dct) g_dct = orig_GetDoubleClickTime(); return g_dct; }
+static UINT WINAPI hooked_GetDoubleClickTime() { if (WOWOPT_FOREIGN_CALLER()) return orig_GetDoubleClickTime(); if (!g_dct) g_dct = orig_GetDoubleClickTime(); return g_dct; }
 
 // #13: GetCursorPos - DISABLED (breaks hardware cursor with RTSSHooks.dll)
 typedef BOOL (WINAPI* GetCursorPos_fn)(LPPOINT);
 static GetCursorPos_fn orig_GetCursorPos = nullptr;
 static BOOL WINAPI hooked_GetCursorPos(LPPOINT lp) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetCursorPos(lp);
     return orig_GetCursorPos(lp);
 }
 
@@ -7551,6 +7591,7 @@ static BOOL WINAPI hooked_GetCursorPos(LPPOINT lp) {
 typedef DWORD (WINAPI* GetSysColor_fn)(int);
 static GetSysColor_fn orig_GetSysColor = nullptr; static DWORD g_sysColors[32] = {};
 static DWORD WINAPI hooked_GetSysColor(int idx) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetSysColor(idx);
     if (idx < 32) { if (!g_sysColors[idx]) g_sysColors[idx] = orig_GetSysColor(idx); return g_sysColors[idx]; }
     return orig_GetSysColor(idx);
 }
@@ -7558,27 +7599,27 @@ static DWORD WINAPI hooked_GetSysColor(int idx) {
 // #15: GetKeyboardLayout
 typedef HKL (WINAPI* GetKeyboardLayout_fn)(DWORD);
 static GetKeyboardLayout_fn orig_GetKeyboardLayout = nullptr; static HKL g_kbl = 0;
-static HKL WINAPI hooked_GetKeyboardLayout(DWORD id) { if (!g_kbl) g_kbl = orig_GetKeyboardLayout(id); return g_kbl; }
+static HKL WINAPI hooked_GetKeyboardLayout(DWORD id) { if (WOWOPT_FOREIGN_CALLER()) return orig_GetKeyboardLayout(id); if (!g_kbl) g_kbl = orig_GetKeyboardLayout(id); return g_kbl; }
 
 // #16: GetKeyboardLayoutNameA
 typedef BOOL (WINAPI* GetKeyboardLayoutNameA_fn)(char*);
 static GetKeyboardLayoutNameA_fn orig_GetKeyboardLayoutNameA = nullptr; static char g_kbln[9] = {};
-static BOOL WINAPI hooked_GetKeyboardLayoutNameA(char* buf) { if (g_kbln[0]) { memcpy(buf, g_kbln, 9); return TRUE; } BOOL r = orig_GetKeyboardLayoutNameA(g_kbln); memcpy(buf, g_kbln, 9); return r; }
+static BOOL WINAPI hooked_GetKeyboardLayoutNameA(char* buf) { if (WOWOPT_FOREIGN_CALLER()) return orig_GetKeyboardLayoutNameA(buf); if (g_kbln[0]) { memcpy(buf, g_kbln, 9); return TRUE; } BOOL r = orig_GetKeyboardLayoutNameA(g_kbln); memcpy(buf, g_kbln, 9); return r; }
 
 // #17: GetCaretBlinkTime
 typedef UINT (WINAPI* GetCaretBlinkTime_fn)();
 static GetCaretBlinkTime_fn orig_GetCaretBlinkTime = nullptr; static UINT g_cbt = 0;
-static UINT WINAPI hooked_GetCaretBlinkTime() { if (!g_cbt) g_cbt = orig_GetCaretBlinkTime(); return g_cbt; }
+static UINT WINAPI hooked_GetCaretBlinkTime() { if (WOWOPT_FOREIGN_CALLER()) return orig_GetCaretBlinkTime(); if (!g_cbt) g_cbt = orig_GetCaretBlinkTime(); return g_cbt; }
 
 // #18: IsWindow
 typedef BOOL (WINAPI* IsWindow_fn)(HWND);
 static IsWindow_fn orig_IsWindow = nullptr; static HWND g_lastIW = NULL; static BOOL g_lastIWRes = TRUE;
-static BOOL WINAPI hooked_IsWindow(HWND h) { if (h == g_lastIW) return g_lastIWRes; g_lastIWRes = orig_IsWindow(h); g_lastIW = h; return g_lastIWRes; }
+static BOOL WINAPI hooked_IsWindow(HWND h) { if (WOWOPT_FOREIGN_CALLER()) return orig_IsWindow(h); if (h == g_lastIW) return g_lastIWRes; g_lastIWRes = orig_IsWindow(h); g_lastIW = h; return g_lastIWRes; }
 
 // #19: GetDesktopWindow
 typedef HWND (WINAPI* GetDesktopWindow_fn)();
 static GetDesktopWindow_fn orig_GetDesktopWindow = nullptr; static HWND g_desktop = NULL;
-static HWND WINAPI hooked_GetDesktopWindow() { if (!g_desktop) g_desktop = orig_GetDesktopWindow(); return g_desktop; }
+static HWND WINAPI hooked_GetDesktopWindow() { if (WOWOPT_FOREIGN_CALLER()) return orig_GetDesktopWindow(); if (!g_desktop) g_desktop = orig_GetDesktopWindow(); return g_desktop; }
 
 // #20: GetFocus - DISABLED (breaks hardware cursor with RTSSHooks.dll)
 typedef HWND (WINAPI* GetFocus_fn)();
@@ -7609,6 +7650,7 @@ static bool InstallBatchOpt20() {
 typedef ULONGLONG (WINAPI* GetTickCount64_fn)();
 static GetTickCount64_fn orig_GetTickCount64 = nullptr;
 static ULONGLONG WINAPI hooked_GetTickCount64() {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetTickCount64();
     LARGE_INTEGER qpc;
     QueryPerformanceCounter(&qpc);
     static LARGE_INTEGER freq;
@@ -7622,6 +7664,7 @@ typedef BOOL (WINAPI* GetClientRect_fn)(HWND, LPRECT);
 static GetClientRect_fn orig_GetClientRect = nullptr;
 static HWND g_crHwnd = NULL; static RECT g_crCache = {};
 static BOOL WINAPI hooked_GetClientRect(HWND h, LPRECT r) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetClientRect(h, r);
     if (h == g_crHwnd) { *r = g_crCache; return TRUE; }
     BOOL res = orig_GetClientRect(h, r);
     if (res) { g_crHwnd = h; g_crCache = *r; }
@@ -7633,6 +7676,7 @@ typedef BOOL (WINAPI* GetWindowRect_fn)(HWND, LPRECT);
 static GetWindowRect_fn orig_GetWindowRect = nullptr;
 static HWND g_wrHwnd = NULL; static RECT g_wrCache = {};
 static BOOL WINAPI hooked_GetWindowRect(HWND h, LPRECT r) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetWindowRect(h, r);
     if (h == g_wrHwnd) { *r = g_wrCache; return TRUE; }
     BOOL res = orig_GetWindowRect(h, r);
     if (res) { g_wrHwnd = h; g_wrCache = *r; }
@@ -7646,6 +7690,7 @@ static BOOL WINAPI hooked_GetWindowRect(HWND h, LPRECT r) {
 typedef int (WINAPI* ShowCursor_fn)(BOOL);
 static ShowCursor_fn orig_ShowCursor = nullptr; static int g_showCount = -1;
 static int WINAPI hooked_ShowCursor(BOOL show) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_ShowCursor(show);
     if (show) { if (g_showCount < 0) g_showCount = orig_ShowCursor(TRUE); g_showCount++; return g_showCount; }
     else { if (g_showCount > 0) g_showCount--; return g_showCount; }
 }
@@ -7677,6 +7722,7 @@ typedef BOOL (WINAPI* GetComputerNameA_fn)(LPSTR, LPDWORD);
 static GetComputerNameA_fn orig_GetComputerNameA = nullptr;
 static char g_computerName[64] = {};
 static BOOL WINAPI hooked_GetComputerNameA(LPSTR buf, LPDWORD nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetComputerNameA(buf, nSize);
     if (g_computerName[0]) { DWORD len = (DWORD)strlen(g_computerName) + 1; if (*nSize >= len) { memcpy(buf, g_computerName, len); return TRUE; } }
     BOOL r = orig_GetComputerNameA(g_computerName, nSize); memcpy(buf, g_computerName, (size_t)*nSize + 1); return r;
 }
@@ -7686,6 +7732,7 @@ typedef BOOL (WINAPI* GetUserNameA_fn)(LPSTR, LPDWORD);
 static GetUserNameA_fn orig_GetUserNameA = nullptr;
 static char g_userName[64] = {};
 static BOOL WINAPI hooked_GetUserNameA(LPSTR buf, LPDWORD nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetUserNameA(buf, nSize);
     if (g_userName[0]) { DWORD len = (DWORD)strlen(g_userName) + 1; if (*nSize >= len) { memcpy(buf, g_userName, len); return TRUE; } }
     BOOL r = orig_GetUserNameA(g_userName, nSize); memcpy(buf, g_userName, (size_t)*nSize + 1); return r;
 }
@@ -7695,6 +7742,7 @@ typedef UINT (WINAPI* GetSystemDirectoryA_fn)(LPSTR, UINT);
 static GetSystemDirectoryA_fn orig_GetSystemDirectoryA = nullptr;
 static char g_sysDir[MAX_PATH] = {};
 static UINT WINAPI hooked_GetSystemDirectoryA(LPSTR buf, UINT nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetSystemDirectoryA(buf, nSize);
     if (g_sysDir[0]) { UINT len = (UINT)strlen(g_sysDir) + 1; if (nSize >= len) { memcpy(buf, g_sysDir, len); return len - 1; } }
     UINT r = orig_GetSystemDirectoryA(g_sysDir, MAX_PATH); if (buf != g_sysDir) memcpy(buf, g_sysDir, (size_t)r + 1); return r;
 }
@@ -7704,6 +7752,7 @@ typedef UINT (WINAPI* GetWindowsDirectoryA_fn)(LPSTR, UINT);
 static GetWindowsDirectoryA_fn orig_GetWindowsDirectoryA = nullptr;
 static char g_winDir[MAX_PATH] = {};
 static UINT WINAPI hooked_GetWindowsDirectoryA(LPSTR buf, UINT nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetWindowsDirectoryA(buf, nSize);
     if (g_winDir[0]) { UINT len = (UINT)strlen(g_winDir) + 1; if (nSize >= len) { memcpy(buf, g_winDir, len); return len - 1; } }
     UINT r = orig_GetWindowsDirectoryA(g_winDir, MAX_PATH); if (buf != g_winDir) memcpy(buf, g_winDir, (size_t)r + 1); return r;
 }
@@ -7713,6 +7762,7 @@ typedef DWORD (WINAPI* GetTempPathA_fn)(DWORD, LPSTR);
 static GetTempPathA_fn orig_GetTempPathA = nullptr;
 static char g_tempPath[MAX_PATH] = {};
 static DWORD WINAPI hooked_GetTempPathA(DWORD nSize, LPSTR buf) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetTempPathA(nSize, buf);
     if (g_tempPath[0]) { DWORD len = (DWORD)strlen(g_tempPath) + 1; if (nSize >= len) { memcpy(buf, g_tempPath, len); return len - 1; } }
     DWORD r = orig_GetTempPathA(MAX_PATH, g_tempPath); if (buf != g_tempPath) memcpy(buf, g_tempPath, (size_t)r + 1); return r;
 }
@@ -7739,6 +7789,7 @@ typedef HANDLE (WINAPI* GetCurrentProcess_fn)();
 static GetCurrentProcess_fn orig_GetCurrentProcess = nullptr;
 static HANDLE g_hProc = NULL;
 static HANDLE WINAPI hooked_GetCurrentProcess() {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetCurrentProcess();
     if (g_hProc) return g_hProc;
     g_hProc = orig_GetCurrentProcess(); return g_hProc;
 }
@@ -7747,6 +7798,7 @@ typedef BOOL (WINAPI* GetCPInfo_fn)(UINT, LPCPINFO);
 static GetCPInfo_fn orig_GetCPInfo = nullptr;
 static CPINFO g_cpInfo[4] = {}; static BOOL g_cpValid[4] = {};
 static BOOL WINAPI hooked_GetCPInfo(UINT cp, LPCPINFO lp) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetCPInfo(cp, lp);
     int idx = (cp == CP_ACP) ? 0 : (cp == CP_OEMCP) ? 1 : (cp == CP_THREAD_ACP) ? 2 : 3;
     if (idx < 3 && g_cpValid[idx]) { *lp = g_cpInfo[idx]; return TRUE; }
     BOOL r = orig_GetCPInfo(cp, &g_cpInfo[idx]); if (r && lp) *lp = g_cpInfo[idx]; g_cpValid[idx] = r; return r;
@@ -7830,6 +7882,14 @@ static DWORD WINAPI MainThread(LPVOID param) {
 
     // Load runtime configuration from wow_opt.ini
     Config::Load();
+    // Read before any system hook is installed, which is all further down.
+    g_wowOptSystemHooksClientOnly = Config::g_settings.OptSystemHooksClientOnly;
+    Log("[Hooks] hooks on system functions answer %s",
+        g_wowOptSystemHooksClientOnly
+            ? "only calls from WoW.exe and this DLL; every other module in the "
+              "process gets the real function"
+            : "every module in the process, overlays and drivers included "
+              "(SystemHooksClientOnly=0)");
 
     // --- Early allocator redirect ---
     // Install mimalloc BEFORE the 5s Sleep so it captures EVERY allocation during
@@ -9894,6 +9954,7 @@ typedef DWORD (WINAPI* WaitForSingleObject_fn)(HANDLE, DWORD);
 static WaitForSingleObject_fn orig_WaitForSingleObject = nullptr;
 
 static DWORD WINAPI hooked_WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_WaitForSingleObject(hHandle, dwMilliseconds);
     if (dwMilliseconds <= 1) {
         for (int i = 0; i < 32; i++) {
             DWORD result = WaitForSingleObject(hHandle, 0);
@@ -9945,6 +10006,7 @@ typedef HMODULE (WINAPI* GetModuleHandleA_fn)(LPCSTR);
 static GetModuleHandleA_fn orig_GetModuleHandleA = nullptr;
 
 static HMODULE WINAPI hooked_GetModuleHandleA(LPCSTR lpModuleName) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetModuleHandleA(lpModuleName);
     if (!lpModuleName) return orig_GetModuleHandleA(lpModuleName);
 
     uint32_t hash = 0x811C9DC5;
@@ -10005,6 +10067,7 @@ static lstrcmpA_fn  orig_lstrcmpA  = nullptr;
 static lstrcmpiA_fn orig_lstrcmpiA = nullptr;
 
 static int WINAPI hooked_lstrcmpA(LPCSTR lpString1, LPCSTR lpString2) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_lstrcmpA(lpString1, lpString2);
     if (!lpString1 || !lpString2) return orig_lstrcmpA(lpString1, lpString2);
 
     const unsigned char* s1 = (const unsigned char*)lpString1;
@@ -10033,6 +10096,7 @@ static int WINAPI hooked_lstrcmpA(LPCSTR lpString1, LPCSTR lpString2) {
 }
 
 static int WINAPI hooked_lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_lstrcmpiA(lpString1, lpString2);
     if (!lpString1 || !lpString2) return orig_lstrcmpiA(lpString1, lpString2);
 
     const unsigned char* s1 = (const unsigned char*)lpString1;
@@ -10116,6 +10180,7 @@ static GetPrivateProfileStringA_fn orig_GetPrivateProfileStringA = nullptr;
 static DWORD WINAPI hooked_GetPrivateProfileStringA(LPCSTR lpAppName, LPCSTR lpKeyName,
     LPCSTR lpDefault, LPSTR lpReturnedString, DWORD nSize, LPCSTR lpFileName)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetPrivateProfileStringA(lpAppName, lpKeyName, lpDefault, lpReturnedString, nSize, lpFileName);
     if (!lpAppName || !lpKeyName || !lpReturnedString || nSize == 0)
         return orig_GetPrivateProfileStringA(lpAppName, lpKeyName, lpDefault, lpReturnedString, nSize, lpFileName);
 
@@ -10197,6 +10262,7 @@ static long g_lstrlenWHits   = 0;
 static long g_lstrlenFallbacks = 0;
 
 static int WINAPI hooked_lstrlenA(LPCSTR lpString) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_lstrlenA(lpString);
     if (!lpString) { g_lstrlenFallbacks++; return 0; }
     __try {
         const char* p = lpString;
@@ -10211,6 +10277,7 @@ static int WINAPI hooked_lstrlenA(LPCSTR lpString) {
 }
 
 static int WINAPI hooked_lstrlenW(LPCWSTR lpString) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_lstrlenW(lpString);
     if (!lpString) { g_lstrlenFallbacks++; return 0; }
     __try {
         const wchar_t* p = lpString;
@@ -10402,6 +10469,7 @@ static int WINAPI hooked_MultiByteToWideChar(
     LPCCH lpMultiByteStr, int cbMultiByte,
     LPWSTR lpWideCharStr, int cchWideChar)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr, cbMultiByte, lpWideCharStr, cchWideChar);
     if (dwFlags != 0)                        { g_mbwcBail.flags++;     goto mbt_fallback; }
     if (!IsAsciiCompatibleCp(CodePage))      { g_mbwcBail.codepage++;  goto mbt_fallback; }
     if (!lpMultiByteStr)                     { g_mbwcBail.nullIn++;    goto mbt_fallback; }
@@ -10459,6 +10527,7 @@ static int WINAPI hooked_WideCharToMultiByte(
     LPSTR lpMultiByteStr, int cbMultiByte,
     LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar)
 {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_WideCharToMultiByte(CodePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
     if (dwFlags != 0)                         { g_wcmbBail.flags++;     goto wcmb_fallback; }
     if (!IsAsciiCompatibleCp(CodePage))       { g_wcmbBail.codepage++;  goto wcmb_fallback; }
     if (!lpWideCharStr)                       { g_wcmbBail.nullIn++;    goto wcmb_fallback; }
@@ -10643,6 +10712,7 @@ static inline uintptr_t HashPtr(const void* p, size_t len) {
 }
 
 static FARPROC WINAPI hooked_GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetProcAddress(hModule, lpProcName);
     // Ordinal lookup - no caching
     if ((uintptr_t)lpProcName < 0x10000) {
         return orig_GetProcAddress(hModule, lpProcName);
@@ -10754,6 +10824,7 @@ static DWORD g_gmfPathLenW = 0;
 static bool g_gmfInitialized = false;
 
 static DWORD WINAPI hooked_GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetModuleFileNameA(hModule, lpFilename, nSize);
     static HMODULE mainMod = GetModuleHandleA(nullptr);
     if ((hModule == NULL || hModule == mainMod) && g_gmfInitialized) {
         if (g_gmfPathLenA < nSize) {
@@ -10767,6 +10838,7 @@ static DWORD WINAPI hooked_GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename,
 }
 
 static DWORD WINAPI hooked_GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetModuleFileNameW(hModule, lpFilename, nSize);
     static HMODULE mainMod = GetModuleHandleA(nullptr);
     if ((hModule == NULL || hModule == mainMod) && g_gmfInitialized) {
         if (g_gmfPathLenW < nSize) {
@@ -10837,6 +10909,7 @@ static inline uint32_t HashNameLower(LPCSTR name) {
 }
 
 static DWORD WINAPI hooked_GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize) {
+    if (WOWOPT_FOREIGN_CALLER()) return orig_GetEnvironmentVariableA(lpName, lpBuffer, nSize);
     // NULL checks: lpName or lpBuffer can be NULL (size query)
     if (!lpName || !lpBuffer) return orig_GetEnvironmentVariableA(lpName, lpBuffer, nSize);
 
@@ -11259,6 +11332,22 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
     switch (reason) {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hModule);
+
+            // The two images whose calls system hooks still answer (version.h).
+            // From the loaded headers, before any hook exists.
+            {
+                HMODULE exe = GetModuleHandleA(NULL);
+                if (exe) {
+                    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)((char*)exe +
+                        ((IMAGE_DOS_HEADER*)exe)->e_lfanew);
+                    g_wowOptClientLo   = (uintptr_t)exe;
+                    g_wowOptClientSize = nt->OptionalHeader.SizeOfImage;
+                }
+                IMAGE_NT_HEADERS* selfNt = (IMAGE_NT_HEADERS*)((char*)hModule +
+                    ((IMAGE_DOS_HEADER*)hModule)->e_lfanew);
+                g_wowOptSelfLo   = (uintptr_t)hModule;
+                g_wowOptSelfSize = selfNt->OptionalHeader.SizeOfImage;
+            }
 
             // Pin the DLL to prevent crashes on process exit if OS unloads DLLs in bad order
             {

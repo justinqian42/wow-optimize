@@ -83,6 +83,9 @@ namespace Config {
         // with ReShade out of the world, and nothing has ever measured a gain
         // from it, so it is off unless asked for.
         bool OptLockTuningInitHook = false;
+        // Hooks on system DLL exports answer only calls from wow.exe and this
+        // DLL; every other module gets the real function.
+        bool OptSystemHooksClientOnly = true;
         bool OptAsyncMpqIo        = true;   // spawns a background I/O worker thread
         bool OptThreadIdCache     = true;   // hooks GetCurrentThreadId
         bool OptPriorityGuard     = true;   // hooks SetPriorityClass to block downgrades
