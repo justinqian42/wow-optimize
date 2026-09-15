@@ -997,6 +997,10 @@ static void StartPriorityWatchdog();
 static void StopPriorityWatchdog();
 static volatile LONG g_priorityWatchdogRestores = 0;
 
+#if !CRASH_TEST_DISABLE_WOW_STRLEN
+void LogStrlen76GuardState();
+#endif
+
 extern "C" void Log(const char* fmt, ...);
 
 // The "Timing Method Fix" installer used to live here. It hooked nothing: the
@@ -5603,6 +5607,9 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
         Log("[Stats] Priority watchdog: %ld restorations", (long)g_priorityWatchdogRestores);
 
     LogLockTuningStats();
+#if !CRASH_TEST_DISABLE_WOW_STRLEN
+    LogStrlen76GuardState();
+#endif
 
     Log("[Stats] ====================================");
 
@@ -10328,48 +10335,97 @@ static bool InstallLStrLenHooks() {
 typedef unsigned int (__stdcall* strlen76_fn)(const char* str);
 static strlen76_fn orig_strlen76 = nullptr;
 
+// Scan must be 16-byte aligned. An unaligned _mm_loadu_si128 can straddle a
+// page boundary; when a valid string terminates within 15 bytes of the end
+// of a committed page and the next page is unmapped/decommitted, the load
+// faults reading bytes past the terminator. That overrun is what crashed at
+// RVA 0xA980 during login/logout/char-swap, when heavy string churn (300+
+// callers) coincides with the heap committing/decommitting pages.
+//
+// Aligning the base down to 16 bytes guarantees every _mm_load_si128 stays
+// inside one 4 KiB page (4096 % 16 == 0), so the scan never reads into a
+// page that the string itself does not occupy — exactly as safe as the
+// byte-by-byte function it replaces. The first chunk's leading bytes (those
+// before str) are masked out so they cannot produce a false terminator.
+static __forceinline unsigned int Strlen76Scan(const char* str) {
+    const __m128i zero = _mm_setzero_si128();
+    uintptr_t   addr = (uintptr_t)str;
+    const char* base = (const char*)(addr & ~(uintptr_t)15);
+    unsigned    off  = (unsigned)(addr & 15);
+
+    int mask = _mm_movemask_epi8(
+        _mm_cmpeq_epi8(_mm_load_si128((const __m128i*)base), zero)) >> off;
+    if (mask) {
+        unsigned long idx;
+        _BitScanForward(&idx, (unsigned long)mask);
+        return (unsigned int)idx;
+    }
+
+    for (const char* p = base + 16; ; p += 16) {
+        mask = _mm_movemask_epi8(
+            _mm_cmpeq_epi8(_mm_load_si128((const __m128i*)p), zero));
+        if (mask) {
+            unsigned long idx;
+            _BitScanForward(&idx, (unsigned long)mask);
+            return (unsigned int)((size_t)(p - str) + idx);
+        }
+    }
+}
+
+// The guard, and why it is only a learning phase now.
+//
+// The scan used to run inside __try on every call, which put an SEH frame and
+// a stack cookie into the prologue of a function with more than three hundred
+// callers. The handler fell back to the client's own strlen, and that reads
+// the same bytes: the aligned scan touches only the pages the string and its
+// terminator occupy, which are the pages the byte loop touches, so any fault
+// here is a fault the fallback would take too. A guard whose fallback reads
+// the same bytes recovers nothing.
+//
+// That is an argument, and this project removes guards on evidence rather
+// than on arguments. So the first kStrlenLearnCalls calls still run guarded
+// and count what the handler caught. If it caught nothing the hot path drops
+// the frame; if it ever caught anything the guard stays for the session and
+// the report says so.
+static constexpr unsigned kStrlenLearnCalls = 1u << 20;
+static unsigned g_strlenGuardedCalls = 0;
+static unsigned g_strlenCaught = 0;
+static bool     g_strlenArmed = false;
+
+static __declspec(noinline) unsigned int Strlen76Guarded(const char* str) {
+    __try {
+        return Strlen76Scan(str);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        ++g_strlenCaught;
+        return orig_strlen76(str);
+    }
+}
+
 static unsigned int __stdcall hooked_strlen76(const char* str) {
     if (!str) {
         return orig_strlen76(str); // NULL → error handler (0x57)
     }
+    if (g_strlenArmed) return Strlen76Scan(str);
 
-    __try {
-        // Scan must be 16-byte aligned. An unaligned _mm_loadu_si128 can straddle a
-        // page boundary; when a valid string terminates within 15 bytes of the end
-        // of a committed page and the next page is unmapped/decommitted, the load
-        // faults reading bytes past the terminator. That overrun is what crashed at
-        // RVA 0xA980 during login/logout/char-swap, when heavy string churn (300+
-        // callers) coincides with the heap committing/decommitting pages.
-        //
-        // Aligning the base down to 16 bytes guarantees every _mm_load_si128 stays
-        // inside one 4 KiB page (4096 % 16 == 0), so the scan never reads into a
-        // page that the string itself does not occupy — exactly as safe as the
-        // byte-by-byte function it replaces. The first chunk's leading bytes (those
-        // before str) are masked out so they cannot produce a false terminator.
-        const __m128i zero = _mm_setzero_si128();
-        uintptr_t   addr = (uintptr_t)str;
-        const char* base = (const char*)(addr & ~(uintptr_t)15);
-        unsigned    off  = (unsigned)(addr & 15);
+    if (++g_strlenGuardedCalls >= kStrlenLearnCalls && g_strlenCaught == 0)
+        g_strlenArmed = true;
+    return Strlen76Guarded(str);
+}
 
-        int mask = _mm_movemask_epi8(
-            _mm_cmpeq_epi8(_mm_load_si128((const __m128i*)base), zero)) >> off;
-        if (mask) {
-            unsigned long idx;
-            _BitScanForward(&idx, (unsigned long)mask);
-            return (unsigned int)idx;
-        }
-
-        for (const char* p = base + 16; ; p += 16) {
-            mask = _mm_movemask_epi8(
-                _mm_cmpeq_epi8(_mm_load_si128((const __m128i*)p), zero));
-            if (mask) {
-                unsigned long idx;
-                _BitScanForward(&idx, (unsigned long)mask);
-                return (unsigned int)((size_t)(p - str) + idx);
-            }
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return orig_strlen76(str);
+void LogStrlen76GuardState() {
+    if (!orig_strlen76) {
+        Log("[Strlen76] not measured: the hook on sub_76EE30 is not installed.");
+        return;
+    }
+    if (g_strlenArmed) {
+        Log("[Strlen76] %u call(s) ran guarded and the handler caught nothing, so the "
+            "scan now runs without an exception frame.", g_strlenGuardedCalls);
+    } else if (g_strlenCaught) {
+        Log("[Strlen76] the guard caught %u fault(s) in %u guarded call(s) and stays "
+            "on for this session.", g_strlenCaught, g_strlenGuardedCalls);
+    } else {
+        Log("[Strlen76] %u of %u guarded call(s) so far, nothing caught; the "
+            "exception frame is still on.", g_strlenGuardedCalls, kStrlenLearnCalls);
     }
 }
 
