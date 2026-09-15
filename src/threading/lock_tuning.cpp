@@ -84,9 +84,10 @@ static void WINAPI Hooked_InitializeCriticalSection(LPCRITICAL_SECTION cs) {
 // it whenever it creates a lock: overlays, ReShade, DXVK, and anything else a
 // player has injected. It is also outside wow.exe, so No Client Patches does not
 // stop it. A tester running ReShade could not enter the world until this whole
-// switch was off, while No Client Patches changed nothing. Which half is
-// responsible is not established, so the hook has its own switch, inheriting
-// this one, to let the next session tell them apart.
+// switch was off, while No Client Patches changed nothing. With the hook on its
+// own switch he ran the retrofit alone and entered the world, so the hook is the
+// half that broke it. How it breaks ReShade is not known. Nothing has measured a
+// gain from the hook either, so it is off by default and the retrofit is not.
 bool InstallLockTuning(bool retrofit, bool hookInitCS) {
     unsigned engineTuned = 0;
     if (retrofit) {
