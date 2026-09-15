@@ -18,6 +18,7 @@
 #pragma intrinsic(_ReturnAddress)
 
 extern "C" void Log(const char* fmt, ...);
+extern void LogFlushImmediate();  // Defined in dllmain.cpp
 
 // int __cdecl sub_85CAB0(lua_State* L, Table* t, TValue* key) -> Node*
 typedef void* (__cdecl* newkey_fn)(int L, int t, void* key);
@@ -44,9 +45,35 @@ static volatile long g_logged        = 0;
 
 extern "C" void InvalidateTableCacheSlot(void* table, void* key_str);
 
+// A fault inside the client's luaH_newkey is noted and passed on, not absorbed.
+//
+// This used to catch it and hand the caller a private scratch node. luaH_newkey
+// rehashes when the table is full: it allocates a new node array, moves every
+// entry and frees the old one. A fault part way through that leaves the table
+// with half its entries moved, and handing back a scratch node lets the client
+// carry on with it. The collector walks every live table, so the next
+// traversal of that one reads what was left - and the one tester crash with
+// this DLL in the stack is the collector's traversetable reading [0+9], a
+// collectable value with a null object, which is what a half-moved table holds.
+// Whether the guard ever fired in that session is not known; no log since has
+// shown it firing. Crashing where the table breaks names the cause, and
+// crashing later in the collector names nothing.
+static LONG NoteNewKeyFault(int t, void* ret) {
+    ++g_recovered;
+    if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
+        Log("[NewKeySafety] a fault inside luaH_newkey, table 0x%08X, called from %p. "
+            "Passed on to the crash handler: carrying on would leave the table "
+            "half rebuilt for the collector to walk.", t, ret);
+        LogFlushImmediate();
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static void* __cdecl Safe_newkey(int L, int t, void* key)
 {
     ++g_total_calls;
+    // Our own cache invalidation, guarded on its own: a fault here is ours and
+    // must not stop the client's insert.
     __try {
         if (t && key && (uintptr_t)t >= 0x10000 && (uintptr_t)t < 0xFFE00000 &&
             (uintptr_t)key >= 0x10000 && (uintptr_t)key < 0xFFE00000) {
@@ -59,14 +86,12 @@ static void* __cdecl Safe_newkey(int L, int t, void* key)
                 }
             }
         }
-        return g_orig_newkey(L, t, key);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        // Corrupted hash chain or invalid pointers — hand back a harmless node instead of crashing.
-        ++g_recovered;
-        if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
-            Log("[NewKeySafety] ONE-SHOT DIAGNOSTIC: Caught crash in luaH_newkey! Table=0x%08X, RetAddr=%p", t, _ReturnAddress());
-        }
-        return g_scratch_node;
+    }
+    __try {
+        return g_orig_newkey(L, t, key);
+    } __except (NoteNewKeyFault(t, _ReturnAddress())) {
+        return nullptr;
     }
 }
 
@@ -99,7 +124,9 @@ bool InstallLuaNewKeySafety()
     CrashDumper::RegisterFeature("LuaNewKeySafety");
     CrashDumper::FeatureSetActive("LuaNewKeySafety", true);
 
-    Log("[NewKeySafety] ACTIVE: SEH guard on luaH_newkey (sub_85CAB0), fixes 0x85CB43 crash");
+    Log("[NewKeySafety] ACTIVE on luaH_newkey (sub_85CAB0): invalidates the table "
+        "cache slot for each new key, and logs a fault inside the insert before "
+        "passing it on rather than letting the client carry on with a half-rebuilt table");
     g_statsInstalled = true;
     return true;
 #endif
@@ -114,8 +141,8 @@ void LuaNewKeySafety_LogStats(void) {
         return;
     }
     Log("[NewKeySafety] %lld calls, %lld cache slot(s) invalidated - that is "
-        "this hook's actual work and it is not a guard - and %lld recovered "
-        "from chain corruption, which is.",
+        "this hook's actual work - and %lld fault(s) inside luaH_newkey, each "
+        "passed on to the crash handler.",
         (long long)g_total_calls, (long long)g_invalidated,
         (long long)g_recovered);
 
