@@ -172,15 +172,32 @@ static uint32_t ComputeThis(uint32_t L, int wantedType) {
 //   0 - declined, run the client's routine and return its answer
 //   1 - computed, but still checking: run the client's routine too and compare
 //   2 - computed and trusted: do not run the client's routine at all
+// Faults the guard caught. The client's routine reads the same Lua stack, the
+// same object and calls the same virtual type check, so a fault here is one it
+// would take too; once kVerifyFirst lookups have run guarded and matched, the
+// armed path calls ComputeThis without an exception frame. A caught fault also
+// disables the module, so the unguarded path is never reached after one.
+static unsigned long g_caught = 0;
+
+static __declspec(noinline) bool ComputeGuarded(uint32_t L, int wantedType, uint32_t* mine) {
+    __try {
+        *mine = ComputeThis(L, wantedType);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_caught;
+        return false;
+    }
+}
+
 extern "C" int __cdecl LuaThisFast_Compute(uint32_t L, int wantedType, uint32_t* out) {
     *out = 0;
     if (g_dead || !L) return 0;
     ++g_calls;
 
     uint32_t mine;
-    __try {
+    if (g_armed != 0 && g_caught == 0) {
         mine = ComputeThis(L, wantedType);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } else if (!ComputeGuarded(L, wantedType, &mine)) {
         g_dead = true;
         Log("[LuaThis] Disabled for this session: the inline lookup faulted. The "
             "client's own routine runs from here on.");
@@ -314,6 +331,10 @@ void LuaThisCache_LogStats() {
     if (!Config::g_settings.OptLuaThisFast) return;
     if (!g_installed) { Log("[LuaThis] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[LuaThis] installed but never called"); return; }
+    Log("[LuaThis]   exception guard: %lu fault(s) caught; the armed path runs %s.",
+        g_caught, !g_armed ? "guarded, still verifying"
+                  : (g_caught ? "guarded, because the guard has caught something"
+                              : "without an exception frame"));
     Log("[LuaThis] %lu lookups, %lu inline, %lu handed back to the client, "
         "%lu verified against it%s",
         g_calls, g_fast, g_declined, g_verified,

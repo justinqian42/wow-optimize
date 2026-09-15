@@ -110,10 +110,9 @@ static __declspec(naked) int* __cdecl ClientIndex2Adr(int /*idx*/, void* /*L*/) 
 // ----------------------------------------------------------------
 #include "../allocators/loading_defrag.h"
 
-static int __cdecl Optimized_RawGetI(int L, int idx, int n)
+static __forceinline int RawGetICore(int L, int idx, int n)
 {
     ++g_total_calls;
-    bool processed = false;
     int res_val = 0;
 
     // Bail out during lua_State swap or active loading
@@ -129,7 +128,7 @@ static int __cdecl Optimized_RawGetI(int L, int idx, int n)
         return g_orig_rawgeti(L, idx, n);
     }
 
-    __try {
+    {
         int* L_base = *(int**)(L + 0x10);  // L->base
         int* L_top  = *(int**)(L + 0x0C);  // L->top
 
@@ -216,7 +215,6 @@ static int __cdecl Optimized_RawGetI(int L, int idx, int n)
             top[2] = src[2];  // tt
             top[3] = src[3];  // taint
             *(int**)(L + 0x0C) = top + 4;
-            processed = true;
 
             // Taint propagation — replicate sub_84E670 EXACTLY
             DWORD taint = src[3];
@@ -238,10 +236,43 @@ static int __cdecl Optimized_RawGetI(int L, int idx, int n)
         // ============================================================
         return g_orig_rawgeti(L, idx, n);
 
+    }
+}
+
+// The guard, as a learning phase.
+//
+// The whole body above used to run inside __try on every call, which put an SEH
+// frame and a stack cookie into the prologue of a hook the client calls about
+// 150 million times a session. Every fault it could catch is a read of L->base,
+// L->top, the table slot, the table's size or its array, and the client's own
+// lua_rawgeti, the fallback, reads exactly those. The only statements after the
+// push touch the taint cells at fixed addresses in wow.exe. So a fault here is
+// one the fallback would take as well, and the guard recovers nothing.
+//
+// The first kRawGetILearnCalls calls still run guarded and count what the
+// handler catches. If it caught nothing the hook runs the body directly; if it
+// ever caught anything the guard stays for the session and the report says so.
+static constexpr unsigned kRawGetILearnCalls = 1u << 20;
+static unsigned g_rawgetiGuardedCalls = 0;
+static unsigned g_rawgetiCaught = 0;
+static bool     g_rawgetiArmed = false;
+
+static __declspec(noinline) int RawGetIGuarded(int L, int idx, int n)
+{
+    __try {
+        return RawGetICore(L, idx, n);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
-        if (processed) return res_val;
+        ++g_rawgetiCaught;
         return g_orig_rawgeti(L, idx, n);
     }
+}
+
+static int __cdecl Optimized_RawGetI(int L, int idx, int n)
+{
+    if (g_rawgetiArmed) return RawGetICore(L, idx, n);
+    if (++g_rawgetiGuardedCalls >= kRawGetILearnCalls && g_rawgetiCaught == 0)
+        g_rawgetiArmed = true;
+    return RawGetIGuarded(L, idx, n);
 }
 
 // ----------------------------------------------------------------
@@ -296,6 +327,15 @@ void LuaRawGetIInline_LogStats(void) {
         "%lld fell back.",
         (long long)total, (long long)arr,
         100.0 * (double)arr / (double)total, (long long)(total - arr));
+    if (g_rawgetiArmed)
+        Log("[RawGetIInline]   %u call(s) ran guarded and the handler caught nothing, "
+            "so the body now runs without an exception frame.", g_rawgetiGuardedCalls);
+    else if (g_rawgetiCaught)
+        Log("[RawGetIInline]   the guard caught %u fault(s) in %u guarded call(s) and "
+            "stays on for this session.", g_rawgetiCaught, g_rawgetiGuardedCalls);
+    else
+        Log("[RawGetIInline]   %u of %u guarded call(s) so far, nothing caught; the "
+            "exception frame is still on.", g_rawgetiGuardedCalls, kRawGetILearnCalls);
 }
 
 void UninstallLuaRawGetIInline()

@@ -117,6 +117,34 @@ int Compare(const char* s1, const char* s2, size_t n) {
 // measured on a live client, only in a standalone harness.
 static bool g_abSubject = false;
 
+// The guard, as a learning phase.
+//
+// Compare used to run inside __try on every call, which put an SEH frame and a
+// stack cookie into the prologue of a hook called about 405 million times in a
+// tester session. Compare loads a block only when all sixteen bytes lie in the
+// page of a byte the original has already read, so every page it touches is one
+// the client's own strncmp touches: a caller that faults here faults in the
+// fallback too, and the guard recovers nothing.
+//
+// The first kStrncmpLearnCalls calls still run guarded and count what the
+// handler catches. If it caught nothing the hook calls Compare directly; if it
+// ever caught anything the guard stays for the session and the report says so.
+static constexpr unsigned kStrncmpLearnCalls = 1u << 20;
+static unsigned g_guardedCalls = 0;
+static unsigned g_caught = 0;
+static bool     g_unguarded = false;
+
+static __declspec(noinline) int StrncmpGuarded(const char* s1, const char* s2, size_t n) {
+    __try {
+        return Compare(s1, s2, n);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // A caller that would have faulted in the original faults here too;
+        // hand it back so the fault happens where the client expects it.
+        ++g_caught;
+    }
+    return orig_strncmp(s1, s2, n);
+}
+
 static int __cdecl Hooked_StrncmpBody(const char* s1, const char* s2, size_t n) {
     ++g_calls;
 
@@ -124,12 +152,10 @@ static int __cdecl Hooked_StrncmpBody(const char* s1, const char* s2, size_t n) 
 
     uintptr_t a = (uintptr_t)s1, b = (uintptr_t)s2;
     if (a > 0x10000 && a < 0xFFE00000 && b > 0x10000 && b < 0xFFE00000) {
-        __try {
-            return Compare(s1, s2, n);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            // A caller that would have faulted in the original faults here too;
-            // hand it back so the fault happens where the client expects it.
-        }
+        if (g_unguarded) return Compare(s1, s2, n);
+        if (++g_guardedCalls >= kStrncmpLearnCalls && g_caught == 0)
+            g_unguarded = true;
+        return StrncmpGuarded(s1, s2, n);
     }
     return orig_strncmp(s1, s2, n);
 }
@@ -253,6 +279,15 @@ void LogStats() {
         return;
     }
     Log("[StrncmpSSE2] %ld calls", g_calls);
+    if (g_unguarded)
+        Log("[StrncmpSSE2]   %u call(s) ran guarded and the handler caught nothing, so "
+            "Compare now runs without an exception frame.", g_guardedCalls);
+    else if (g_caught)
+        Log("[StrncmpSSE2]   the guard caught %u fault(s) in %u guarded call(s) and "
+            "stays on for this session.", g_caught, g_guardedCalls);
+    else
+        Log("[StrncmpSSE2]   %u of %u guarded call(s) so far, nothing caught; the "
+            "exception frame is still on.", g_guardedCalls, kStrncmpLearnCalls);
 }
 
 void Shutdown() {

@@ -285,6 +285,29 @@ bool ReadableRange(const void* p, size_t bytes) {
     return a >= 0x10000 && a < 0xFFE00000 && (a + bytes) > a;
 }
 
+// Faults the guard caught, while checking or after. The fallback is the
+// client's own test, which reads the same ray, vertices and triangle indices, so
+// a fault here is one the fallback would take too; the armed path calls Test
+// without an exception frame once kVerifyFirst comparisons have run guarded and
+// this is still zero. If it ever is not, every armed call stays guarded.
+//
+// The guard lives in its own function so that Hooked_Test has no __try at all:
+// one anywhere in it puts the frame into its prologue for every call.
+unsigned long g_caught = 0;
+
+__declspec(noinline) bool TestGuardedCall(const void* ray, const void* verts,
+                                          const void* tri, bool wantT, bool wantUV,
+                                          float tol, Out* o, int* r) {
+    __try {
+        *r = Test((const float*)ray, (const float*)verts, (const uint16_t*)tri,
+                  wantT, wantUV, tol, o);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_caught;
+        return false;
+    }
+}
+
 int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
                         void* outT, void* outUV, float tol) {
     ++g_calls;
@@ -310,11 +333,12 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
             if (r & 0xFF) ++g_hits;
         } else {
             Out o;
-            __try {
+            if (g_caught == 0) {
                 r = Test((const float*)ray, (const float*)verts,
                          (const uint16_t*)tri, outT != nullptr,
                          outUV != nullptr, tol, &o);
-            } __except (EXCEPTION_EXECUTE_HANDLER) {
+            } else if (!TestGuardedCall(ray, verts, tri, outT != nullptr,
+                                        outUV != nullptr, tol, &o, &r)) {
                 AbTest::TickOut(t);
                 return orig_Test(ray, verts, tri, outT, outUV, tol);
             }
@@ -341,11 +365,8 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
     Out mine;
     int ours;
     const uint64_t tOursA = SelfBench::Now();
-    __try {
-        ours = Test((const float*)ray, (const float*)verts,
-                    (const uint16_t*)tri, outT != nullptr, outUV != nullptr,
-                    tol, &mine);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    if (!TestGuardedCall(ray, verts, tri, outT != nullptr, outUV != nullptr,
+                         tol, &mine, &ours)) {
         return orig_Test(ray, verts, tri, outT, outUV, tol);
     }
 
@@ -448,6 +469,10 @@ void LogStats() {
             "yet. This is measured and zero, not unmeasured.");
         return;
     }
+    Log("[RayTriangle]   exception guard: %lu fault(s) caught; the armed path runs %s.",
+        g_caught, !g_armed ? "guarded, still checking"
+                  : (g_caught ? "guarded, because the guard has caught something"
+                              : "without an exception frame"));
 
     Log("[RayTriangle] %lu tests, %lu of them hit (%.1f%%), %lu compared with "
         "the client%s. Counts are lower bounds.",
