@@ -126,6 +126,7 @@ static volatile DWORD g_lastMainThreadTick = 0;
 static volatile bool  g_freezeWatchdogActive = false;
 static HANDLE         g_freezeWatchdogThread = NULL;
 DWORD          g_mainThreadId = 0;
+bool           g_processExiting = false;
 
 // Forward-declared here because the watchdog (below) is defined before
 // lua_optimize.h is included; definitions match that header.
@@ -11375,6 +11376,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
                 // nothing after it. Emit it here or it is lost on every normal
                 // exit, since this process leaves through TerminateProcess and
                 // Shutdown() never runs.
+                //
+                // By now the client may have freed what our reporters point at.
+                // A tester's normal quit logged a first-chance access violation
+                // in lua_gc reading l_G of the lua_State the report still held,
+                // from an address that was reserved but no longer committed. The
+                // guard caught it, and the log still showed a fault to a player
+                // who had only closed the game. Reporters that would call into
+                // the client check this flag and print their last sample instead.
+                g_processExiting = true;
                 __try {
                     DumpPeriodicStats("session end", true);
                 } __except(EXCEPTION_EXECUTE_HANDLER) {

@@ -43,6 +43,7 @@ extern "C" void ReleaseLoadingArena();
 
 extern bool g_isMultiClient;
 extern DWORD g_mainThreadId;
+extern bool g_processExiting;
 extern "C" void Log(const char* fmt, ...);
 
 // ================================================================
@@ -2203,7 +2204,7 @@ void LogStats() {
     }
 
     bool fresh = false;
-    if (Api.L && Api.lua_gc && g_mainThreadId != 0 &&
+    if (Api.L && Api.lua_gc && g_mainThreadId != 0 && !g_processExiting &&
         GetCurrentThreadId() == g_mainThreadId &&
         !g_isSwapping.load(std::memory_order_acquire) &&
         !g_isReloading.load(std::memory_order_acquire)) {
@@ -2227,7 +2228,10 @@ void LogStats() {
         "runs only while stepping is on.",
         mb,
         fresh ? "read by this report"
-              : "last sample - this report could not read it",
+              : g_processExiting
+                  ? "last sample - not read at process exit, where the client "
+                    "may already have freed its Lua state"
+                  : "last sample - this report could not read it",
         State.gcOptimized
             ? "running"
             : "OFF: the lua_State changed and nothing turns it back on, so only "
