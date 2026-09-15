@@ -407,6 +407,7 @@ namespace Config {
         // sub_484B00. Off by default and experimental; it predicts batches and
         // compares them with what the client writes before it takes over.
         bool OptUiBatchFill = false;
+        bool OptParticleFill = false;
         // Hands mimalloc a block of address space above 2GB so it grows there
         // instead of into the half a 32-bit client allocates from. Two tester
         // sessions ended with the low half down to a megabyte while the working
