@@ -406,28 +406,37 @@ bool Init() {
         return false;
     }
 
-    std::string binPath = StorePath(".bin");
-    std::string idxPath = StorePath(".idx");
-    if (binPath.empty()) {
-        Log("[BytecodeStore] NOT active: could not work out where Wow.exe lives.");
-        return false;
-    }
-
-    // No write sharing. A second client started against the same game folder
-    // fails to open these and runs without a store, which is the right outcome:
-    // two processes appending to one blob file would interleave.
-    g_bin = CreateFileA(binPath.c_str(), GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ, NULL, OPEN_ALWAYS,
-                        FILE_ATTRIBUTE_NORMAL, NULL);
-    g_idx = CreateFileA(idxPath.c_str(), GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ, NULL, OPEN_ALWAYS,
-                        FILE_ATTRIBUTE_NORMAL, NULL);
-    if (g_bin == INVALID_HANDLE_VALUE || g_idx == INVALID_HANDLE_VALUE) {
-        DWORD err = GetLastError();
+    // No write sharing: two processes appending to one blob file would
+    // interleave. A second client started against the same game folder used to
+    // fail here and run the whole session without a store, which a tester's
+    // two-client log shows on every report. It takes the next numbered pair
+    // instead, the way the log files do, and keeps it for its next session.
+    std::string binPath, idxPath;
+    DWORD err = 0;
+    for (int slot = 1; slot <= 8; ++slot) {
+        const std::string tag = slot == 1 ? std::string() : "." + std::to_string(slot);
+        binPath = StorePath((tag + ".bin").c_str());
+        idxPath = StorePath((tag + ".idx").c_str());
+        if (binPath.empty()) {
+            Log("[BytecodeStore] NOT active: could not work out where Wow.exe lives.");
+            return false;
+        }
+        g_bin = CreateFileA(binPath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ, NULL, OPEN_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, NULL);
+        const DWORD binErr = GetLastError();
+        g_idx = CreateFileA(idxPath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ, NULL, OPEN_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, NULL);
+        const DWORD idxErr = GetLastError();
+        if (g_bin != INVALID_HANDLE_VALUE && g_idx != INVALID_HANDLE_VALUE) break;
+        err = g_bin == INVALID_HANDLE_VALUE ? binErr : idxErr;
         if (g_bin != INVALID_HANDLE_VALUE) { CloseHandle(g_bin); g_bin = INVALID_HANDLE_VALUE; }
         if (g_idx != INVALID_HANDLE_VALUE) { CloseHandle(g_idx); g_idx = INVALID_HANDLE_VALUE; }
-        Log("[BytecodeStore] NOT active: could not open %s (error %lu). Another "
-            "client running from the same folder already holds it.",
+    }
+    if (g_bin == INVALID_HANDLE_VALUE || g_idx == INVALID_HANDLE_VALUE) {
+        Log("[BytecodeStore] NOT active: every numbered store up to %s is held by "
+            "another client or cannot be opened (last error %lu).",
             binPath.c_str(), err);
         return false;
     }
