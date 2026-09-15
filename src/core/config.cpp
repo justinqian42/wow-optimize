@@ -141,6 +141,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "CollisionRayOutcode", &Settings::OptCollisionRayOutcode },
     { "Graphics_Sound", "RayTriangleSse2", &Settings::OptRayTriangleSse2 },
     { "Graphics_Sound", "BoneMatrixUpload", &Settings::OptBoneMatrixUpload },
+    { "Graphics_Sound", "UiBatchFill", &Settings::OptUiBatchFill },
     { "General", "MimallocHighArena", &Settings::OptMimallocHighArena },
     { "General", "VaCensus", &Settings::OptVaCensus },
     { "General", "HighPlacementModules", &Settings::OptHighPlacementModules },
@@ -672,6 +673,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptCollisionRayOutcode = GetPrivateProfileIntA("Graphics_Sound", "CollisionRayOutcode", 0, iniPath.c_str()) != 0;
         g_settings.OptRayTriangleSse2     = GetPrivateProfileIntA("Graphics_Sound", "RayTriangleSse2", 0, iniPath.c_str()) != 0;
         g_settings.OptBoneMatrixUpload    = GetPrivateProfileIntA("Graphics_Sound", "BoneMatrixUpload", 0, iniPath.c_str()) != 0;
+        g_settings.OptUiBatchFill         = GetPrivateProfileIntA("Graphics_Sound", "UiBatchFill", 0, iniPath.c_str()) != 0;
         g_settings.OptMimallocHighArena   = GetPrivateProfileIntA("General", "MimallocHighArena", 0, iniPath.c_str()) != 0;
         g_settings.OptClientWriteBatch    = GetPrivateProfileIntA("General", "ClientWriteBatch", 1, iniPath.c_str()) != 0;
         g_settings.MimallocHighArenaMB    = GetPrivateProfileIntA("General", "MimallocHighArenaMB", 256, iniPath.c_str());

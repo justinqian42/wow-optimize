@@ -167,6 +167,7 @@ add_library(wow_optimize SHARED
     src/runtime_vm/lua_undump.cpp
     src/simd_math/quat_lerp_sse2.cpp
     src/simd_math/bone_matrix_upload_sse2.cpp
+    src/simd_math/ui_batch_fill_sse2.cpp
     src/simd_math/m2_matrix_slot_sse2.cpp
     src/hooks_subsystems/m2_anim_stride.cpp
     src/hooks_subsystems/m2_anim_reuse.cpp

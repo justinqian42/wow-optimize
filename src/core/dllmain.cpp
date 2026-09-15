@@ -51,6 +51,7 @@
 #include "freeze_catcher.h"
 #include "ray_triangle_sse2.h"
 #include "bone_matrix_upload_sse2.h"
+#include "ui_batch_fill_sse2.h"
 #include "m2_matrix_slot_sse2.h"
 #include "m2_anim_stride.h"
 #include "m2_anim_reuse.h"
@@ -5616,6 +5617,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("ObjMgrEnumFast::LogStats", ObjMgrEnumFast::LogStats());
     STAT_TIME("MpqOpenCensus::LogStats", MpqOpenCensus::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
+    STAT_TIME("UiBatchFill::LogStats", UiBatchFill::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
     STAT_TIME("M2AnimReuse::LogStats", M2AnimReuse::LogStats());
@@ -8372,6 +8374,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     CollisionRayOutcode::Init();
     RayTriangle::Init();
     BoneMatrixUpload::Init();
+    UiBatchFill::Init();
 
     Log("--- M2 Matrix Slot Copy (SSE2) ---");
     M2MatrixSlot::Install();
@@ -11394,6 +11397,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             // first, which is why every other flush point exists.
             ClientWriteBatch::FlushAll("process detach");
             BoneMatrixUpload::Shutdown();
+            UiBatchFill::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();
             M2MatrixSlot::Shutdown();
