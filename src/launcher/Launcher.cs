@@ -117,6 +117,13 @@ namespace WowOptimizeLauncher {
             "QualityGovernor", "MipBiasGovernor", "SpellEffectCulling",
             "AnimLod", "M2AnimStride", "SoundVolumeLimit",
 
+            // Keeps a player out of the world. The hook it installs sits in front
+            // of InitializeCriticalSection for every module in the process, and a
+            // tester bisected his failure to enter the world with ReShade down to
+            // this one switch. It is a compatibility hook, not a speed switch, and
+            // this button must never turn it on.
+            "LockTuningInitHook",
+
             // Left off because something measured them and the answer was no.
             "CompatMode",          // slower on purpose; it repairs a broken connection
             "MatrixVectorSse2",    // measured against the client: 3.3 ns to its 2.5
@@ -1586,10 +1593,23 @@ namespace WowOptimizeLauncher {
         // an A/B harness rotating eighteen features every twenty seconds. That
         // button is gone; this one is what it was being mistaken for.
         private void SetUpMaxPerformance() {
-            int on = 0, off = 0;
+            int on = 0, off = 0, left = 0;
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl == null) continue;
-                bool want = Kinds.HelpsSpeed(item.Key);
+                bool want;
+                if (item.Experimental) {
+                    // Its own default, whichever way that points. This button
+                    // used to turn every one of these on - forty-eight of them,
+                    // including replacements that are off because nobody has run
+                    // them in a game yet. A switch that exists to be left off has
+                    // to survive the button that turns everything on, and the six
+                    // that are on by default have to survive it too, so neither is
+                    // decided here.
+                    want = item.DefaultVal;
+                    left++;
+                } else {
+                    want = Kinds.HelpsSpeed(item.Key);
+                }
                 item.Ctrl.Checked = want;
                 if (want) on++; else off++;
             }
@@ -1600,6 +1620,9 @@ namespace WowOptimizeLauncher {
                 + "Off: everything that measures the game, everything that buys "
                 + "frames by changing how it looks or sounds, and the few that "
                 + "were measured against the client and lost.\r\n\r\n"
+                + left.ToString() + " switch(es) marked [+] or [!] were left at "
+                + "their own default, because an unproven replacement should not "
+                + "be turned on by a button that says performance.\r\n\r\n"
                 + "Saved. Launch when ready.",
                 "Max Performance", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
