@@ -47,6 +47,10 @@ static volatile long g_putqword_calls = 0, g_putqword_hits = 0;
 // whole life: the counters were printed only from ShutdownDataStoreFastPath,
 // which does not run because the process leaves through TerminateProcess.
 static uint32_t g_installedHooks = 0;
+// Whether Init was reached at all. Init is only called when the switch is on, so
+// this separates "switched off" from "asked to install and could not", which
+// are different answers to the only question a reader has.
+static bool g_initRan = false;
 
 // ================================================================
 // Original function pointers (__thiscall on x86)
@@ -249,6 +253,7 @@ static CDataStore* __fastcall HookGetQword(CDataStore* self, void*, uint32_t* ou
 // Install hooks
 // ================================================================
 bool InitDataStoreFastPath() {
+    g_initRan = true;
 #if TEST_DISABLE_DATASTORE_FASTPATH
     Log("[DataStore] DISABLED via feature flag");
     return false;
@@ -290,9 +295,15 @@ void LogDataStoreStats() {
     Log("[DataStore] not measured: compiled out at build time.");
 #else
     if (g_installedHooks == 0) {
-        Log("[DataStore] not measured: none of the six CDataStore accessors is "
-            "hooked. They go in under the Combat_Net/SavedVarsPretoken switch, "
-            "which does not name them.");
+        if (!g_initRan) {
+            Log("[DataStore] not measured: switched off. The six CDataStore "
+                "accessors go in under Combat_Net/SavedVarsPretoken, which does "
+                "not name them.");
+        } else {
+            Log("[DataStore] NOT active: asked to hook the six CDataStore "
+                "accessors and none of them went in. The reason is earlier in "
+                "this log.");
+        }
         return;
     }
     if (g_getdword_calls == 0 && g_putdword_calls == 0 &&

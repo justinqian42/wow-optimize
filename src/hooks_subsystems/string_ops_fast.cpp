@@ -24,6 +24,9 @@ static volatile long g_jenkins_fast = 0;
 // the counters were printed only from ShutdownStringOpsFast, which does not run
 // because the process leaves through TerminateProcess.
 static bool g_installed = false;
+// Whether Init was reached. It runs only when the switch is on, so this separates
+// "switched off" from "asked to install and could not".
+static bool g_initRan = false;
 
 // ================================================================
 // Original function pointers
@@ -106,25 +109,67 @@ static uint32_t CalculateOurHash(const uint8_t* key, uint32_t length, uint32_t i
     return c;
 }
 
+// The learning phase, which this hook never had.
+//
+// It used to call the client's hash, call ours, compare them, throw ours away
+// and return the client's - on every call, for the life of the session. That is
+// two hashes where the client did one, so the replacement was strictly slower
+// than the function it replaced and could never be anything else. It also
+// counted g_jenkins_fast on every call, so the report would have read 100%
+// inlined for a path that was used 0% of the time, if the report had ever been
+// printed at all.
+//
+// Now it is the shape every other replacement in this project uses: run both and
+// hand back the client's answer until enough calls have agreed, then use ours and
+// resample. One disagreement retires it for the session and says so.
+static constexpr long kVerifyFirst  = 4096;
+static constexpr long kResampleMask = 1023;
+static long g_verified  = 0;       // calls that ran both and compared
+static long g_mismatch  = 0;
+static bool g_armed     = false;
+static bool g_retired   = false;
+
+__declspec(noinline) static void ReportMismatch(const uint8_t* key, uint32_t length,
+                                                uint32_t initval, uint32_t orig,
+                                                uint32_t ours) {
+    Log("[StringOps] Jenkins hash MISMATCH: len=%u init=%u client=0x%08X ours=0x%08X "
+        "- retired for this session, every later call goes to the client.",
+        length, initval, orig, ours);
+    if (key && length > 0) {
+        char buf[128] = {0};
+        size_t n = length < 32 ? length : 32;
+        size_t w = 0;
+        for (size_t i = 0; i < n && w + 3 < sizeof(buf); i++) {
+            _snprintf(buf + w, sizeof(buf) - w - 1, "%02X ", key[i]);
+            w += 3;
+        }
+        Log("[StringOps]   key: %s", buf);
+    }
+}
+
 static uint32_t __cdecl HookJenkinsHash(const uint8_t* key, uint32_t length, uint32_t initval) {
 #if !TEST_DISABLE_STRING_OPS_FAST
     ++g_jenkins_calls;
     if (!pOrigJenkins) return initval;
 
-    uint32_t orig_hash = pOrigJenkins(key, length, initval);
-    uint32_t our_hash = CalculateOurHash(key, length, initval);
-    if (orig_hash != our_hash) {
-        Log("[JenkinsHash Mismatch] len=%u init=%u orig=0x%08X our=0x%08X", length, initval, orig_hash, our_hash);
-        if (key && length > 0) {
-            char buf[256] = {0};
-            size_t print_len = length < 32 ? length : 32;
-            for (size_t i = 0; i < print_len; i++) {
-                sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%02X ", key[i]);
-            }
-            Log("  Key: %s", buf);
-        }
+    if (g_retired) return pOrigJenkins(key, length, initval);
+
+    if (g_armed && ((g_jenkins_calls & kResampleMask) != 0)) {
+        ++g_jenkins_fast;
+        return CalculateOurHash(key, length, initval);
     }
-    ++g_jenkins_fast;
+
+    uint32_t orig_hash = pOrigJenkins(key, length, initval);
+    uint32_t our_hash  = CalculateOurHash(key, length, initval);
+    ++g_verified;
+    if (orig_hash != our_hash) {
+        ++g_mismatch;
+        g_retired = true;
+        g_armed   = false;
+        ReportMismatch(key, length, initval, orig_hash, our_hash);
+        return orig_hash;
+    }
+    if (!g_armed && g_verified >= kVerifyFirst) g_armed = true;
     return orig_hash;
 #else
     return pOrigJenkins(key, length, initval);
@@ -178,9 +223,14 @@ void DumpStringOpsStats() {
     Log("[StringOps] not measured: compiled out at build time.");
 #else
     if (!g_installed) {
-        Log("[StringOps] not measured: the hook on the client's Jenkins hash is not "
-            "installed. It goes in under the Graphics_Sound/StrStrSse2 switch, which "
-            "does not name it.");
+        if (!g_initRan) {
+            Log("[StringOps] not measured: switched off. The hook on the client's "
+                "Jenkins hash goes in under Graphics_Sound/StrStrSse2, which does "
+                "not name it.");
+        } else {
+            Log("[StringOps] NOT active: asked to hook the client's Jenkins hash "
+                "and it did not go in. The reason is earlier in this log.");
+        }
         return;
     }
     if (g_jenkins_calls == 0) {
@@ -188,10 +238,21 @@ void DumpStringOpsStats() {
             "hashed nothing through it.");
         return;
     }
-    Log("[StringOps] Jenkins hash: %ld calls, %ld inlined (%.1f%%). Plain counters, "
-        "so both are lower bounds.",
+    Log("[StringOps] Jenkins hash: %ld calls, %ld answered by the replacement "
+        "(%.1f%%), %ld run both ways and compared. Plain counters, so each is a "
+        "lower bound.",
         g_jenkins_calls, g_jenkins_fast,
-        100.0 * g_jenkins_fast / g_jenkins_calls);
+        100.0 * g_jenkins_fast / g_jenkins_calls, g_verified);
+    if (g_retired)
+        Log("[StringOps]   RETIRED: %ld comparison(s) disagreed with the client, so "
+            "every call since has gone to the client's own routine.", g_mismatch);
+    else if (g_armed)
+        Log("[StringOps]   armed after %ld agreeing comparison(s); one call in %d is "
+            "still checked against the client.", (long)kVerifyFirst, kResampleMask + 1);
+    else
+        Log("[StringOps]   still verifying: %ld of %ld agreeing comparison(s) needed "
+            "before the replacement's own answer is used, so it is running both and "
+            "is slower than the client until then.", g_verified, (long)kVerifyFirst);
 #endif
 }
 

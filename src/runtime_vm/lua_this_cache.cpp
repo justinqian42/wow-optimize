@@ -328,7 +328,13 @@ void GetLuaThisCacheStats(uint64_t* hits, uint64_t* total) {
 }
 
 void LuaThisCache_LogStats() {
-    if (!Config::g_settings.OptLuaThisFast) return;
+    // Printed rather than returned on. Every other reporter here says "switched
+    // off"; this one said nothing, so a log carried no [LuaThis] line at all and
+    // a reader could not tell the switch from a module that failed to build.
+    if (!Config::g_settings.OptLuaThisFast) {
+        Log("[LuaThis] not measured: switched off (UI_Lua/LuaThisFast).");
+        return;
+    }
     if (!g_installed) { Log("[LuaThis] not installed - nothing measured"); return; }
     if (g_calls == 0) { Log("[LuaThis] installed but never called"); return; }
     Log("[LuaThis]   exception guard: %lu fault(s) caught; the armed path runs %s.",
