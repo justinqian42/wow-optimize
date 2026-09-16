@@ -184,15 +184,21 @@ namespace WowExtendedHooks {
     }
 
     void DumpStats() {
-        // Several entries below are commented out of the install table above,
-        // so their counters can only ever read 0/0. A zero here means "not
-        // hooked" and not "hooked and idle"; the ACTIVE lines at startup say
-        // which ones were installed.
-        Log("[EXTENDED] hits/calls, lower bounds - Strcpy: %d/%d | SFile: %d/%d | "
-            "PushImpl: %d/%d | TableGet: %d/%d",
-            g_h[0], g_c[0], g_h[1], g_c[1], g_h[3], g_c[3], g_h[4], g_c[4]);
-        Log("[EXTENDED] TexInit: %d/%d | Status: %d/%d",
-            g_h[6], g_c[6], g_h[7], g_c[7]);
+        // One hook is installed here. The five other counters this line used to
+        // print - Strcpy, SFile, TableGet, TexInit and Status - belong to entries
+        // commented out of the install table above, so they could only ever read
+        // 0/0, and a reader had no way to tell that from a hook that ran and found
+        // nothing. They are named as not installed instead of printed as zero.
+        if (g_c[3] == 0) {
+            Log("[EXTENDED] measured and zero: the Lua push-string implementation "
+                "at 0x0084E300 is hooked and the client pushed nothing through it.");
+        } else {
+            Log("[EXTENDED] PushImpl: %d/%d hits/calls, plain counters and lower "
+                "bounds.", g_h[3], g_c[3]);
+        }
+        Log("[EXTENDED] not installed, so not measured: Strcpy, SFile, TableGet, "
+            "TexInit, Status. Each is commented out of the install table, three of "
+            "them for a __usercall convention and one for stale table pointers.");
         // C9-C40 are not printed any more. They were empty functions.
     }
 }

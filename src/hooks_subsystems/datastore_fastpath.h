@@ -22,6 +22,9 @@
 
 bool InitDataStoreFastPath();
 void ShutdownDataStoreFastPath();
+// Called from the periodic report. Shutdown is not a place a counter can be
+// printed from: this process leaves through TerminateProcess.
+void LogDataStoreStats();
 void DumpDataStoreStats();
 
 #endif // DATASTORE_FASTPATH_H

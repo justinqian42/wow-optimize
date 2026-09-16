@@ -19,6 +19,12 @@ extern "C" void Log(const char* fmt, ...);
 static volatile long g_jenkins_calls = 0;
 static volatile long g_jenkins_fast = 0;
 
+// Whether the hook went in. Without it a zero call count cannot be told from a
+// module that never installed, and this one reported neither for its whole life:
+// the counters were printed only from ShutdownStringOpsFast, which does not run
+// because the process leaves through TerminateProcess.
+static bool g_installed = false;
+
 // ================================================================
 // Original function pointers
 // ================================================================
@@ -159,7 +165,8 @@ bool InitStringOpsFast() {
 
     Log("[StringOps] Installed %d/%d hooks (total %d+ xrefs)",
         installed, (int)(sizeof(hooks)/sizeof(hooks[0])), 1013);
-    return installed == (int)(sizeof(hooks)/sizeof(hooks[0]));
+    g_installed = installed == (int)(sizeof(hooks)/sizeof(hooks[0]));
+    return g_installed;
 #endif
 }
 
@@ -167,12 +174,24 @@ bool InitStringOpsFast() {
 // Statistics dump
 // ================================================================
 void DumpStringOpsStats() {
-#if !TEST_DISABLE_STRING_OPS_FAST
-    Log("[StringOps] === String & Memory Ops Statistics ===");
-    if (g_jenkins_calls > 0)
-        Log("[StringOps] Jenkins hash: %ld calls, %ld inlined (%.1f%%)",
-            g_jenkins_calls, g_jenkins_fast,
-            100.0 * g_jenkins_fast / g_jenkins_calls);
+#if TEST_DISABLE_STRING_OPS_FAST
+    Log("[StringOps] not measured: compiled out at build time.");
+#else
+    if (!g_installed) {
+        Log("[StringOps] not measured: the hook on the client's Jenkins hash is not "
+            "installed. It goes in under the Graphics_Sound/StrStrSse2 switch, which "
+            "does not name it.");
+        return;
+    }
+    if (g_jenkins_calls == 0) {
+        Log("[StringOps] measured and zero: the hook is installed and the client "
+            "hashed nothing through it.");
+        return;
+    }
+    Log("[StringOps] Jenkins hash: %ld calls, %ld inlined (%.1f%%). Plain counters, "
+        "so both are lower bounds.",
+        g_jenkins_calls, g_jenkins_fast,
+        100.0 * g_jenkins_fast / g_jenkins_calls);
 #endif
 }
 

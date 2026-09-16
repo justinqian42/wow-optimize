@@ -278,6 +278,10 @@ static volatile int g_w19LastTrack = 0;
 // Installation / Shutdown / Stats
 // ================================================================
 namespace WowOptHooks {
+    // How many of the four went in. A report of zeroes from a hook that never
+    // installed reads exactly like one from a hook nothing called.
+    static int g_installedHooks = 0;
+
     bool InstallAll() {
         int installed = 0;
 
@@ -309,6 +313,7 @@ namespace WowOptHooks {
             "of them does work - ten that only counted and called the original "
             "were removed.",
             installed, (int)(sizeof(hooks) / sizeof(hooks[0])));
+        g_installedHooks = installed;
         return installed > 0;
     }
 
@@ -329,8 +334,14 @@ namespace WowOptHooks {
         // successes rather than fast paths, g_w19Cached counted successes
         // rather than cache hits. A reader of this report saw a high skip rate
         // for a hook that skipped nothing.
-        Log("[WowOpt] hits/calls below are plain counters on hooked client "
-            "functions and are lower bounds.");
+        if (g_installedHooks == 0) {
+            Log("[WowOpt] not measured: none of the four hooks on wow.exe went in. "
+                "The counters below would all read zero because nothing ran, which "
+                "is not the same as nothing happening.");
+            return;
+        }
+        Log("[WowOpt] hits/calls below are plain counters on %d hooked client "
+            "function(s) and are lower bounds.", g_installedHooks);
         Log("[WowOpt] Memcpy680: %d/%d | ObjDestroy: %d/%d | AsyncDest: %d/%d "
             "| BufValid: %d/%d",
             g_w1Hits, g_w1Calls, g_w2Hits, g_w2Calls,

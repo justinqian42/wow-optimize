@@ -42,6 +42,12 @@ static volatile long g_putbyte_calls  = 0, g_putbyte_hits  = 0;
 static volatile long g_getqword_calls = 0, g_getqword_hits = 0;
 static volatile long g_putqword_calls = 0, g_putqword_hits = 0;
 
+// How many of the six hooks went in. Without it a report of all zeroes cannot be
+// told from a module that never installed, and this one reported neither for its
+// whole life: the counters were printed only from ShutdownDataStoreFastPath,
+// which does not run because the process leaves through TerminateProcess.
+static uint32_t g_installedHooks = 0;
+
 // ================================================================
 // Original function pointers (__thiscall on x86)
 // ================================================================
@@ -274,16 +280,31 @@ bool InitDataStoreFastPath() {
     }
 
     Log("[DataStore] FastPath installed %d/6 hooks", installed);
+    g_installedHooks = installed;
     return installed == 6;
 #endif
 }
 
 void LogDataStoreStats() {
-#if !TEST_DISABLE_DATASTORE_FASTPATH
-    if (g_getdword_calls > 0 || g_putdword_calls > 0 ||
-        g_getbyte_calls > 0  || g_putbyte_calls > 0  ||
-        g_getqword_calls > 0 || g_putqword_calls > 0) {
-        Log("[DataStore] Stats:");
+#if TEST_DISABLE_DATASTORE_FASTPATH
+    Log("[DataStore] not measured: compiled out at build time.");
+#else
+    if (g_installedHooks == 0) {
+        Log("[DataStore] not measured: none of the six CDataStore accessors is "
+            "hooked. They go in under the Combat_Net/SavedVarsPretoken switch, "
+            "which does not name them.");
+        return;
+    }
+    if (g_getdword_calls == 0 && g_putdword_calls == 0 &&
+        g_getbyte_calls == 0  && g_putbyte_calls == 0 &&
+        g_getqword_calls == 0 && g_putqword_calls == 0) {
+        Log("[DataStore] measured and zero: %u of 6 accessors hooked and the client "
+            "read no packet field through them.", g_installedHooks);
+        return;
+    }
+    {
+        Log("[DataStore] Stats (%u of 6 accessors hooked; plain counters, so every "
+            "figure is a lower bound):", g_installedHooks);
         if (g_getdword_calls > 0) Log("  GetDword: %ld/%ld hits (%ld%%)", g_getdword_hits, g_getdword_calls, (g_getdword_hits * 100) / g_getdword_calls);
         if (g_putdword_calls > 0) Log("  PutDword: %ld/%ld hits (%ld%%)", g_putdword_hits, g_putdword_calls, (g_putdword_hits * 100) / g_putdword_calls);
         if (g_getbyte_calls > 0)  Log("  GetByte:  %ld/%ld hits (%ld%%)", g_getbyte_hits, g_getbyte_calls, (g_getbyte_hits * 100) / g_getbyte_calls);

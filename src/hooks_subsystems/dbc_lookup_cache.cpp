@@ -457,7 +457,21 @@ bool InstallDbcLookupCache()
 void DbcLookupCache_LogStats()
 {
     uint64_t total = g_hits + g_misses;
-    if (total == 0 && g_bypassedPlainCopy == 0) return;
+
+    // Three states. This used to return without printing anything when the
+    // counters were empty, so a log carried no line at all whether the cache was
+    // switched off, failed to install, or sat installed and untouched.
+    if (!g_cache) {
+        Log("[DbcLookupCache] not measured: the table was never allocated, so no "
+            "lookup went through this. The switch is DbcLookupCache and the reason "
+            "an install refused is earlier in this log.");
+        return;
+    }
+    if (total == 0 && g_bypassedPlainCopy == 0) {
+        Log("[DbcLookupCache] measured and zero: installed, and the client decoded "
+            "no DBC row through it.");
+        return;
+    }
 
     if (total > 0) {
         Log("[DbcLookupCache] %llu calls, %llu hits, %llu misses (%.1f%% hit rate)",

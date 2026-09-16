@@ -889,17 +889,12 @@ extern "C" void WowOpt_NoteClientPatchRefused(void) {
 #define CRASH_TEST_DISABLE_MPQ_MMAP        1   // MPQ memory mapping (ALREADY DISABLED - risky)
 #define CRASH_TEST_DISABLE_QPC_CACHE       1   // QPC coalescing cache (DISABLED to fix random stutters under DXVK)
 #define CRASH_TEST_DISABLE_TICK_COUNT      1   // GetTickCount/timeGetTime redirection to QPC (DISABLED to fix random stutters and CPU overhead)
-#define CRASH_TEST_DISABLE_LUA_INTERNALS   0   // Lua VM internals (concat hook)
 #define CRASH_TEST_DISABLE_THREAD_AFFINITY   0   // Thread core pinning (re-enabled - was disabled preemptively)
-#define CRASH_TEST_DISABLE_SHORT_WAIT_SPIN   1   // WaitSpin - tested bad. DEAD FLAG: no #if reads it.
 #ifndef CRASH_TEST_DISABLE_VA_ARENA
 #define CRASH_TEST_DISABLE_VA_ARENA          0   // VA Arena compiled in; activation is runtime opt-in via Config OptVaArena (default off). Set to 1 to hard-remove.
 #endif
 // DEAD FLAGS - no #if anywhere reads these three. The code they name is not in
 // the build; setting them to 0 puts none of it back. Kept for the note.
-#define CRASH_TEST_DISABLE_DISPATCH_POOL     1   // DispatchPool - tested bad
-#define CRASH_TEST_DISABLE_BGPRELOAD_CACHE   1   // bgpreloadsleep cache - 0 hits
-#define CRASH_TEST_DISABLE_SUBTASK_EVENTPOOL 1   // Subtask event pool - 0 hits
 
 // Feature toggles for hooks
 #ifndef CRASH_TEST_DISABLE_GETFILESIZE_CACHE
@@ -5180,6 +5175,14 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     if (!g_statsFreq.QuadPart) QueryPerformanceFrequency(&g_statsFreq);
     g_statTimeCount = 0;
 
+    // The whole dump, against the sum of the timed reporters inside it. A field
+    // log carried "periodic stats dump took 91.5 ms" from the probe around this
+    // call and "90 reporter(s) took 7.1 ms" from the line at the end, and nothing
+    // said where the other 84 ms went. Two instruments disagreeing is
+    // information, so the difference is now printed rather than left implied.
+    LARGE_INTEGER dumpStart;
+    QueryPerformanceCounter(&dumpStart);
+
     // The first thing in the report, because it is the first thing anyone
     // reading a bug report needs and it used to be scattered over six thousand
     // lines of start-up.
@@ -5714,6 +5717,11 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("FontGlyphCache::LogStats", FontGlyphCache::LogStats());
     WowOpt_ReportForeignDetours();
     STAT_TIME("ApiCache::LogStats", ApiCache::LogStats());
+    // Both of these used to print only from their own Shutdown, which this
+    // process never reaches, so two modules that hook seven client functions
+    // between them had never put a number in any log.
+    STAT_TIME("LogDataStoreStats", LogDataStoreStats());
+    STAT_TIME("DumpStringOpsStats", DumpStringOpsStats());
     STAT_TIME("TextureUnloadDelay::LogStats", TextureUnloadDelay::LogStats());
     STAT_TIME("Verdict::LogStats", Verdict::LogStats());
     STAT_TIME("NetDiag::LogStats", NetDiag::LogStats());
@@ -5774,9 +5782,19 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
             worst[at] = i;
         }
 
-        Log("[Report] %d reporter(s) took %.1f ms of main thread between them. "
-            "That is a pause the player sees, so the slowest are named:",
-            g_statTimeCount, sum);
+        LARGE_INTEGER dumpEnd;
+        QueryPerformanceCounter(&dumpEnd);
+        double dumpMs = g_statsFreq.QuadPart
+            ? (double)(dumpEnd.QuadPart - dumpStart.QuadPart) * 1000.0 /
+              (double)g_statsFreq.QuadPart
+            : 0.0;
+
+        Log("[Report] this report has taken %.1f ms of main thread so far, of which "
+            "%d timed reporter(s) account for %.1f ms and %.1f ms is everything "
+            "else in the dump - the log lines it writes directly and the work not "
+            "wrapped in a timer.", dumpMs, g_statTimeCount, sum, dumpMs - sum);
+        Log("[Report] That is a pause the player sees, so the slowest reporters are "
+            "named:");
         for (int i = 0; i < found; i++) {
             if (g_statTimes[worst[i]].ms < 0.5) break;
             Log("[Report]   %-38s %6.1f ms", g_statTimes[worst[i]].name,
@@ -8646,7 +8664,12 @@ static DWORD WINAPI MainThread(LPVOID param) {
     bool eventDispatchOk = InstallEventDispatchCache();
 #else
     bool eventDispatchOk = false;
-    Log("[EventDispatchCache] DISABLED via TEST_DISABLE_UNIT_API_FASTPATH");
+    // The guard above is a plain #if 0, not a flag. It named
+    // TEST_DISABLE_UNIT_API_FASTPATH, which gates something else entirely, so a
+    // bisection that set that flag either way would have seen no change here and
+    // drawn the wrong conclusion from it.
+    Log("[EventDispatchCache] not installed: the call is compiled out with #if 0 "
+        "and no switch or flag turns it back on.");
 #endif
 
 

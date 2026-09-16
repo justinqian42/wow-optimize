@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <atomic>
 #include "memory_pressure_governor.h"
+#include "crash_dumper.h"
 #include "version.h"
 #include "heap_compactor.h"
 
@@ -199,6 +200,12 @@ void OnFrame() {
                 "%uMB, %d samples)",
                 LevelName(current), LevelName(target),
                 (unsigned)(freeBlock / (1024*1024)), g_hystCount);
+            // Also into the event trace, so a slow-frame report can name it. A
+            // tester session crossed into RED eighteen seconds after a 1934 ms
+            // frame and the two were connected by hand from timestamps.
+            CrashDumper::Trace("VA pressure %s -> %s, largest free block below "
+                               "2GB = %u MB", LevelName(current), LevelName(target),
+                               (unsigned)(freeBlock / (1024 * 1024)));
             if (target >= PRESSURE_RED)
                 Log("[PressureGovernor]   RED sheds the caches and runs one "
                     "mi_collect. Tightening the purge delay returns physical "
