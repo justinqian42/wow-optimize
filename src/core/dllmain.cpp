@@ -6033,6 +6033,8 @@ extern "C" void WowOpt_OnFrameBoundary() {
     // The per-frame ring, and the key that dumps it. Both are one presented
     // frame apart by construction, which is the resolution the ring is for.
     FlightRecorder::OnFrame();
+    // After the ring has this frame, so a dump of a slow frame contains it.
+    FrameBench::FlushAutoMark();
     FlightRecorder::PollHotkey();
     CameraReplay::OnFrame();
     AbTest::OnFrame();

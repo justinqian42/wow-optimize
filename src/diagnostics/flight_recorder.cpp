@@ -179,11 +179,40 @@ void Mark(const char* why) {
     hdr[sizeof(hdr) - 1] = 0;
     Log("%s", hdr);
 
-    Log("[FlightRec] the last %u frames before the mark; counters are per frame, "
-        "differenced from the running totals the ring stores", want);
+    // What counts as slow has to be read off this window, not fixed at 20 ms.
+    // A vsync-capped client spends every frame above 20 ms, so a fixed threshold
+    // calls all 240 of them interesting and the dump becomes 120 identical rows
+    // of the display's refresh period. Twice the window's own median is slow on
+    // any client, and the slowest frame in the window is always printed whatever
+    // the threshold says, so a window that is uniformly stalled still shows one.
+    double sorted[kDumpFrames];
+    for (uint32_t k = 0; k < want; ++k) sorted[k] = g_ring[(first + k) % kFrames].ms;
+    for (uint32_t k = 1; k < want; ++k) {          // insertion sort, once per mark
+        double v = sorted[k];
+        uint32_t j = k;
+        while (j > 0 && sorted[j - 1] > v) { sorted[j] = sorted[j - 1]; --j; }
+        sorted[j] = v;
+    }
+    double median  = want ? sorted[want / 2] : 0.0;
+    double slowMs  = median * 2.0 > 20.0 ? median * 2.0 : 20.0;
+    double worstMs = want ? sorted[want - 1] : 0.0;
 
-    uint32_t printed = 0;
-    for (uint32_t i = first; i < g_written; ++i) {
+    Log("[FlightRec] the last %u frames before the mark, median %.2f ms; a frame is "
+        "printed when a counter moved or it ran over %.2f ms. Counters are per "
+        "frame, differenced from the running totals the ring stores",
+        want, median, slowMs);
+
+    // Chosen newest first, printed oldest first. Walking forward and stopping at
+    // the print limit printed the START of the window and cut off before the
+    // frame that caused the mark - which is what every mark in a tester session
+    // did, 120 rows of steady vsync and nothing of the hitch.
+    const uint32_t kMaxPrint = 120;
+    uint32_t pick[kMaxPrint];
+    uint32_t picked  = 0;
+    uint32_t dropped = 0;
+
+    for (uint32_t back = 0; back < want; ++back) {
+        uint32_t i = g_written - 1 - back;
         const Frame& f = g_ring[i % kFrames];
         // The frame before it, for the delta. The oldest entry in the window has
         // one only when the ring holds something older still.
@@ -193,12 +222,21 @@ void Mark(const char* why) {
         // Frames where nothing happened and the timing is unremarkable are the
         // bulk of any window and say nothing. Print a frame when a counter moved
         // or the frame was slow; count the rest.
-        bool interesting = (f.ms > 20.0);
-        if (p) {
+        bool interesting = (f.ms >= worstMs) || (f.ms > slowMs);
+        if (p && !interesting) {
             for (int s = 0; s < g_slotsUsed; ++s)
                 if (f.v[s] != p->v[s]) { interesting = true; break; }
         }
         if (!interesting) continue;
+        if (picked >= kMaxPrint) { ++dropped; continue; }
+        pick[picked++] = i;
+    }
+
+    for (uint32_t k = picked; k-- > 0;) {
+        uint32_t i = pick[k];
+        const Frame& f = g_ring[i % kFrames];
+        bool havePrev = (i > 0) && (g_written - i) < (uint32_t)kFrames;
+        const Frame* p = havePrev ? &g_ring[(i - 1) % kFrames] : nullptr;
 
         char line[512];
         int n = _snprintf(line, sizeof(line) - 1, "[FlightRec] %5u %6.2f",
@@ -209,17 +247,18 @@ void Mark(const char* why) {
         }
         line[sizeof(line) - 1] = 0;
         Log("%s", line);
-        if (++printed >= 120) {
-            Log("[FlightRec] ... stopping at 120 printed frames; the rest of the "
-                "window had activity too and is not shown");
-            break;
-        }
     }
 
-    if (printed == 0) {
-        Log("[FlightRec] every frame in the window was under 20 ms with no counter "
+    if (dropped) {
+        Log("[FlightRec] ... %u earlier frame(s) in the window also had activity and "
+            "are not shown; the %u above are the ones nearest the mark",
+            dropped, picked);
+    }
+
+    if (picked == 0) {
+        Log("[FlightRec] every frame in the window was under %.2f ms with no counter "
             "moving. That is a measurement, not an empty log: whatever you saw did "
-            "not touch anything this recorder watches.");
+            "not touch anything this recorder watches.", slowMs);
     }
     Log("=== END MARK %u ===", g_marks);
 }

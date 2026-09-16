@@ -123,6 +123,9 @@ static double g_p95Ms         = 0.0;   // same walk, so the two are always compa
 static uint64_t g_medianAtFrame = 0;
 static DWORD  g_lastSlowReport = 0;
 static uint64_t g_slowFrames  = 0;
+// Reason for an auto-mark that the frame boundary has not dumped yet. Empty
+// when there is none; see FlushAutoMark.
+static char   g_pendingMark[96] = {0};
 
 double MedianMs() { return g_medianMs; }
 double SessionP95Ms() { return g_p95Ms; }
@@ -304,13 +307,25 @@ static void Accumulate(double ms) {
     const double autoMarkAt =
         (g_medianMs > 0.0 && g_medianMs * AUTO_MARK_FACTOR > AUTO_MARK_FLOOR_MS)
             ? g_medianMs * AUTO_MARK_FACTOR : AUTO_MARK_FLOOR_MS;
+    //
+    // Held until the frame boundary has fed the recorder. This function runs
+    // first in the boundary, before FlightRecorder::OnFrame writes the frame it
+    // is describing, so marking from here dumped a ring ending one frame before
+    // the spike.
     if (ms >= autoMarkAt && FlightRecorder::IsRecording()) {
-        char why[96];
-        _snprintf(why, sizeof(why) - 1, "frame of %.0f ms, %.0fx the median",
+        _snprintf(g_pendingMark, sizeof(g_pendingMark) - 1,
+                  "frame of %.0f ms, %.0fx the median",
                   ms, ms / (g_medianMs > 0.0 ? g_medianMs : 1.0));
-        why[sizeof(why) - 1] = 0;
-        FlightRecorder::Mark(why);
+        g_pendingMark[sizeof(g_pendingMark) - 1] = 0;
     }
+}
+
+void FlushAutoMark() {
+    if (!g_pendingMark[0]) return;
+    char why[96];
+    memcpy(why, g_pendingMark, sizeof(why));
+    g_pendingMark[0] = 0;
+    FlightRecorder::Mark(why);
 }
 
 void OnPresent(Source src) {

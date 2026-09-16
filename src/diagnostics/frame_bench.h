@@ -42,6 +42,12 @@ void OnPresent(Source src);
 // the whole session so far.
 void Report(const char* reason);
 
+// Dumps the flight recorder if the frame just measured was slow enough to mark.
+// Separate from OnPresent because the recorder is fed later in the same frame
+// boundary: marking from inside OnPresent dumps a ring whose newest entry is the
+// frame before the slow one, which is the frame nobody asked about.
+void FlushAutoMark();
+
 // 95th percentile frame time over the last few seconds, or 0 before enough frames
 // have been seen.
 //
