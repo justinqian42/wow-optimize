@@ -2056,6 +2056,24 @@ void OnMainThreadSleep(DWORD mainThreadId, double frameMs) {
                 Log("[LuaOpt] Subsequent swap: interface verification failed, will retry");
             } else {
                 Log("[LuaOpt] Subsequent swap - caches cleared, interface re-setup");
+                // The new state gets the GC set up again, which it did not between
+                // fef87027 and now. gcOptimized is cleared above, StepGC returns on
+                // it, and nothing here ever set it back, so one /reload ended manual
+                // stepping for the rest of the session - and with it the 300 MB
+                // emergency collector, which lives inside StepGC behind the same
+                // test. A tester session sat at 257.5 MB of Lua memory with 6 MB as
+                // the largest free block below 2GB and that collector switched off
+                // by a UI reload it had no way to know about.
+                //
+                // If this fails the state is exactly what it was before: gcOptimized
+                // stays false and only the client's own collector runs.
+                if (OptimizeGC(Api.L)) {
+                    Log("[LuaOpt] GC set up again on the new state - stepping and the "
+                        "emergency collector are back for this session");
+                } else {
+                    Log("[LuaOpt] GC could not be set up on the new state; the client's "
+                        "own collector is what runs from here");
+                }
             }
         }
         g_addonReadCounter = 0;
@@ -2234,8 +2252,10 @@ void LogStats() {
                   : "last sample - this report could not read it",
         State.gcOptimized
             ? "running"
-            : "OFF: the lua_State changed and nothing turns it back on, so only "
-              "the client's own collector runs",
+            : "OFF: the setup on this lua_State did not take, so only the "
+              "client's own collector runs and the emergency collector below "
+              "cannot fire. A swap re-runs the setup, so this means it failed "
+              "rather than that nobody tried",
         State.fullCollects);
     if (mb > 300.0) {
         Log("[Wrong] [LuaOpt] Lua memory is past the 300 MB mark where the "
