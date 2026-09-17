@@ -5159,15 +5159,21 @@ static void TryRemoveFPSCap() {
 // the worst few, so the next log says which rather than which half.
 namespace {
 struct StatTimeRec { const char* name; double ms; };
-StatTimeRec g_statTimes[96];
+// Room to spare, and the overflow is counted rather than dropped in silence.
+// The table held 96 while the dump called 93 reporters, so three more timers
+// would have been lost without a word and the total would have read low.
+constexpr int STAT_TIME_MAX = 160;
+StatTimeRec g_statTimes[STAT_TIME_MAX];
 int         g_statTimeCount = 0;
+int         g_statTimeLost  = 0;
 
 struct StatTimer {
     const char*   name;
     LARGE_INTEGER a;
     StatTimer(const char* n) : name(n) { QueryPerformanceCounter(&a); }
     ~StatTimer() {
-        if (g_statTimeCount >= 96 || !g_statsFreq.QuadPart) return;
+        if (g_statTimeCount >= STAT_TIME_MAX) { ++g_statTimeLost; return; }
+        if (!g_statsFreq.QuadPart) return;
         LARGE_INTEGER b;
         QueryPerformanceCounter(&b);
         g_statTimes[g_statTimeCount].name = name;
@@ -5184,6 +5190,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
 
     if (!g_statsFreq.QuadPart) QueryPerformanceFrequency(&g_statsFreq);
     g_statTimeCount = 0;
+    g_statTimeLost  = 0;
 
     // The whole dump, against the sum of the timed reporters inside it. A field
     // log carried "periodic stats dump took 91.5 ms" from the probe around this
@@ -5620,7 +5627,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     if (g_priorityWatchdogRestores > 0)
         Log("[Stats] Priority watchdog: %ld restorations", (long)g_priorityWatchdogRestores);
 
-    LogLockTuningStats();
+    STAT_TIME("LogLockTuningStats", LogLockTuningStats());
 #if !CRASH_TEST_DISABLE_WOW_STRLEN
     LogStrlen76GuardState();
 #endif
@@ -5636,13 +5643,13 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     // hang a quitting process. Every other report below is a plain read of a
     // counter the main thread owns.
     if (Config::g_settings.OptSamplingProfiler && !atProcessExit) {
-        SamplingProfiler::DumpNow();
+        STAT_TIME("SamplingProfiler::DumpNow", SamplingProfiler::DumpNow());
     }
 #endif
-    CpuTopology::Report();
-    FrameBench::Report(why);
+    STAT_TIME("CpuTopology::Report", CpuTopology::Report());
+    STAT_TIME("FrameBench::Report", FrameBench::Report(why));
     STAT_TIME("CrashDumper::ReportFeatureActivity", CrashDumper::ReportFeatureActivity());
-    CrashDumper::ReportFirstChanceSummary();
+    STAT_TIME("CrashDumper::FirstChanceSummary", CrashDumper::ReportFirstChanceSummary());
     STAT_TIME("PerfDiagnostics::LogStats", PerfDiagnostics::LogStats());
     STAT_TIME("LuaGCGovernor::LogStats", LuaGCGovernor::LogStats());
     STAT_TIME("LuaMemPoolFast::LogStats", LuaMemPoolFast::LogStats());
@@ -5654,7 +5661,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaProtoCache::LogStats", LuaProtoCache::LogStats());
     STAT_TIME("LuaBytecodeStore::LogStats", LuaBytecodeStore::LogStats());
     STAT_TIME("LuaUndump::LogStats", LuaUndump::LogStats());
-    LuaBytecodeStore::SaveIfDirty();
+    STAT_TIME("LuaBytecodeStore::SaveIfDirty", LuaBytecodeStore::SaveIfDirty());
     STAT_TIME("AnimLod::LogStats", AnimLod::LogStats());
     STAT_TIME("CollisionOutcode::LogStats", CollisionOutcode::LogStats());
     STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
@@ -5717,7 +5724,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("StrtodFast_LogStats", StrtodFast_LogStats());
     STAT_TIME("RegexCache_LogStats", RegexCache_LogStats());
     STAT_TIME("MatrixCopySSE2_LogStats", MatrixCopySSE2_LogStats());
-    ReportCrtFreeStats();
+    STAT_TIME("ReportCrtFreeStats", ReportCrtFreeStats());
     if (g_spinTaken > 0 || g_spinSkipped > 0) {
         Log("[SleepPrecision] busy-wait taken %ld, handed back %ld (frames over "
             "%.0f ms give the time to the scheduler instead)",
@@ -5726,7 +5733,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaFastPath::LogStats", LuaFastPath::LogStats());
     STAT_TIME("ObjVisCache::LogStats", ObjVisCache::LogStats());
     STAT_TIME("FontGlyphCache::LogStats", FontGlyphCache::LogStats());
-    WowOpt_ReportForeignDetours();
+    STAT_TIME("WowOpt_ReportForeignDetours", WowOpt_ReportForeignDetours());
     STAT_TIME("ApiCache::LogStats", ApiCache::LogStats());
     // Both of these used to print only from their own Shutdown, which this
     // process never reaches, so two modules that hook seven client functions
@@ -5804,6 +5811,9 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
             "%d timed reporter(s) account for %.1f ms and %.1f ms is everything "
             "else in the dump - the log lines it writes directly and the work not "
             "wrapped in a timer.", dumpMs, g_statTimeCount, sum, dumpMs - sum);
+        if (g_statTimeLost)
+            Log("[Report]   %d more timer(s) had nowhere to be recorded, so the "
+                "figure above is short by their cost.", g_statTimeLost);
         Log("[Report] That is a pause the player sees, so the slowest reporters are "
             "named:");
         for (int i = 0; i < found; i++) {
