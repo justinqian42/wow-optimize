@@ -27,11 +27,9 @@ namespace TextureUnloadDelay {
 
     // Membership set for g_delayedQueue, kept in step with it under the same lock.
     //
-    // The duplicate check used to be a linear walk of the queue, on the main
-    // thread, on every single texture release. Nothing bounded the queue, so the
-    // walk grew with it and releasing n textures cost on the order of n squared -
-    // in a zone that churns textures, the hottest function in the module got
-    // slower the more work there was to do.
+    // Not a linear walk of the queue: that runs on the main thread on every
+    // texture release, nothing bounds the queue, and releasing n textures then
+    // costs on the order of n squared.
     static std::unordered_set<void*> g_queued;
 
     // The queue is a delay, not a cache: anything still in it after five seconds
@@ -95,18 +93,10 @@ static constexpr long SELF_CHECK_AFTER = 20000;   // decided releases before jud
         if (!g_enabled || g_isReleasing || GetCurrentThreadId() != g_mainThreadId)
             return orig_Texture_Release(Block);
 
-        // This branch used to call Flush() - on the main thread, for every
-        // release, while a transition was in progress or within ten seconds of
-        // one. Flush() stamps g_lastTransitionEndTick, and that stamp is what
-        // decides the ten-second window, so calling it from here kept renewing
-        // the very window that had brought us here. Any game releases a texture
-        // at least once every ten seconds, so after the first loading screen the
-        // window never closed again: the feature spent the rest of the session
-        // switched off while still paying for the hook, the state queries and a
-        // mutex acquisition on every release.
-        //
-        // Flush now happens only where a transition genuinely begins or ends,
-        // which is where it was always called from anyway.
+        // Do not call Flush() from here. It stamps g_lastTransitionEndTick, and
+        // that stamp is what decides the ten-second bypass window, so a release
+        // inside the window renews it - and any game releases a texture at least
+        // once every ten seconds. Flush belongs where a transition begins or ends.
         if (IsBypassActive()) {
             InterlockedIncrement(&g_bypassed);
             return orig_Texture_Release(Block);
@@ -120,23 +110,14 @@ static constexpr long SELF_CHECK_AFTER = 20000;   // decided releases before jud
 
         // Stop holding textures once the feature has measured itself useless.
         //
-        // The whole premise is that a texture released now is often wanted again
-        // shortly, so holding it for five seconds saves a reload. Two testers
-        // have now measured that:
+        // The premise is that a texture released now is often wanted again
+        // shortly. Two testers measured it: 784051 queued against 1631 reused
+        // before the TTL, 0.2%, and 0.4% on another machine. Held textures at
+        // that rate are a memory leak with a timer, in a 32-bit process that was
+        // already at a 2.4 GB working set.
         //
-        //     784051 queued, 1631 reused before TTL (0.2%), 780792 expired
-        //     (an earlier session on another machine: 0.4%)
-        //
-        // Three quarters of a million textures held to save sixteen hundred
-        // reloads. That is not a cache, it is a memory leak with a timer - and
-        // the session those numbers come from had a 32-bit process at a 2.4 GB
-        // working set, freezing for a second at a time.
-        //
-        // So it now stops after a large enough sample says it is not paying.
-        // Anything already queued still expires normally through Flush; this
-        // only stops adding more. A feature that measures itself and gives up is
-        // better than one that has to be found in a log and switched off by
-        // hand, and this one has now been found twice.
+        // So it stops once a large enough sample says it is not paying. Anything
+        // already queued still expires through Flush; this only stops adding.
         if (!g_selfDisabled) {
             long q = g_queuedTotal, r = g_reused, e = g_expired;
             long decided = r + e;

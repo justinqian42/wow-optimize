@@ -571,14 +571,11 @@ static DWORD WINAPI FreezeWatchdogProc(LPVOID) {
         DWORD elapsed = GetTickCount() - lastTick;
         if (elapsed <= 10000) { escalatedThisStall = false; locatedThisStall = false; }
         if (elapsed > 10000) {
-            // Loading screens, UI reloads and lua_State swaps legitimately block
-            // the main thread (cold MPQ asset loads + addon (re)load). That is NOT
-            // a hang the player feels -- it's a progress-bar load -- so don't spam
-            // the log with a full freeze report. Note it on one line and wait it
-            // out. This is the source of the "many FREEZE DETECTED" entries.
-            // Grace period: for 30s after a lua_State swap, treat main-thread silence
-            // as expected. WoW's addon loader runs synchronously after the swap completes
-            // (our IsReloading/IsSwapping flags clear before this begins).
+            // Loading screens, UI reloads and lua_State swaps block the main
+            // thread legitimately, so note them on one line rather than writing a
+            // full freeze report. The grace period runs 30s past a swap: the
+            // client's addon loader runs synchronously after it, by which point
+            // IsReloading and IsSwapping have already cleared.
             DWORD swapTick = LuaOpt::GetLastSwapTick();
             bool inPostSwapGrace = (swapTick != 0 && (GetTickCount() - swapTick) < 30000);
             bool expected = LuaOpt::IsLoadingMode() || LuaOpt::IsReloading() || LuaOpt::IsSwapping() || inPostSwapGrace;

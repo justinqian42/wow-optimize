@@ -57,35 +57,15 @@ extern "C" void mi_collect(bool force);
 #include "mimalloc_high_arena.h"
 #include "high_placement.h"
 
-// Largest free virtual address range, measured twice.
+// Largest free virtual address range, measured twice: over everything, and over
+// the low 2 GB into `lowHalfOut` when it is wanted. On a large-address-aware
+// client the full-range answer is dominated by the barely-touched half above
+// 2 GB and stays in the gigabytes while the low half is down to a megabyte, so
+// the two are different questions and a caller has to say which it is asking.
 //
-// This scanned to wherever VirtualQuery stops, which on a large-address-aware
-// client means the whole 3 or 4 GB. The region above 2 GB is barely touched, so
-// the answer is dominated by it and stays in the gigabytes while the low half -
-// where the client's own allocations live, and where anything that cannot hold
-// a pointer with the top bit set must go - is down to a megabyte.
-//
-// A tester session shows both numbers side by side for three and a half hours:
-// this function reporting 2046 MB falling to 1361 MB and never approaching its
-// 16 MB trigger, while the periodic statistics line, which scans only the low
-// half, reported a 1 MB largest block and "fragmented" from the first report
-// onwards. Neither line said which range it had measured, so they read as a
-// contradiction rather than as two different questions.
-//
-// `lowHalfOut` receives the figure for the low 2 GB when it is wanted.
-// What this walk costs, because it is the prime suspect for a stall we cause.
-//
-// Tester logs carry "STALL periodic maintenance took 42.6 ms" and "39.5 ms" -
-// forty milliseconds on the main thread, inside a frame, every five minutes,
-// from this project's own reporting. Logging is not the cause: it goes through a
-// lock-free ring to a writer thread. This walk is: VirtualQuery over the whole
-// address space, one call per region, and a fragmented 3 GB VA has tens of
-// thousands of regions. The session where that stall was recorded had 149 MB free
-// below 2 GB with a largest block of 19 MB, which is exactly that shape.
-//
-// Suspecting is not measuring, so it is timed and the region count is reported
-// with it. If it comes back at two milliseconds the suspicion is wrong and the
-// stall is somewhere else in the report.
+// The walk is timed and the region count reported with it, because a
+// VirtualQuery over a fragmented 3 GB address space is tens of thousands of
+// calls and is the prime suspect for a stall of our own making.
 // The monitor thread's most recent walk, for the report to read instead of
 // walking again on the main thread. Written by one thread and read by another;
 // they are plain SIZE_T on 32-bit x86, so a read cannot tear, and a report that
@@ -99,12 +79,10 @@ static volatile DWORD  g_lastWalkTick = 0;
 static double   g_walkMsWorst = 0.0;
 static double   g_walkMsTotal = 0.0;
 
-// Which thread paid for each walk. The two used to share one pair of counters
-// and the report called all of them main-thread work, which was true before the
-// monitor thread existed and false afterwards. Reading that line as it stood,
-// 811 runs and 7.7 seconds looked like a stall inside a frame every ten seconds;
-// the arithmetic is what gave it away - 811 walks over a 7854 second session is
-// one every 9.7 seconds, which is the monitor interval and cannot be a frame.
+// Which thread paid for each walk, counted separately. Pooled, the report reads
+// as main-thread work: 811 runs and 7.7 seconds looks like a stall inside a
+// frame until the arithmetic says 811 walks over 7854 seconds is one every 9.7,
+// which is the monitor interval.
 static DWORD    g_monitorTid    = 0;
 static unsigned g_walkCountMain = 0;
 static double   g_walkMsMain    = 0.0;
