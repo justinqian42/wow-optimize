@@ -24,6 +24,7 @@ The current public build is focused on real frametime stability, long-session sm
 ---
 
 ## Table of Contents
+* [What's New in v3.19.3](#whats-new-in-v3193)
 * [What's New in v3.19.2](#whats-new-in-v3192)
 * [Send me your log](#send-me-your-log)
   * [Measuring rather than reporting](#if-you-want-to-measure-something-rather-than-report-a-bug)
@@ -38,6 +39,72 @@ The current public build is focused on real frametime stability, long-session sm
 * [Troubleshooting & Diagnostics](#troubleshooting)
 
 ---
+
+## What's New in v3.19.3
+
+### Fixed
+
+* **Entering the world with ReShade loaded.** A hook this DLL placed in front of
+  `InitializeCriticalSection` sat in front of every module in the process, not
+  just the game, and it kept a player with ReShade at the loading screen. It has
+  its own switch now, Critical Section Hook (All Modules), and that switch is off:
+  nothing has ever measured a gain from it.
+* **Every other hook on a Windows or CRT export answers the game only.** Thirty
+  of them cached or rewrote answers - timers, window rectangles, registry reads,
+  string conversions - for ReShade, DXVK, overlays and drivers as well. Each one
+  now checks who called it and hands any other module the real function. The
+  switch is System Hooks: Game Only, default on.
+* **MAX PERFORMANCE no longer ticks switches that are not proven.** It set 113 of
+  139, including all 48 marked unproven and the critical-section hook above. It
+  now leaves every unproven switch at its own default.
+* **A normal quit no longer logs an access violation.** The closing report asked
+  the Lua state for its memory after the game had already freed it, and the
+  exception that followed reached testers as a crash that had not happened.
+* **Two clients from one game folder.** They opened the same log file and wrote
+  over each other for the whole session; the second one also ran with no
+  compiled-script store at all. Each takes the next free name now.
+* **The Lua collector no longer stops for the rest of the session after one
+  `/reload`.** Manual stepping and the 300 MB emergency collection both hung off
+  a flag that a UI reload cleared and nothing set again. A tester session sat at
+  257 MB of Lua memory with that protection switched off and no way to know.
+
+### Faster
+
+* **The game's string hash is finally being replaced.** The replacement ran
+  alongside the original on every call and then threw its own answer away, so it
+  was strictly slower than the function it replaced. It now verifies for 4096
+  calls and takes over: a 3.5-hour session answered 102,613,258 of 102,617,562
+  calls, with zero disagreements.
+* **Eight of the hottest hooks lost their exception frame.** Each built an SEH
+  frame and a stack cookie on every call - up to 405 million calls a session -
+  to guard a fallback that reads the same bytes. They now run guarded until a
+  million calls have passed without catching anything, then without.
+* **New SSE2 replacements**, each off by default and each checking itself against
+  the game's own routine before it is used: particle vertex fill, UI batch fill,
+  ray against triangle (measured 1.89x), collision ray outcode (16.43x),
+  quaternion unpack (7.33x).
+
+### Reports
+
+A bug report is only worth the round trip if the log answers the question.
+
+* **The flight recorder keeps the frame you marked.** Every automatic mark in a
+  tester session printed the 120 frames before the hitch and stopped short of the
+  hitch itself. It now keeps the frames nearest the mark, and the mark waits for
+  the recorder to have that frame.
+* **A slow frame says what was in it.** Only rare events were traced, so 63 of 65
+  spikes in one session read "nothing traced in this window". A Lua compile over
+  20 ms and a change in address-space pressure are traced now: the same session
+  had a 156 ms compile of a WeakAuras saved-variables file with nothing
+  connecting it to a frame.
+* **Two modules that had never printed a number in any session now report.** The
+  packet-field fast path and the string-hash replacement printed their counters
+  only from a shutdown path this process never reaches.
+* **A crash dump says which build it came from.** The version in the binary said
+  3.19.1 on every 3.19.2 build, which is the one field a dump without a log
+  carries.
+* **The report measures all of itself.** It costs up to 110 ms of the main thread
+  every five minutes and its own accounting covered 8 of those.
 
 ## What's New in v3.19.2
 
@@ -765,7 +832,7 @@ Recent events:
     -110351ms  TID=900   D3D9 device Reset (dev=0x0EB1AA90)
 ```
 
-The startup banner reports the exact build the log came from (`v3.19.1 (build abc1234)`), so please don't trim the first lines.
+The startup banner reports the exact build the log came from (`v3.19.3 (build abc1234)`), so please don't trim the first lines.
 
 If the complaint is stuttering rather than a crash, look for `slow frame` lines — each one names how far past your session's own median that frame ran, and what was happening during it:
 

@@ -414,7 +414,7 @@ namespace WowOptimizeLauncher {
         // remote version.txt to decide whether to show the update notification,
         // and shown in the version label. Keep in sync with version.txt and
         // src/core/version.h on every release.
-        private const string APP_VERSION = "3.19.2";
+        private const string APP_VERSION = "3.19.3";
 
         private string iniPath;
         private Dictionary<string, SettingItem> settingsMap;
