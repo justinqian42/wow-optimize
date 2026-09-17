@@ -1,19 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_fastpath.h
-// Description: Accelerates Lua runtime calls in `lua_fastpath.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
 #ifndef LUA_FASTPATH_H
 #define LUA_FASTPATH_H
 

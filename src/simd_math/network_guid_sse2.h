@@ -1,18 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: network_guid_sse2.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 #pragma region System Dependencies
 #include <stdint.h>
 #pragma endregion

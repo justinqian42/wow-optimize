@@ -1,17 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: cvar_watchdog.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
 bool InitCvarWatchdog();
 
 // Call every frame. No-ops until the client has a Lua state, scans once, then

@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: guid_lookup_cache.cpp
 // Description: Lock-free GUID to Object pointer lookup cache.
 // Safety & Threading: Thread-safe, avoids global locks using atomic cache slots.
 // ============================================================================

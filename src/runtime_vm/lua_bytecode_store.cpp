@@ -1,10 +1,7 @@
 // ============================================================================
-// Module: lua_bytecode_store.cpp
 // Description: Keeps compiled Lua chunks on disk so the next session skips the
 //              parse as well as the repeat.
-// Safety & Threading: Main thread only, alongside the Lua state.
 // ============================================================================
-//
 // The proto cache next door removes the second and later compiles of a chunk
 // within one session. It measured what that leaves behind: a loading screen
 // that spends 2128 ms in the Lua compiler, of which only 260 ms is source the
@@ -20,7 +17,6 @@
 // chunk, and it already owns the two hooks - luaY_parser, where a Proto is
 // returned, and luaL_loadbuffer, where the finished closure is on the stack and
 // can be dumped.
-//
 // ---------------------------------------------------------------------------
 // Nothing is trusted until it has been proved, chunk by chunk
 //
@@ -37,7 +33,6 @@
 //
 // The first disagreement retires the store for the rest of the session and says
 // which field differed. There is no second chance and no repair.
-//
 // ---------------------------------------------------------------------------
 // Identity
 //
@@ -52,7 +47,6 @@
 // defence against someone constructing one on purpose, and the file lives in
 // the user's own game folder, where anything that could write it could write
 // the addons instead.
-//
 // ---------------------------------------------------------------------------
 // Two files, because this client is killed rather than closed
 //
@@ -75,7 +69,6 @@
 // A pair whose header does not match this build of the DLL, or whose Wow.exe
 // stamp has changed, is discarded and started again. Patching the client
 // changes the compiler, so bytecode from before the patch has to go.
-//
 // ---------------------------------------------------------------------------
 // The index is in memory, the bytecode is not
 //

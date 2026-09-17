@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: memory_pressure_governor.cpp
-// Description: SSE2 vectorized replacement for legacy CRT function `memory_pressure_governor.cpp`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

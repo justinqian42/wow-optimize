@@ -5,7 +5,6 @@
 // Safety & Threading: A watchdog thread; the main thread is touched only during
 //                     a frame that has already overrun.
 // ============================================================================
-//
 // The worst thing in the field data is a frame that took 1918 ms - three hundred
 // and forty-three times the median - and this is the whole of what the log could
 // say about it:
@@ -32,7 +31,6 @@
 // Normal frames cost one clock read and one comparison per wake-up, on a thread
 // that is asleep the rest of the time; the main thread is never suspended during
 // a frame that is behaving.
-//
 // ---------------------------------------------------------------------------
 // The stamp, and why it is milliseconds
 //
@@ -41,7 +39,6 @@
 // start time would arm the catcher inside a frame that is fine or hide one that
 // is not. A 32-bit millisecond count cannot tear on this architecture, and a
 // millisecond is four hundred times finer than the events being caught.
-//
 // ---------------------------------------------------------------------------
 // What it prints
 //

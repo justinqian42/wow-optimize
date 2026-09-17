@@ -2,9 +2,7 @@
 // Module: objmgr_enum_fast
 // Description: Hoists a loop-invariant out of the object manager's enumerator,
 //              and measures what the enumerator actually costs.
-// Safety & Threading: Main thread, same as the function it replaces.
 // ============================================================================
-//
 // sub_4D4B30 is the client's enumerate-all-objects call, reached from
 // twenty-five places - targeting, nameplates, aggro, spell visuals, anything
 // that asks "what is around me". Its loop is:
@@ -37,7 +35,6 @@
 // This walks the live list and hoists that. Nothing else changes: the same
 // nodes in the same order, the same callback with the same three arguments, the
 // same two exits.
-//
 // ---------------------------------------------------------------------------
 // Why not a flat array, which is the obvious idea
 //
@@ -58,7 +55,6 @@
 // loop is dominated by an indirect call into the caller's callback, which no
 // change of container removes, and which a hardware prefetcher cannot see
 // across. Flattening the list would leave that call exactly where it is.
-//
 // ---------------------------------------------------------------------------
 // What this measures, which is the part nobody has
 //
@@ -68,7 +64,6 @@
 // call, the largest single walk, and how often a callback stopped it early. If
 // it turns out to be a handful of calls over a few dozen objects then the flat
 // array idea is dead for one log line, and so is this hoist.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

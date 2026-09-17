@@ -1,6 +1,5 @@
 #pragma once
 // ============================================================================
-// Module: combatlog_parser.h
 // Description: C-level combat log event pre-parser and aggregator API
 // ============================================================================
 

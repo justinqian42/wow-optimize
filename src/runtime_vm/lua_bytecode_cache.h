@@ -1,20 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_bytecode_cache.h
-// Description: Accelerates Lua runtime calls in `lua_bytecode_cache.h`. Caches structures to bypass parser overhead.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 // Caches the precompiled Lua chunk produced by luaL_loadbuffer keyed by
 // FNV-1a(source). On hit, replays bytecode to skip the parser entirely.
 // Cache cleared on lua_State swap (bytecode is VM-bound).

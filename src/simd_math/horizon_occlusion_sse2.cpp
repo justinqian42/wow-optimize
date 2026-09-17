@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: horizon_occlusion_sse2.cpp
-//
 // sub_78F6A0 builds the terrain horizon: it projects a strip of vertices, then
 // rasterises them into a 384-column array of floats holding, per screen column,
 // the highest thing seen there. Terrain culling reads that array afterwards.

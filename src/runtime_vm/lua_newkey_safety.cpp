@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_newkey_safety.cpp
-// Description: Accelerates Lua runtime calls in `lua_newkey_safety.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

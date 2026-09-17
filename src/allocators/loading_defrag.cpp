@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: loading_defrag.cpp
 // Description: Speculative pre-committing and VA defragmentation during loading screens.
 // Safety & Threading: Safe background thread execution. Main thread updates zone history.
 // ============================================================================

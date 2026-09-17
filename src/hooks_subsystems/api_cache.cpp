@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: api_cache.cpp
-//
 // Caches GetItemInfo. It used to cache GetSpellInfo as well; that hook is gone,
 // because reading 0x00540A30 in the disassembler shows the function has no
 // cacheable result to speak of.
@@ -344,9 +342,7 @@ static inline void ReplayItemResults(lua_State* L, const ItemCacheEntry* e) {
 
 static lua_State* g_cacheLuaState = nullptr;
 
-// ================================================================
 // Hooked_GetItemInfo
-// ================================================================
 
 static int __cdecl Hooked_GetItemInfo(lua_State* L) {
     if (L != g_cacheLuaState) {
@@ -420,9 +416,7 @@ static int __cdecl Hooked_GetItemInfo(lua_State* L) {
     return ret;
 }
 
-// ================================================================
 // Hook installation helper.
-// ================================================================
 
 static bool HookFunc(const char* name, uintptr_t addr, void* hookFn, void** origFn) {
     MH_STATUS s = MH_CreateHook((void*)addr, hookFn, origFn);
@@ -439,9 +433,7 @@ static bool HookFunc(const char* name, uintptr_t addr, void* hookFn, void** orig
     return true;
 }
 
-// ================================================================
 // Public API.
-// ================================================================
 
 namespace ApiCache {
 

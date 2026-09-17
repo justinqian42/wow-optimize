@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: wow_subsystem_hooks.cpp
-// Description: Installs and manages target intercepts for subsystem `wow_subsystem_hooks.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #include "wow_subsystem_hooks.h"
 #include "MinHook.h"
 #include "version.h"
@@ -81,10 +75,6 @@ static void __fastcall Hooked_DBCLoader(int* This, void* unused, int a2, DWORD e
 // ================================================================
 // U6-U100: Comprehensive WoW.exe subsystem hooks
 // Each targets a specific hot path from binary analysis.
-// ================================================================
-
-
-// ================================================================
 // Installation / Shutdown / Stats
 // ================================================================
 namespace WowSubsystemHooks {

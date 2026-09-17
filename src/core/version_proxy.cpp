@@ -1,5 +1,4 @@
 ﻿// ============================================================================
-// Module: version_proxy.cpp
 // Description: Proxy wrapper for standard version.dll exports. Intercepts game boot calls and schedules the initialization thread after process setup.
 // Safety & Threading: Loader lock safe. Export ordinals must match native dll to boot.
 // ============================================================================
@@ -11,9 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-// ================================================================
 // Real version.dll function pointers
-// ================================================================
 static HMODULE g_realVersionDll = nullptr;
 
 typedef BOOL (WINAPI* GetFileVersionInfoA_fn)(LPCSTR, DWORD, DWORD, LPVOID);
@@ -80,9 +77,7 @@ static bool LoadRealVersionDll() {
     return true;
 }
 
-// ================================================================
 // Proxy log
-// ================================================================
 // This was fopen on a relative path, which resolves against the process working
 // directory. A shortcut with a different "Start in", or anything that starts the
 // game from another folder, put the one record of whether the payload loaded
@@ -150,9 +145,7 @@ static void ProxyLogAttach(HMODULE hSelf) {
 }
 
 
-// ================================================================
 // Forwarded exports
-// ================================================================
 extern "C" {
 
 __declspec(dllexport) BOOL WINAPI Export_GetFileVersionInfoA(LPCSTR a, DWORD b, DWORD c, LPVOID d) {
@@ -206,9 +199,7 @@ __declspec(dllexport) DWORD WINAPI Export_VerLanguageNameW(DWORD a, LPWSTR b, DW
 
 } // extern "C"
 
-// ================================================================
 // Loader thread
-// ================================================================
 // The release payload puts version.dll, wow_optimize_launcher.exe and
 // wow_loader.exe in the same folder as Wow.exe, and Windows resolves version.dll
 // out of the application directory for whatever runs there. So this proxy can
@@ -291,9 +282,7 @@ static DWORD WINAPI LoaderThread(LPVOID param) {
     return hOptDll ? 0 : 1;
 }
 
-// ================================================================
 // DLL Entry Point
-// ================================================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
     switch (reason) {
         case DLL_PROCESS_ATTACH:

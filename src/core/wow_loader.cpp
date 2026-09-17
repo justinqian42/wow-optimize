@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: wow_loader.cpp
-// Description: Installs and manages target intercepts for subsystem `wow_loader.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: render_state_dedup.cpp
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -80,9 +76,7 @@ static SetSamplerState_t g_orig_SetSamplerState = nullptr;
 typedef HRESULT (STDMETHODCALLTYPE *Reset_t)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
 static Reset_t g_orig_Reset = nullptr;
 
-// ================================================================
 // SetRenderState — compare-before-set dedup
-// ================================================================
 static HRESULT STDMETHODCALLTYPE Hooked_SetRenderState(
     IDirect3DDevice9* device, D3DRENDERSTATETYPE state, DWORD value)
 {
@@ -109,9 +103,7 @@ static HRESULT STDMETHODCALLTYPE Hooked_SetRenderState(
     return hr;
 }
 
-// ================================================================
 // SetTexture — compare-before-set dedup
-// ================================================================
 //
 // The most frequent state call in this renderer and the last one here without
 // dedup. A batch that draws the same material repeatedly rebinds the same
@@ -153,9 +145,7 @@ static HRESULT STDMETHODCALLTYPE Hooked_SetTexture(
     return hr;
 }
 
-// ================================================================
 // SetTextureStageState — compare-before-set dedup
-// ================================================================
 static HRESULT STDMETHODCALLTYPE Hooked_SetTextureStageState(
     IDirect3DDevice9* device, DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value)
 {
@@ -178,9 +168,7 @@ static HRESULT STDMETHODCALLTYPE Hooked_SetTextureStageState(
     return hr;
 }
 
-// ================================================================
 // SetSamplerState — compare-before-set dedup
-// ================================================================
 static HRESULT STDMETHODCALLTYPE Hooked_SetSamplerState(
     IDirect3DDevice9* device, DWORD sampler, D3DSAMPLERSTATETYPE type, DWORD value)
 {
@@ -455,9 +443,7 @@ static IDirect3D9* WINAPI Hooked_D3DCreate9(UINT SDKVersion)
     return d3d9;
 }
 
-// ================================================================
 // Install / Shutdown
-// ================================================================
 bool InstallRenderStateDedup(void)
 {
     // Clear caches

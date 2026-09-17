@@ -1,7 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: quality_governor.h
 // Description: Lowers a graphics setting when frames are consistently slow, and
 //              puts the player's own value back when they are not.
 // Safety & Threading: Main thread only. Observes CVar writes from the CVar_Set

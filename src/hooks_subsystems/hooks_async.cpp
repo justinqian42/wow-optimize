@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: hooks_async.cpp
-// Description: Installs and manages target intercepts for subsystem `hooks_async.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -22,9 +16,7 @@ typedef unsigned long _DWORD;
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Memory validation
-// ================================================================
 static bool IsReadable(uintptr_t addr) {
     if (addr == 0) return false;
     MEMORY_BASIC_INFORMATION mbi;
@@ -33,9 +25,7 @@ static bool IsReadable(uintptr_t addr) {
     return !(mbi.Protect & PAGE_NOACCESS) && !(mbi.Protect & PAGE_GUARD);
 }
 
-// ================================================================
 // Shared Worker Pool Infrastructure
-// ================================================================
 // Lightweight SPMC ring buffer for fire-and-forget tasks.
 // Each hook enqueues a task; N worker threads dequeue and process.
 // Pattern established in combatlog_mt.cpp and reused here.
@@ -604,9 +594,7 @@ static size_t StripColorCodes(char* str, size_t len) {
     return writeIdx;
 }
 
-// ================================================================
 // Public API
-// ================================================================
 
 bool InstallAsyncHooks(void) {
     // Initialize worker pool

@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: lua_undump.cpp
 // Description: Rebuilds a Proto from the bytes the client's own lua_dump wrote.
-// Safety & Threading: Main thread only, alongside the Lua state.
 // ============================================================================
-//
 // The client dumps bytecode and cannot load it. Stock Lua 5.1 f_parser does a
 // luaZ_lookahead and picks luaU_undump or luaY_parser by the LUA_SIGNATURE
 // byte; this client's f_parser (0x00856190) has neither the lookahead nor the
@@ -16,7 +13,6 @@
 // builds the Proto with the client's own allocator and GC linkage, so what
 // comes out is a Proto the client made, holding strings from the client's own
 // intern table.
-//
 // ---------------------------------------------------------------------------
 // Every client entry point this calls, and how each was established
 //
@@ -41,7 +37,6 @@
 // the same for the closure it pushes. A constant built here is stamped the same
 // way, so it carries the taint current at the moment the chunk is handed over,
 // which is precisely what a parse running at that moment would have written.
-//
 // ---------------------------------------------------------------------------
 // The format, read off the writer rather than off stock Lua
 //
@@ -60,7 +55,6 @@
 //                              +60 and per entry a name, a startpc and an
 //                              endpc twelve bytes apart; sizeupvalues +40 and
 //                              that many names.
-//
 // ---------------------------------------------------------------------------
 // Two passes, because a half-built Proto is not recoverable
 //
@@ -74,7 +68,6 @@
 // LUA_ERRMEM, which longjmps clear past this code to the protected call above.
 // That is out of memory, it is already fatal for the compile that asked, and no
 // C++ object with a destructor is alive across any client call here.
-//
 // ---------------------------------------------------------------------------
 // Sizes are published as the array fills, never before
 //

@@ -1,19 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_index2adr.h
-// Description: Accelerates Lua runtime calls in `lua_index2adr.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
 #include <cstdint>
 
 // index2adr (sub_84D9C0) resolves a Lua stack/pseudo index to its TValue*.

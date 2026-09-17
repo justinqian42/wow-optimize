@@ -1,20 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_tonumber_fast.h
-// Description: Accelerates Lua runtime calls in `lua_tonumber_fast.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 #include <cstdint>
 
 // Lua tonumber fast path optimization

@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: hooks_logic.cpp
-// Description: Installs and manages target intercepts for subsystem `hooks_logic.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -364,9 +358,7 @@ static void InvalidateScriptCache() {
     if (++g_uiScriptGen == 0) g_uiScriptGen = 1;
 }
 
-// ================================================================
 // Lua function cache hooks
-// ================================================================
 static inline bool IsTeardownState() {
     uintptr_t gL = *(uintptr_t*)0x00D3F78C;
     return (gL < 0x10000 || gL > 0xFFE00000);
@@ -729,9 +721,7 @@ static int __cdecl Hooked_UnitPowerMax(uintptr_t L) {
 }
 
 
-// ================================================================
 // Public API
-// ================================================================
 // Public API
 // ================================================================
 

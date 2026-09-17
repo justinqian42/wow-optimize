@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: datastore_fastpath.cpp
 // Description: Bypasses legacy serialization checks during CDataStore read and write loops.
 // Safety & Threading: Thread-safe. Requires validation checks verifying read/write positions are above base_offset.
 // ============================================================================
@@ -69,9 +68,7 @@ static PutByte_t  pOrigPutByte  = nullptr;
 static GetQword_t pOrigGetQword = nullptr;
 static PutQword_t pOrigPutQword = nullptr;
 
-// ================================================================
 // Inline helpers
-// ================================================================
 __forceinline void UpdateTLS(CDataStore* s) {
     t_cache.store          = s;
     t_cache.effective_base = s->buffer - s->base_offset;
@@ -249,9 +246,7 @@ static CDataStore* __fastcall HookGetQword(CDataStore* self, void*, uint32_t* ou
     return r;
 }
 
-// ================================================================
 // Install hooks
-// ================================================================
 bool InitDataStoreFastPath() {
     g_initRan = true;
 #if TEST_DISABLE_DATASTORE_FASTPATH

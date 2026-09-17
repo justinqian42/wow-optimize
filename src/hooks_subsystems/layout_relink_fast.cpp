@@ -45,7 +45,6 @@
 // is `test eax, eax` at the top of the inner anchor loop, right after
 // `mov eax, [edx-4]`. That is inside the scan, not in the early-out at 0x489726
 // that this module leaves to the client. The target is the right one.
-//
 // ---------------------------------------------------------------------------
 // Why the case where a dependant IS found cannot be shortcut too
 //
@@ -93,7 +92,6 @@
 // changed is that the single-candidate case is now answerable in principle, and
 // the counters below measure how often it arises before any surgery is written
 // for it.
-//
 // ---------------------------------------------------------------------------
 // The same conflation made the second predicate dead code for a whole field
 // session. It read 0x800 out of the index entry's +0x0C, believing that word to
@@ -110,7 +108,6 @@
 // one session, 24691 - 39.3% - had a non-empty +0x38 and the client still found
 // nothing. Those are 25.4 million deferred calls a session, each one walking an
 // average of 43.3 nodes at nine dereferences apiece.
-//
 // ---------------------------------------------------------------------------
 // This is the second attempt. The first one crashed the game on login and is
 // worth writing down.
@@ -136,7 +133,6 @@
 // when it decides yes it performs the same pointer surgery the client would
 // have performed, transcribed instruction by instruction from the tail below.
 // ---------------------------------------------------------------------------
-//
 // And it does not believe itself. For the first calls of every session it takes
 // no shortcut at all: it makes its prediction, calls the original, and then
 // checks what the original actually did. The not-found tail ends with
@@ -144,7 +140,6 @@
 // path ran, which is a one-word test. Only after a run of agreements does the
 // fast path switch on, and one in every 1024 calls stays in shadow mode
 // afterwards so a late divergence still gets caught.
-//
 // ---------------------------------------------------------------------------
 // The check is deliberately one-sided, and the first version of it was not.
 //

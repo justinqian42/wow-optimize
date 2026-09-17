@@ -1,8 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: shadow_state_probe.h
-//
 // Read-only watch on the client's own shadow state, for the flicker two testers
 // see below extShadowQuality 5. Not our bug - one of them reproduced it with
 // every feature off and no DXVK - but nothing has ever looked at what the

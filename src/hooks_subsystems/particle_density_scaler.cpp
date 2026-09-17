@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: particle_density_scaler.cpp
 // Description: Keeps hold of the particleDensity CVar object for other code. It
 //              no longer scales anything - particle density is the quality
 //              governor's now.

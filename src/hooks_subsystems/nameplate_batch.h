@@ -1,21 +1,7 @@
 #pragma once
 
-// ============================================================================
-// Module: nameplate_batch.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
-// ================================================================
 // Multithreaded Nameplate Renderer
 // 
-// ================================================================
 
 #ifndef NAMEPLATE_BATCH_H
 #define NAMEPLATE_BATCH_H
@@ -25,9 +11,7 @@
 
 namespace NameplateMT {
 
-// ================================================================
 // Task and Result Type Enumerations
-// ================================================================
 enum TaskType {
     TASK_HEALTH_UPDATE = 1,    // Health bar color and percentage
     TASK_TEXT_UPDATE = 2,      // Name, level, guild text formatting
@@ -42,9 +26,7 @@ enum NameplatePriority {
     PRIORITY_DISTANT = 3    // Nameplates beyond 20 yards - batch processing
 };
 
-// ================================================================
 // Core Data Structures
-// ================================================================
 
 // Nameplate processing task (queued by main thread)
 struct NameplateTask {
@@ -131,9 +113,7 @@ struct Stats {
     volatile LONG maxOutputQueueDepth;   // Peak output queue usage
 };
 
-// ================================================================
 // Public API
-// ================================================================
 
 // Initialize the multithreaded nameplate renderer
 bool Init();

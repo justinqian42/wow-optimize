@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: collision_ray_outcode_sse2.cpp
 // Description: SSE2 AABB outcode classification for the collision ray cast.
-// Safety & Threading: Main thread, same as the function it patches.
 // ============================================================================
-//
 // sub_7C6790 is 2.6% of executing main-thread time in the corrected tester
 // profile and the largest client function with nothing shipped against it. It is
 // the ray half of the collision pair: sub_7C7230 answers which triangles a box
@@ -12,7 +9,6 @@
 // a query box as a six-bit outcode, and that opening is what this replaces. The
 // triangle loop, the ray-triangle test at sub_983490 and the nearest-hit
 // bookkeeping are all left to the client.
-//
 // ---------------------------------------------------------------------------
 // Why the sibling module cannot be reused
 //
@@ -27,7 +23,6 @@
 // So the comparisons are not float against float. They are an 80-bit value
 // against a widened float, and rounding a widened bound back down to single
 // would change the answer for any vertex that falls between the two.
-//
 // ---------------------------------------------------------------------------
 // Why double is the exact width, rather than the close one
 //
@@ -54,7 +49,6 @@
 // exponent field, denormals, infinities and NaNs included, and agreed on all
 // 61440 cases; it accepts all 400000 of a draw from the map's own coordinate
 // range, and zero.
-//
 // ---------------------------------------------------------------------------
 // The outcode, read out of the disassembly rather than the decompiler
 //
@@ -81,7 +75,6 @@
 // loc_7C69F1, which restores the entry arrangement for the next iteration; it
 // lands back exactly where the loop started, which is what says the trace is
 // right.
-//
 // ---------------------------------------------------------------------------
 // Where the time actually goes
 //
@@ -91,7 +84,6 @@
 // costs a few hundred mispredictions. The replacement has no branch in it at
 // all: the compare masks are ANDed with their bit values and ORed together, four
 // vertices at a time, and packed down to four bytes with one store.
-//
 // ---------------------------------------------------------------------------
 // Measured, and the number is explained rather than just reported
 //
@@ -119,7 +111,6 @@
 //
 // This is the classification loop. The triangle loop after it is the client's
 // and is untouched, so it is not a speedup of the whole function.
-//
 // ---------------------------------------------------------------------------
 // The two patch sites and what the second one is for
 //

@@ -4,7 +4,6 @@
 //              how much of it is asking for the same name twice.
 // Safety & Threading: Counting hook. Calls through on every path.
 // ============================================================================
-//
 // Why this exists, in one measurement from the field
 //
 // Sicsoo's session, 2026-09-10, one loading screen:
@@ -22,7 +21,6 @@
 //
 // So the time is going somewhere that is neither reading, nor writing, nor
 // compiling. The obvious candidate has never been counted.
-//
 // ---------------------------------------------------------------------------
 // What is being counted
 //
@@ -39,7 +37,6 @@
 // hash lookup, it is one per archive, and the client asks for files that are not
 // there constantly: optional textures, per-race variants, sounds an effect might
 // not have.
-//
 // ---------------------------------------------------------------------------
 // The number that decides what to build next
 //
@@ -53,7 +50,6 @@
 // large share of a loading screen then a negative cache is worth building and
 // this says roughly what it would save. If they are not, the idea is dead for
 // one log line and the forty-five seconds are somewhere else.
-//
 // ---------------------------------------------------------------------------
 // And then removing it, under its own switch
 //

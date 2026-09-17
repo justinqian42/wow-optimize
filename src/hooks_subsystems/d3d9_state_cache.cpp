@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: d3d9_state_cache.cpp
 // Description: Filters redundant D3D9 state modifications to reduce context switches.
 // Safety & Threading: Main thread only. Invalidates cache on Reset().
 // ============================================================================

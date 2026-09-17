@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: saved_vars_async.cpp
 // Description: Coalesces high-frequency small WriteFile calls for SavedVariables
 //              into a single in-memory buffer, writing the complete buffer
 //              synchronously during CloseHandle to prevent race conditions.

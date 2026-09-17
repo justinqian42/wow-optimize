@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: combatlog_incremental.cpp
 // Description: Batching and incremental parsing of combat log events.
 // Safety & Threading: Thread-safe queue, rate-limited processing.
 // ============================================================================

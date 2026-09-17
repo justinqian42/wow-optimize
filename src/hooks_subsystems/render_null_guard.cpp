@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: render_null_guard.cpp
-//
 // sub_873060 is called from the M2 draw path (sub_8203B0 and sub_820AE0, plus
 // sub_7A84D0 and sub_873160). It does two things:
 //

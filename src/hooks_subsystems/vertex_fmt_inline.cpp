@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: vertex_fmt_inline.cpp
 // Description: Removes a per-vertex call from the client's two vertex fillers.
 // Safety & Threading: Patched once at init, before the render path runs.
 // ============================================================================
-//
 // The UI batcher (sub_484B00) and the particle vertex filler (sub_6C4440) both
 // decide, once per vertex, whether the colour needs its bytes swapped for the
 // device's format. They ask like this:

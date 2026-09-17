@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_numconv_fast.cpp
-// Description: Accelerates Lua runtime calls in `lua_numconv_fast.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "lua_numconv_fast.h"
 #include <windows.h>
 #include <stdint.h>
@@ -12,9 +6,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Shared helpers & constants
-// ================================================================
 #define LUA_TNUMBER 3
 
 // Pseudo-index boundary
@@ -125,9 +117,7 @@ static double __cdecl hook_lua_tonumber(uintptr_t L, int idx) {
     return orig_lua_tonumber(L, idx);
 }
 
-// ================================================================
 // Install / Shutdown
-// ================================================================
 static void* const ADDR_LUA_GETTOP   = (void*)0x0084DBD0;
 static void* const ADDR_LUA_ISNUMBER = (void*)0x0084DF20;
 static void* const ADDR_LUA_TONUMBER = (void*)0x0084E030;

@@ -1,22 +1,6 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_vm_engine.h
-// Description: Accelerates Lua runtime calls in `lua_vm_engine.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
-// ================================================================
 // lua_vm_engine.h - Direct-Threaded Lua VM Execution Engine
-// ================================================================
 // Replaces WoW's switch-based luaV_execute with a direct-threaded
 // interpreter that eliminates dispatch overhead, fuses common
 // opcode sequences, and implements inline caching.

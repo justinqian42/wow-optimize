@@ -1,13 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: version.h
-// ============================================================================
-
-
-
-
-
 #define WOW_OPTIMIZE_VERSION_MAJOR  3
 #define WOW_OPTIMIZE_VERSION_MINOR  19
 #define WOW_OPTIMIZE_VERSION_PATCH  2
@@ -48,9 +40,6 @@
 // use-after-free in code that had already been deleted. A flag that says 1 and
 // decides nothing is worse than no flag: it answers a bisection question
 // falsely.
-// ================================================================
-
-// ================================================================
 // PRODUCTION FLAGS - stable configuration
 // ================================================================
 
@@ -728,7 +717,6 @@
 // ================================================================
 // New Extended Hooks (commit 670012c) — disassembly-verified + gated
 // ================================================================
-//
 // SIMD geometry hooks (hooks_simd.cpp):
 //  Vec3Cross 0x5FEC70, IsSphereVisible 0x983D20, FromAngleAxis 0x982400,
 //  QuatSlerp 0x982460. IsSphereVisible + FromAngleAxis had __fastcall→__thiscall

@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_error_diag.cpp
-// Description: Accelerates Lua runtime calls in `lua_error_diag.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include <windows.h>
 #include <cstdint>
 #include "MinHook.h"

@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: mpq_open_census.h
 // Description: Counts and times the client's archive file-open path, and says
 //              how much of it is asking for the same name twice.
 // Safety & Threading: Counting hook. Calls through on every path.

@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: wow_extended_hooks.cpp
-// Description: Installs and manages target intercepts for subsystem `wow_extended_hooks.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #include "wow_extended_hooks.h"
 #include "MinHook.h"
 #include "version.h"
@@ -140,9 +134,7 @@ static LuaHGetN_fn orig_LuaHGetN = nullptr;
 // These target rendering, UI, network, and game logic hot paths.
 
 
-// ================================================================
 // Installation / Shutdown / Stats
-// ================================================================
 namespace WowExtendedHooks {
     bool InstallAll() {
         int installed = 0;

@@ -1,19 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_optimize.h
-// Description: Accelerates Lua runtime calls in `lua_optimize.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
 // Lua VM optimizer
 #ifndef LUA_OPTIMIZE_H
 #define LUA_OPTIMIZE_H

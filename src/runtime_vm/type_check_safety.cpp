@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: type_check_safety.cpp
 // Description: SEH guard for the GUID->object type check sub_4D4DB0.
 // Safety & Threading: read-only guard; safe under concurrent object-manager use.
 // ============================================================================
-//
 // sub_4D4DB0 is __cdecl(__int64 guid, int typeMask):
 //   result = sub_4D4BB0(guid);              // resolve GUID -> object row
 //   if (result && (typeMask & *(*(result+8)+8)) == 0) return 0;   // 0x4D4DF7

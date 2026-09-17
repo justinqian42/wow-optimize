@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: anim_quat_unpack_sse2.cpp
 // Description: SSE2 rewrite of the M2 quaternion track evaluator.
-// Safety & Threading: Main thread, inside the per-model animation pass.
 // ============================================================================
-//
 // sub_828680 evaluates one bone's rotation track. It has exactly one caller,
 // sub_82F0F0, which is the largest single entry in every main-thread profile
 // this project has collected, and it runs once per animated bone per frame.
@@ -27,7 +24,6 @@
 // quaternions depending on which branch it takes - up to sixteen conversions.
 //
 // cvtdq2pd converts two at a time in a register with no memory in the way.
-//
 // ---------------------------------------------------------------------------
 // What it is worth, end to end, with nothing estimated
 //
@@ -60,7 +56,6 @@
 // The average also hides the shape: the animation census has seen 7800 bones in
 // one frame against 1054 typical, so the frames that cost the most save the
 // most.
-//
 // ---------------------------------------------------------------------------
 // The constant is not the one the decompiler prints
 //
@@ -78,7 +73,6 @@
 // module does not carry a literal at all: Init reads the float out of the
 // client's own memory, and refuses to install if the four bytes are not the ones
 // this analysis was done against.
-//
 // ---------------------------------------------------------------------------
 // Why packed double is bit-exact here
 //
@@ -98,7 +92,6 @@
 // The fourth component is written as K * v rather than v * K, through fimul
 // instead of fild plus fmul. IEEE multiplication is exactly commutative and
 // fimul widens the integer exactly, so that is the same value too.
-//
 // ---------------------------------------------------------------------------
 // The argument the decompiler dropped
 //
@@ -113,7 +106,6 @@
 // is __thiscall with five stack arguments and is reached here as __fastcall.
 // This is the third time in this project a register argument has been missing
 // from a prototype; the call site's register writes decide it, not the listing.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

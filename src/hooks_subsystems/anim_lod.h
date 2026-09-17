@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: anim_lod.h
 // Description: Spreads M2 model animation across frames when the scene is crowded.
 // Safety & Threading: Main thread, alongside the render loop.
 // ============================================================================

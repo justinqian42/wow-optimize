@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: strncmp_sse2.cpp
-//
 // strncmp at 0x004180A6 is 1.55% of executing main-thread time in a 28-minute
 // gameplay profile, with 29 call sites. It is the CRT's own implementation
 // linked into the client: byte at a time, unrolled four ways, checking each byte

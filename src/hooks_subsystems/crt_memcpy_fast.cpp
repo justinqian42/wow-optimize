@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: crt_memcpy_fast.cpp
 // Description: SSE2 replacement for the client's own memcpy at 0x0040CB10.
 //              NOT INSTALLED. It corrupted objects and crashed the game.
 // ============================================================================
-//
 // This module is complete, compiles, and is never installed. The call in
 // dllmain is commented out and the linker drops the whole object, which is why
 // nothing in a field log mentions it.

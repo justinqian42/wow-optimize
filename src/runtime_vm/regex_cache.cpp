@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: regex_cache.cpp
 // Description: Bypasses PCRE pattern compilation overhead by caching compiled regex bytes.
 // Safety & Threading: Thread-safe, verified pointer checks.
 // ============================================================================
@@ -27,9 +26,7 @@ static inline bool IsTeardownState() {
     return (gL < 0x10000 || gL > 0xFFE00000);
 }
 
-// ================================================================
 // Cache Configuration
-// ================================================================
 static constexpr int REGEX_CACHE_SIZE     = 256;
 static constexpr int REGEX_CACHE_MASK     = REGEX_CACHE_SIZE - 1;
 static constexpr int REGEX_MAX_PATTERN    = 512;   // max pattern length to cache
@@ -91,9 +88,7 @@ static inline uint32_t RegexHash(const char* s, int len, unsigned int options) {
     return h;
 }
 
-// ================================================================
 // Cache Operations
-// ================================================================
 const uint8_t* RegexCache_Get(const char* pattern, int patternLen, unsigned int options, const unsigned char* tableptr, int* outCompiledLen) {
     if (patternLen <= 0 || patternLen >= REGEX_MAX_PATTERN) return nullptr;
 
@@ -204,9 +199,7 @@ static void* __cdecl Hooked_pcre_compile(
     return result;
 }
 
-// ================================================================
 // Install / Shutdown
-// ================================================================
 bool InstallRegexCache() {
     g_regexCache = (RegexCacheEntry*)HighTables::Reserve("regex_cache",
                                                          REGEX_CACHE_BYTES);

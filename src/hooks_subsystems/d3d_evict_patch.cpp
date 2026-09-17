@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: d3d_evict_patch.cpp
-// Description: Installs and manages target intercepts for subsystem `d3d_evict_patch.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #include <windows.h>
 #include <cstdint>
 #include "MinHook.h"

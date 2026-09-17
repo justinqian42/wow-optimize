@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: cvar_watchdog.cpp
 // Description: Checks a list of globals the client is known to crash on when they
 //              are null, and says so. Runs once, after the client is up.
 // Safety & Threading: Main thread only.

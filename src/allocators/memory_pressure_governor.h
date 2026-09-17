@@ -1,23 +1,6 @@
 #pragma once
 
-// ============================================================================
-// Module: memory_pressure_governor.h
-// Description: SSE2 vectorized replacement for legacy CRT function `memory_pressure_governor.h`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
-// ================================================================
 // Memory-Pressure Governor
-// ================================================================
 // Polls the HeapCompactor's cached LargestFreeBlock every frame,
 // classifies VA pressure into 3 levels with hysteresis, and fires
 // registered cache-shed callbacks + drops the texture budget toward

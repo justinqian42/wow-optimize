@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_pushstring_cache.cpp
-// Description: Accelerates Lua runtime calls in `lua_pushstring_cache.cpp`. Caches structures to bypass parser overhead.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "lua_pushstring_cache.h"
 #include <windows.h>
 #include <MinHook.h>

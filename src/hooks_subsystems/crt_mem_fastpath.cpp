@@ -1,7 +1,5 @@
 // ============================================================================
-// Module: crt_mem_fastpath.cpp
 // Description: SSE2 vectorized replacement for legacy CRT memory functions.
-// Safety & Threading: Concurrent execution safe.
 // ============================================================================
 
 #include <windows.h>

@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: anim_census.cpp
-//
 // A tester's sampling profile puts roughly a fifth of main-thread execution in
 // the M2 animation family around sub_82F0F0 - the largest single target in the
 // whole profile, and about twice anything else. That function interpolates the

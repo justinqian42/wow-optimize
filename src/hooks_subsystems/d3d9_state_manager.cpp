@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: d3d9_state_manager.cpp
 // Description: Deduplicates D3D9 device state changes and caches rendering states
 //              to maximize CPU throughput and minimize driver overhead.
 // Safety & Threading: Main render thread only. Crash-guarded against NULL pointers.
@@ -30,9 +29,7 @@ extern "C" void Log(const char* fmt, ...);
 // Per-frame work that must run on a true frame boundary (see dllmain).
 extern "C" void WowOpt_OnFrameBoundary();
 
-// ================================================================
 // Memory validation
-// ================================================================
 static bool IsReadable(uintptr_t addr) {
     if (addr == 0) return false;
     MEMORY_BASIC_INFORMATION mbi;
@@ -109,9 +106,7 @@ volatile LONG g_deviceResetCounter = 0;
 // the same millisecond).
 static WinMutex g_vtableMutex;
 
-// ================================================================
 // Per-frame statistics
-// ================================================================
 // Plain 32-bit, not LONG64 with InterlockedIncrement64. There was one of those
 // at the top of every one of these sixteen hooks, so SetRenderState, SetTexture
 // and DrawPrimitive each carried a lock cmpxchg8b retry loop on 32-bit x86, on
@@ -202,9 +197,7 @@ static unsigned long g_wouldSkip[NUM_HOOKS] = {};
 static unsigned long g_rsCritWouldSkip = 0;
 static unsigned long g_rsCritCompared  = 0;
 
-// ================================================================
 // State caches
-// ================================================================
 static DWORD  g_rsCache[256] = {};
 static bool   g_rsValid[256] = {};
 static DWORD  g_tssCache[256] = {};
@@ -268,9 +261,7 @@ static inline void CheckDeviceChange(void* dev) {
     }
 }
 
-// ================================================================
 // Fast matrix/material hash functions
-// ================================================================
 static uint64_t QuickMatrixHash(const float* m) {
     uint64_t h = 0;
     const uint32_t* p = (const uint32_t*)m;
@@ -290,9 +281,7 @@ static uint32_t HashMaterial(const DWORD* mat) {
     return h;
 }
 
-// ================================================================
 // original function pointers for calling back to driver
-// ================================================================
 typedef HRESULT (__stdcall *SetRenderState_t)(void* dev, DWORD state, DWORD value);
 static SetRenderState_t g_orig_SetRenderState = nullptr;
 
@@ -341,9 +330,7 @@ static Reset_t g_orig_Reset = nullptr;
 typedef HRESULT (__stdcall *PresentFn)(void* dev, const RECT* src, const RECT* dst,
                                        HWND hOverride, const RGNDATA* dirty);
 
-// ================================================================
 // Hooked functions
-// ================================================================
 
 // Bumped whenever a state setter actually reaches D3D9, and never on a call the
 // dedup above skips - a skipped call means the state did not change, which is
@@ -905,12 +892,8 @@ static HRESULT __stdcall Hooked_Present(void* dev, const RECT* src, const RECT* 
     return hr;
 }
 
-// ================================================================
 // VTable patching
-// ================================================================
-// ================================================================
 // Draw-call census
-// ================================================================
 // These two skip nothing and never will - they exist to answer one question
 // that no instrument in this project could answer before: how many primitives
 // does a draw call carry?
@@ -1983,9 +1966,7 @@ static bool TryFindAndPatchDevice() {
     return PatchDeviceVTable(pDevice);
 }
 
-// ================================================================
 // Public API
-// ================================================================
 bool IsD3D9DeviceHooked(void) { return g_deviceHooked; }
 
 bool InstallD3D9StateManager(void) {

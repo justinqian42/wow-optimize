@@ -1,17 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: render_null_guard.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
 bool InstallRenderNullGuard();
 
 // Printed from the periodic report. Says how many draw-path calls the guard

@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: luaS_newlstr_sse2.cpp
-// Description: Accelerates Lua runtime calls in `luaS_newlstr_sse2.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

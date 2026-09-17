@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: lua_compile_census.cpp
-//
 // About 5% of executing main-thread time in a real session is inside the Lua
 // code generator. The profiler points straight at it: sub_862390, ten
 // instructions that write an emitted instruction back into fs->f->code, at

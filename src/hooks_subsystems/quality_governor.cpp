@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: quality_governor.cpp
 // Description: One quality dial for the settings that cost GPU time. Turns it
 //              down while the frame-time tail says the machine cannot keep up,
 //              and back up to the player's own values when it can.

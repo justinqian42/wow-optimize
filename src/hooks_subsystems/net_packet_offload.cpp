@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: net_packet_offload.cpp
 // Description: Parallel network packet deserialization and decompression offloader.
 //              Optimizes criteria event lookup using O(1) dynamic sliced caches.
 // Safety & Threading: Main thread affinity. Lock-free cache synchronization.

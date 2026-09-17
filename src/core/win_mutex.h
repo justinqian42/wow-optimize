@@ -21,9 +21,7 @@
 #include <windows.h>
 #include <chrono>
 
-// ============================================================================
 // WinMutex — std::mutex replacement backed by SRWLOCK
-// ============================================================================
 class WinMutex {
 public:
     // Aggregate-initializable: WinMutex m = {};  or  WinMutex m;
@@ -45,9 +43,7 @@ private:
     SRWLOCK m_srw;
 };
 
-// ============================================================================
 // WinLockGuard — std::lock_guard<std::mutex> replacement
-// ============================================================================
 class WinLockGuard {
 public:
     explicit WinLockGuard(WinMutex& mtx) noexcept : m_mtx(mtx) { m_mtx.lock(); }
@@ -60,9 +56,7 @@ private:
     WinMutex& m_mtx;
 };
 
-// ============================================================================
 // WinUniqueLock — std::unique_lock<std::mutex> replacement (for cond-var use)
-// ============================================================================
 class WinUniqueLock {
 public:
     explicit WinUniqueLock(WinMutex& mtx) noexcept
@@ -98,9 +92,7 @@ private:
     bool      m_owned;
 };
 
-// ============================================================================
 // WinCondVar — std::condition_variable replacement using SleepConditionVariableSRW
-// ============================================================================
 class WinCondVar {
 public:
     constexpr WinCondVar() noexcept : m_cv(CONDITION_VARIABLE_INIT) {}

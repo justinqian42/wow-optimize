@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: wow_perf_hooks.cpp
-// Description: Installs and manages target intercepts for subsystem `wow_perf_hooks.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #include "wow_perf_hooks.h"
 #include "MinHook.h"
 #include "version.h"
@@ -483,9 +477,7 @@ typedef void (__cdecl *SoundSysTick_fn)(int);
 static SoundSysTick_fn orig_SoundSysTick = nullptr;
 
 
-// ================================================================
 // Installation / Shutdown / Stats
-// ================================================================
 namespace WowPerfHooks {
     bool InstallAll() {
         int installed = 0;

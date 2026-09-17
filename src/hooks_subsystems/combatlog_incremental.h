@@ -1,7 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: combatlog_incremental.h
 // Description: Batching and incremental parsing of combat log events.
 // Safety & Threading: Thread-safe queue, invoked on main thread OnFrame.
 // ============================================================================

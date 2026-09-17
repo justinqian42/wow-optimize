@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: camera_replay.cpp
-//
 // A benchmark that can be run twice the same way.
 //
 // FrameBench records every presented frame, and two sessions still cannot be

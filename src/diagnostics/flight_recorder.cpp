@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: flight_recorder.cpp
-//
 // Every visual defect reported against this project has cost three to five
 // rounds of questions, and every one of them stalled at the same place. The
 // player says "the shadows flashed while I was flying over Redridge, around
@@ -17,7 +15,6 @@
 // The missing piece is the same every time: a way for the person who can see the
 // bug to say NOW, and have the log keep the frames around that instant instead
 // of their average.
-//
 // ---------------------------------------------------------------------------
 // Why a key and not a slash command
 //
@@ -30,7 +27,6 @@
 // most and where no addon is executing at all: a loading screen, and the
 // character-switch transition where the garbled names appear. Scroll Lock by
 // default because the client binds no action to it.
-//
 // ---------------------------------------------------------------------------
 // What it records
 //
@@ -46,7 +42,6 @@
 //
 // 512 frames at 24 columns is 48 KB, and the per-frame cost is one memcpy of 96
 // bytes and one clock read.
-//
 // ---------------------------------------------------------------------------
 // Why this one is on by default
 //

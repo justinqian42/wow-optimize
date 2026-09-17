@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: lua_table_census.cpp
 // Description: Measures how much of the GC's table walk is empty slots.
 // Safety & Threading: Main thread, inside the client's collector.
 // ============================================================================
-//
 // luaC_traversetable is the most expensive Lua function in every profile this
 // project has collected: 1.41% to 2.46% of executing time, ahead of
 // luaV_execute. Reading it (sub_85A960) shows why it could be wasteful. It
@@ -26,7 +24,6 @@
 // So this measures it, weighted correctly by construction: it counts the tables
 // the collector actually walks, as often as it walks them, which is exactly the
 // weighting that decides whether compaction is worth anything.
-//
 // ---------------------------------------------------------------------------
 // Why a hook here is not the dangerous thing it looks like
 //

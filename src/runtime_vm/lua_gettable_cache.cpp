@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_gettable_cache.cpp
-// Description: Accelerates Lua runtime calls in `lua_gettable_cache.cpp`. Caches structures to bypass parser overhead.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "version.h"
 #include "MinHook.h"
 #include "crash_dumper.h"

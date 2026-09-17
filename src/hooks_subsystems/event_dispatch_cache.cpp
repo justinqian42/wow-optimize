@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: event_dispatch_cache.cpp
-// ============================================================================
-
 #include "event_dispatch_cache.h"
 #include <windows.h>
 #include <cstdint>
@@ -106,9 +102,7 @@ static int __cdecl Hooked_GetFramesRegistered(uintptr_t L) {
     return orig_GetFramesRegistered(L);
 }
 
-// ----------------------------------------------------------------
 // Install / Uninstall
-// ----------------------------------------------------------------
 bool InstallEventDispatchCache()
 {
     // Verify target addresses

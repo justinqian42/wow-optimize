@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: lua_alloc_census.cpp
 // Description: Counts every allocation the Lua VM makes, by size.
 // Safety & Threading: Runs on whichever thread the VM runs on - one, by contract.
 // ============================================================================
-//
 // Every object Lua creates - strings, tables, closures, stacks, upvalues - is
 // allocated through one function pointer. luaM_realloc_ at 0x0085D6F0 reads it:
 //

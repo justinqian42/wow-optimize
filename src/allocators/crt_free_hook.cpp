@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: crt_free_hook.cpp
 // Description: Removes a dead _msize call from WoW's CRT free wrapper.
 // Safety & Threading: Concurrent safe. Calls WoW's own free, never this DLL's.
 // ============================================================================

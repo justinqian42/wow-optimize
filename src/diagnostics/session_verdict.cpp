@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: session_verdict.cpp
-//
 // A tester session produces between half a megabyte and four megabytes of log,
 // and nothing in it says what went wrong. Answering "why did his shadows
 // flicker" or "why did that load take 139 seconds" has meant twenty to sixty
@@ -17,7 +15,6 @@
 // list. It computes nothing and hooks nothing; every line here was already
 // somewhere in the log, in a place nobody would look without knowing what they
 // were looking for.
-//
 // ---------------------------------------------------------------------------
 // What keeps it honest
 //

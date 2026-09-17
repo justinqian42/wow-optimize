@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_settable_cache.cpp
-// Description: Accelerates Lua runtime calls in `lua_settable_cache.cpp`. Caches structures to bypass parser overhead.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -15,9 +9,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Cache Configuration
-// ================================================================
 static constexpr int SETTABLE_CACHE_SIZE = 4096;
 static constexpr int SETTABLE_CACHE_MASK = SETTABLE_CACHE_SIZE - 1;
 
@@ -34,9 +26,7 @@ static volatile LONG g_setTableGen = 0;
 static volatile LONG64 g_stHits = 0;
 static volatile LONG64 g_stMisses = 0;
 
-// ================================================================
 // Safe Memory Probe
-// ================================================================
 static inline bool IsSafeRead4(uintptr_t addr) {
     if (addr < 0x10000 || addr > 0xFFE00000) return false;
     MEMORY_BASIC_INFORMATION mbi;

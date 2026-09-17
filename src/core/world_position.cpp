@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: world_position.cpp
 // Description: The client's world streaming centre, and whether it can be read.
 // Safety & Threading: Main thread.
 // ============================================================================
-//
 // Three modules used to read a player position from 0x00BE1F30. No instruction
 // in wow.exe references that address - it has no cross-references and no type
 // information, and it sits in zero-filled storage nothing writes. So all three

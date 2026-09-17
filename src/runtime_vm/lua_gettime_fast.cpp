@@ -1,7 +1,5 @@
 // ============================================================================
-// Module: lua_gettime_fast.cpp
 // Description: Accelerates Lua GetTime API calls via high-precision caching.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
 // ============================================================================
 
 #include <windows.h>

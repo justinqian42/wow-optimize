@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: addon_dispatcher.cpp
 // Description: Dispatches addon Update calls asynchronously to thread pools.
 // Safety & Threading: Lock-free worker safe.
 // ============================================================================
@@ -14,9 +13,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Addon Callback Structure
-// ================================================================
 struct AddonCallback {
     void* frame;          // Frame pointer
     void* callback;       // Callback function pointer
@@ -102,15 +99,11 @@ static inline void SetStackTopFast(lua_State* L, RawTValue* top) {
 }
 
 
-// ================================================================
 // Batch Processing State
-// ================================================================
 static std::vector<AddonCallback> g_currentBatch;
 static SRWLOCK g_batchLock = SRWLOCK_INIT;
 
-// ================================================================
 // Statistics (atomic counters)
-// ================================================================
 static volatile LONG g_callbacksQueued = 0;
 static volatile LONG g_callbacksProcessed = 0;
 static volatile LONG g_callbacksDropped = 0;
@@ -119,23 +112,17 @@ static double g_totalProcessTimeMs = 0.0;
 static double g_totalBatchSize = 0.0;
 static SRWLOCK g_statsLock = SRWLOCK_INIT;
 
-// ================================================================
 // Worker Thread Pool State
-// ================================================================
 static constexpr int WORKER_THREAD_COUNT = 4;
 static HANDLE g_workerThreads[WORKER_THREAD_COUNT] = {};
 static volatile bool g_workerShutdown = false;
 static HANDLE g_workerEvent = NULL;
 static double g_qpcFreqMs = 0.0;
 
-// ================================================================
 // Hook State
-// ================================================================
 static bool g_initialized = false;
 
-// ================================================================
 // Memory Validation Helpers
-// ================================================================
 static bool IsReadable(uintptr_t addr) {
     if (addr == 0) return false;
     MEMORY_BASIC_INFORMATION mbi;
@@ -144,9 +131,7 @@ static bool IsReadable(uintptr_t addr) {
     return !(mbi.Protect & PAGE_NOACCESS) && !(mbi.Protect & PAGE_GUARD);
 }
 
-// ================================================================
 // Callback Processing (Worker Thread)
-// ================================================================
 static void ProcessCallback(const AddonCallback* callback) {
     // Validate pointers before queueing
     if (!IsReadable((uintptr_t)callback->frame) || 
@@ -169,9 +154,7 @@ static void ProcessCallback(const AddonCallback* callback) {
     QueueOutputCallback(callback);
 }
 
-// ================================================================
 // Worker Thread Procedure
-// ================================================================
 static DWORD WINAPI WorkerThreadProc(LPVOID) {
     Log("[AddonDispatcher] Worker thread started (TID: %d)", GetCurrentThreadId());
 
@@ -211,9 +194,7 @@ static DWORD WINAPI WorkerThreadProc(LPVOID) {
     return 0;
 }
 
-// ================================================================
 // Batch Collection and Dispatch
-// ================================================================
 static void CollectCallback(void* frame, void* callback, double elapsed) {
     if (!g_initialized) return;
     if (LuaOpt::IsReloading() || LuaOpt::IsSwapping()) return;
@@ -282,9 +263,7 @@ static void DispatchBatch() {
     ReleaseSRWLockExclusive(&g_batchLock);
 }
 
-// ================================================================
 // Public API Implementation
-// ================================================================
 namespace AddonDispatcher {
 
 bool Init() {

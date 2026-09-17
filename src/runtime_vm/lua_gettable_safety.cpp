@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_gettable_safety.cpp
-// Description: Accelerates Lua runtime calls in `lua_gettable_safety.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -92,9 +86,7 @@ static void* __cdecl Safe_sub_85BC10(int a1, uint32_t* a2, int a3)
     }
 }
 
-// ----------------------------------------------------------------
 // Install / Uninstall
-// ----------------------------------------------------------------
 bool InstallLuaGetTableSafety()
 {
     void* target = (void*)0x0085BC10;

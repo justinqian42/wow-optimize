@@ -4,7 +4,6 @@
 //              the pairs the verification phase already produces.
 // Safety & Threading: Main thread, inside a verification path.
 // ============================================================================
-//
 // Every module in this project that replaces a client function ends its report
 // the same way: no frame-time gain is claimed. That is honest and it has been
 // true for every one of them, because the only instrument that could claim one
@@ -20,7 +19,6 @@
 //
 // So this counts cycles around each half of a pair the module was going to run
 // anyway, and reports the ratio of the totals.
-//
 // ---------------------------------------------------------------------------
 // What this is and is not
 //

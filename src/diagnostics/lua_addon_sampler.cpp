@@ -1,11 +1,9 @@
 // ============================================================================
-// Module: lua_addon_sampler.cpp
 // Description: Charges main-thread samples to the addon whose Lua is running.
 // Safety & Threading: NoteSample runs on the profiler thread with the main
 //              thread suspended. Everything it touches is read-only and wrapped
 //              in SEH, because a suspended thread can be caught mid-write.
 // ============================================================================
-//
 // Every offset below was read out of the client, not assumed from stock Lua,
 // because this VM is +4-shifted and reading stock offsets is what produced the
 // smushed-text bug.

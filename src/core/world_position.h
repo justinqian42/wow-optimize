@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: world_position.h
 // Description: The client's world streaming centre, and whether it can be read.
 // Safety & Threading: Main thread.
 // ============================================================================

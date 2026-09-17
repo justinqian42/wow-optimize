@@ -1,17 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: combatlog_optimize.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
 // Combat log optimizer.
 // 1. Retention time increase (300 -> 1800 sec)
 // 2. Periodic CombatLogClearEntries from C level

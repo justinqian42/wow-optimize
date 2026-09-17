@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: hooks_render.cpp
-// Description: Installs and manages target intercepts for subsystem `hooks_render.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -42,9 +36,7 @@ static constexpr LONG64 MIN_LOCK_INTERVAL_US = 2000;
 // missing is a camera position at that call site, which is the only reason this
 // is a comment and not an implementation.
 
-// ================================================================
 // Backbuffer LockRect Elimination
-// ================================================================
 // Detects redundant LockRect calls within a time window and skips them.
 
 static bool ShouldSkipBackbufferLock() {
@@ -54,9 +46,7 @@ static bool ShouldSkipBackbufferLock() {
     return elapsedUs < MIN_LOCK_INTERVAL_US;
 }
 
-// ================================================================
 // Instanced Mesh Batching Framework
-// ================================================================
 // Collects identical mesh draws for potential D3D9 instanced rendering.
 
 #ifndef ADDR_DRAW_INDEXED_PRIMITIVE
@@ -65,9 +55,7 @@ static bool ShouldSkipBackbufferLock() {
 
 #define TEST_DISABLE_INSTANCED_MESH 1
 
-// ================================================================
 // Public API
-// ================================================================
 
 bool InstallRenderHooks(void) {
     QueryPerformanceFrequency(&g_qpcFreq);

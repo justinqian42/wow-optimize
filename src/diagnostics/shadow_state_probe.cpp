@@ -1,12 +1,9 @@
 // ============================================================================
-// Module: shadow_state_probe.cpp
-//
 // Two testers independently report that lowering extShadowQuality below 5 makes
 // shadows flicker or disappear. One of them settled the important question
 // before we could: it happens with every feature of ours switched off, and
 // without the DXVK proxy. So this is the client's own bug, and this module does
 // not try to fix it - it watches it, so there is something to reason from.
-//
 // ---------------------------------------------------------------------------
 // Why this stopped sampling
 //
@@ -27,7 +24,6 @@
 //
 // A sampler cannot answer this question. The pass either ran or it did not, and
 // the only instrument that says so exactly is the pass itself.
-//
 // ---------------------------------------------------------------------------
 // What is measured now
 //

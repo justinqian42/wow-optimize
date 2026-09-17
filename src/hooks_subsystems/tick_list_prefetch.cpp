@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: tick_list_prefetch.cpp
 // Description: Prefetches the next node of the per-frame object tick walk.
 // Safety & Threading: Main thread, inside the frame.
 // ============================================================================
-//
 // sub_6BE3E0 walks an intrusive list every frame:
 //
 //     v2 = dword_AD9ACC;

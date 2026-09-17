@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_stack_fast.cpp
-// Description: Accelerates Lua runtime calls in `lua_stack_fast.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -15,9 +9,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Shared: symbolic type constants and secure taint cells
-// ================================================================
 #define LUA_TNIL              0
 #define LUA_TBOOLEAN          1
 #define LUA_TLIGHTUSERDATA    2
@@ -767,9 +759,7 @@ static int __cdecl hook_lua_getfenv(uintptr_t L, int idx) {
     return orig_lua_getfenv(L, idx);
 }
 
-// ================================================================
 // Install / Shutdown
-// ================================================================
 
 static void* const ADDR_PUSHNIL           = (void*)0x0084E280;
 static void* const ADDR_PUSHINTEGER       = (void*)0x0084E2D0;

@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: lua_this_cache.cpp
 // Description: Inlines the object lookup every Lua call to a UI method starts with.
 // Safety & Threading: Main thread, alongside the Lua state.
 // ============================================================================
-//
 // sub_4A81B0 is the prologue of every FrameScript method binding in the client -
 // 674 call sites, one for each `frame:SetText`, `frame:GetWidth` and the rest.
 // Every call from Lua into a UI object runs it first. What it does:
@@ -18,7 +16,6 @@
 //
 // Four calls into the Lua API and a push/pop pair, to read one pointer out of
 // one table slot. This reads it directly instead.
-//
 // ---------------------------------------------------------------------------
 // The module that used to be here claimed this and did nothing
 //
@@ -26,7 +23,6 @@
 // diagnosis was wrong: sub_4A81B0 takes L in ESI, which no plain C detour can
 // receive, but MinHook enters the detour with the caller's registers intact. A
 // naked thunk reads ESI and passes it on, which is what this does.
-//
 // ---------------------------------------------------------------------------
 // What lua_rawgeti does besides fetch, which is the whole difficulty
 //
@@ -46,7 +42,6 @@
 // one instruction later with nothing in between, so nothing can observe it and
 // nothing reproduces it. lua_settop with a negative index only moves L->top; its
 // own taint stamping is on the positive branch, which this path never takes.
-//
 // ---------------------------------------------------------------------------
 // Declining rather than reproducing
 //

@@ -1,19 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: strcat_fast.h
-// Description: SSE2 vectorized replacement for legacy CRT function `strcat_fast.h`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
-
-
-
-
-
-
-
-
 #ifndef STRCAT_FAST_H
 #define STRCAT_FAST_H
 

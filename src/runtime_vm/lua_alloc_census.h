@@ -1,7 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: lua_alloc_census.h
 // Description: Counts Lua VM allocations by size, through G->frealloc.
 // ============================================================================
 

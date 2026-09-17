@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_getstr_inline.cpp
-// Description: Accelerates Lua runtime calls in `lua_getstr_inline.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -46,9 +40,7 @@ void InvalidateLuaGetStrInlineCache() {
 // ----------------------------------------------------------------
 static void* g_nil_object = (void*)0x00A46F78;
 
-// ----------------------------------------------------------------
 // Original function pointer
-// ----------------------------------------------------------------
 typedef void* (__cdecl *luaH_getstr_fn)(int table, int tstring);
 static luaH_getstr_fn g_orig_getstr = nullptr;
 
@@ -56,7 +48,6 @@ static luaH_getstr_fn g_orig_getstr = nullptr;
 // ----------------------------------------------------------------
 // The chain walk, and the SEH that used to cover everything
 // ----------------------------------------------------------------
-//
 // This function is 993333271 calls in one field session and half of them stop on
 // the first node. A __try region on 32-bit MSVC is not free: the prologue pushes
 // an exception registration record and links it through fs:[0], and that happens
@@ -180,9 +171,7 @@ static void* __cdecl Optimized_GetStr(int table, int tstring)
     return WalkChainGuarded(table, tstring, first);
 }
 
-// ----------------------------------------------------------------
 // Install / Uninstall
-// ----------------------------------------------------------------
 bool InstallLuaGetStrInline()
 {
     // Verified correct against the stock luaH_getstr decompile (0x85C430)

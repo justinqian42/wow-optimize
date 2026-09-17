@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: x87_precision_check.h
 // Description: Measures the floating point control state every SIMD
 //              replacement in this project assumes.
 // Safety & Threading: Reads two registers.

@@ -6,7 +6,6 @@
 // measured session at roughly 5900 cycles each. Nothing that makes the inside of
 // it cheaper reaches that number; the only lever big enough is doing it less
 // often for models the player cannot see the difference on.
-//
 // ---------------------------------------------------------------------------
 // Why the previous attempt could not work, and why this one can
 //
@@ -27,7 +26,6 @@
 // the call and the tail goes with it, which is the glowing shoulder pads bug
 // that guard exists to prevent. Skip only the loop and the model keeps its pose
 // while its materials, particles and attachments carry on animating normally.
-//
 // ---------------------------------------------------------------------------
 // The cut, and why it needs no new control flow at all
 //
@@ -52,7 +50,6 @@
 // fits without splitting an instruction, and nothing in the client jumps into
 // them: the only cross references are to 0x0082F418 itself, two jumps and a
 // fall-through.
-//
 // ---------------------------------------------------------------------------
 // What a held frame looks like
 //

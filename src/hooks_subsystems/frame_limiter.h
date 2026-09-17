@@ -6,7 +6,6 @@
 #include <windows.h>
 
 // ============================================================================
-// Module: frame_limiter.h
 // Description: Custom high-precision hybrid frame rate limiter.
 // Safety & Threading: Thread-safe. Integrates with the main render thread.
 // ============================================================================

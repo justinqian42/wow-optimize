@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: addon_profiler.cpp
-//
 // "Do you think it would be possible to profile how much time each addon is
 // using per frame and graph it out?" - a tester, on a session running at 7-16
 // fps with a quarter of the CPU going to one third-party library and no way to

@@ -1,8 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: addon_profiler.h
-//
 // Turns on the client's own script profiler and reports per-addon CPU cost to
 // the log, ranked. Measures nothing itself - the client already can, behind the
 // scriptProfile CVar that nothing in the default UI exposes.

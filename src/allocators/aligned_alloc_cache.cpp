@@ -1,7 +1,5 @@
 // ============================================================================
-// Module: aligned_alloc_cache.cpp
 // Description: Aligned memory pool cache to avoid heap fragmentation.
-// Safety & Threading: Concurrent execution safe.
 // ============================================================================
 
 #include "aligned_alloc_cache.h"

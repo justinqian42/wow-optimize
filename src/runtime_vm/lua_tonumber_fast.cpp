@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_tonumber_fast.cpp
-// Description: Accelerates Lua runtime calls in `lua_tonumber_fast.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

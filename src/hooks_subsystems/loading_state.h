@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: loading_state.h
 // Description: Native loading-screen / combat state detection from the client's
 //              own event stream, independent of the !LuaBoost addon.
 // ============================================================================

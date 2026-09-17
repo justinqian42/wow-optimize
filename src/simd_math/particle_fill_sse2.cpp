@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: particle_fill_sse2.cpp
-//
 // The per-particle vertex fill in the client's particle emitter, sub_6C4440
 // (Particle_FillVertices, 2.5% of self time in the corrected combat profile and
 // claimed by nothing in this project until now).

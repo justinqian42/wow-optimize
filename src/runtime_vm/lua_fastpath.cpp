@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: lua_fastpath.cpp
 // Description: Implements optimized redirects for hot Lua C-API functions (string.*, math.*, select) using fast math and string logic.
 // Safety & Threading: Main thread / Lua VM execution context. Stack top alignment must be strictly balanced.
 // ============================================================================
@@ -187,7 +186,6 @@ static bool IsExecutable(uintptr_t addr) {
 
 // ================================================================
 // Phase 1: string.format hook (hardcoded address 0x00853C50).
-//
 // ================================================================
 
 static constexpr uintptr_t ADDR_str_format = 0x00853C50;
@@ -630,7 +628,6 @@ fallback:
 
 // ================================================================
 // Phase 2: runtime-discovered Lua function hooks.
-//
 // ================================================================
 
 static bool IsReadableMemory(uintptr_t addr) {
@@ -2724,9 +2721,7 @@ static int __cdecl Hooked_Math_Sqrt(lua_State* L) {
 }
 
 // ================================================================
-// ================================================================
 // Hooked_StrTrim — strtrim fast path
-// ================================================================
 static volatile LONG64 g_strTrimHits = 0;
 static volatile LONG64 g_strTrimFallbacks = 0;
 
@@ -2767,9 +2762,7 @@ static int __cdecl Hooked_StrTrim(lua_State* L) {
     return 1;
 }
 
-// ================================================================
 // Hooked_StrSplit — strsplit fast path
-// ================================================================
 static volatile LONG64 g_strSplitHits = 0;
 static volatile LONG64 g_strSplitFallbacks = 0;
 
@@ -2857,9 +2850,7 @@ static int __cdecl Hooked_StrSplit(lua_State* L) {
     return pieces;
 }
 
-// ================================================================
 // Hooked_StrJoin — strjoin fast path (WoW global)
-// ================================================================
 // strjoin(delimiter, s1, s2, ...) -> delimiter-joined string. The
 // inverse of strsplit; common in addon serialization/UI code. We build
 // the result directly when the delimiter and every piece are NUL-free
@@ -2952,9 +2943,6 @@ static int __cdecl Hooked_StrRep(lua_State* L) {
 // ================================================================
 // Hooked_IPairs_Factory — ipairs() factory fast path
 // Optimized ipairs() factory that returns our fast iterator.
-// ================================================================
-
-// ================================================================
 // Hooked_IPairs_Iterator — ipairs iterator fast path (direct hook of ipairsaux)
 // Fast numeric table iteration via luaH_getnum (bypasses lua_gettable).
 // ================================================================
@@ -3289,9 +3277,6 @@ static constexpr int NUM_FUNC_HOOKS = 0;
 
 // ================================================================
 // Unit API Fast Paths — Direct CGUnit_C field reads
-// ================================================================
-
-// ================================================================
 // Unit API Fast Paths Implementation
 // ================================================================
 

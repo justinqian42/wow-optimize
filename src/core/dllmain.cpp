@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: dllmain.cpp
 // Description: Main DLL orchestration and initialization hub. Detours system APIs (GetSystemMetrics, sleep pacing, timeGetTime, and ReadFile) to establish frame pacing, timing, and I/O caching.
 // Safety & Threading: Main thread execution only. Sequence modifications can lead to system loader deadlocks.
 // ============================================================================
@@ -1375,9 +1374,7 @@ static fn_ThreadWorker orig_ThreadWorker = nullptr;
 
 // WineSafe_CreateHook is now defined in version.h (shared across all TUs)
 
-// ================================================================
 // Global state
-// ================================================================
 bool   g_isMultiClient = false;         // Set by DetectMultiClient() via named mutex
 static HANDLE g_instanceMutex = NULL;   // "wow_optimize_instance_v2" mutex
 static DWORD  g_nextStatsDumpTick = 0;  // Next periodic stats dump (GetTickCount)
@@ -1385,10 +1382,8 @@ static DWORD  g_nextMiCollectTick = 0;  // Next mimalloc collect (multi-client o
 static void   DumpPeriodicStats(const char* why = "periodic",
                                 bool atProcessExit = false);
 
-// ================================================================
 // Logging - ring buffer + background thread
 //
-// ================================================================
 static FILE* g_log = nullptr;
 static FILE* g_sessionLog = nullptr;
 
@@ -2446,7 +2441,6 @@ static int WINAPI hooked_send(SOCKET s, const char* buf, int len, int flags) {
 
 // ================================================================
 // 3b. recv / WSARecv - receive-side socket optimization
-//
 // ================================================================
 
 typedef int (WINAPI* recv_fn)(SOCKET, char*, int, int);
@@ -2513,7 +2507,6 @@ static bool InstallNetworkHooks() {
 
 // ================================================================
 // 4. MPQ Handle Tracking (O(1) hash lookup)
-//
 // ================================================================
 
 static constexpr int MPQ_HASH_SIZE = 512; // power of 2, load factor < 0.5
@@ -2620,7 +2613,6 @@ static void UntrackMpqHandle(HANDLE h) {
 
 // ================================================================
 // 4b. Memory-Mapped MPQ Files
-//
 // ================================================================
 // MPQ map lock - always defined (used by scanner even when mmap disabled)
 static SRWLOCK g_mpqMapLock = SRWLOCK_INIT;
@@ -3200,7 +3192,6 @@ static bool InstallReadFileHook() {
 
 // ================================================================
 // 5b. Async MPQ Prefetch Queue - background overlapped reads
-//
 // ================================================================
 
 struct PrefetchSlot {
@@ -3331,7 +3322,6 @@ static BOOL CheckPrefetch(HANDLE hFile, LARGE_INTEGER offset, LPVOID lpBuffer, D
 
 // ================================================================
 // 6. GetTickCount - QPC Precision
-//
 // ================================================================
 typedef DWORD (WINAPI* GetTickCount_fn)(void);
 static GetTickCount_fn orig_GetTickCount = nullptr;
@@ -3455,7 +3445,6 @@ static bool InstallCriticalSectionHook() {
 
 // ================================================================
 // 7b. Heap Optimization - Low Fragmentation Heap
-//
 // ================================================================
 
 typedef HANDLE (WINAPI* HeapCreate_fn)(DWORD, SIZE_T, SIZE_T);
@@ -3648,7 +3637,6 @@ static bool InstallHeapRedirectToMimalloc() {
 
 // ================================================================
 // 7c. OutputDebugStringA - No-op when no debugger
-//
 // ================================================================
 
 typedef void (WINAPI* OutputDebugStringA_fn)(LPCSTR);
@@ -3675,7 +3663,6 @@ static bool InstallOutputDebugStringHook() {
 
 // ================================================================
 // 7d. CompareStringA - Fast ASCII Path
-//
 // ================================================================
 
 static const unsigned char g_asciiToUpper[256] = {
@@ -3774,7 +3761,6 @@ static bool InstallCompareStringHook() {
 
 // ================================================================
 // 7e. GetFileAttributesA - Cache for MPQ paths
-//
 // ================================================================
 
 typedef DWORD (WINAPI* GetFileAttributesA_fn)(LPCSTR);
@@ -3883,7 +3869,6 @@ static bool InstallGetFileAttributesHook() {
 
 // ================================================================
 // 7g. SetFilePointer → SetFilePointerEx Redirect
-//
 // ================================================================
 
 typedef DWORD (WINAPI* SetFilePointer_fn)(HANDLE, LONG, PLONG, DWORD);
@@ -3933,7 +3918,6 @@ static bool InstallSetFilePointerHook() {
 
 // ================================================================
 // 7h. GlobalAlloc/GlobalFree - mimalloc for GMEM_FIXED
-//
 // ================================================================
 
 typedef HGLOBAL (WINAPI* GlobalAlloc_fn)(UINT, SIZE_T);
@@ -4008,7 +3992,6 @@ static bool InstallGlobalAllocHooks() {
 
 // ================================================================
 // 7f2. IsBadReadPtr / IsBadWritePtr - Fast Path
-//
 // ================================================================
 
 typedef BOOL (WINAPI* IsBadReadPtr_fn)(const void*, UINT_PTR);
@@ -4075,7 +4058,6 @@ static bool InstallBadPtrHooks() {
 
 // ================================================================
 // 7f. GetCurrentThreadId - TLS Cached
-//
 // ================================================================
 
 typedef DWORD (WINAPI* GetCurrentThreadId_fn)(void);
@@ -4111,7 +4093,6 @@ static bool InstallThreadIdCacheHook() {
 
 // ================================================================
 // 7f3. QueryPerformanceCounter - Coalesced with RDTSC fast path
-//
 // ================================================================
 
 typedef BOOL (WINAPI* QueryPerformanceCounter_fn)(LARGE_INTEGER*);
@@ -4191,7 +4172,6 @@ static bool InstallQPCHook() {
 
 // ================================================================
 // 8. CreateFile - Sequential Scan + MPQ Tracking
-//
 // ================================================================
 typedef HANDLE (WINAPI* CreateFileA_fn)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE (WINAPI* CreateFileW_fn)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
@@ -4494,7 +4474,6 @@ static bool InstallFileHooks() {
 
 // ================================================================
 // 9. CloseHandle - Cache Invalidation
-//
 // ================================================================
 typedef BOOL (WINAPI* CloseHandle_fn)(HANDLE);
 static CloseHandle_fn orig_CloseHandle = nullptr;
@@ -4675,7 +4654,6 @@ static void ScanExistingMpqHandles() {
 
 // ================================================================
 // 9b. FlushFileBuffers - Skip for MPQ (read-only)
-//
 // ================================================================
 
 typedef BOOL (WINAPI* FlushFileBuffers_fn)(HANDLE);
@@ -5830,7 +5808,6 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
 
 // ================================================================
 // 19. sub_869E00 - Zero-Message Frame Continue (disabled)
-//
 // ================================================================
 
 typedef int (__cdecl* MsgPump_fn)(void*, int*, DWORD*, void*, void*);
@@ -5904,7 +5881,6 @@ static bool InstallMsgPumpHook() {
 
 // ================================================================
 // 20. sub_69E220 - Swap/Present Optimization (Vulkan/D3D9)
-//
 // ================================================================
 
 typedef void (__cdecl* SubFn)();
@@ -6025,7 +6001,6 @@ static bool InstallSwapPresentHook() {
 // Frame-boundary timing detour (used only when the optimizing swap
 // hook above is not installed)
 // ================================================================
-//
 // sub_69E220 is the only true frame boundary available: reached solely through
 // the render vtable, exactly once per presented frame. The optimizing hook above
 // already reports each frame to FrameBench, but it is gated behind OptVulkanDXVK,
@@ -6192,7 +6167,6 @@ static inline uint64_t ComputeCStringHash(const char* s) {
 
 // ================================================================
 // 21f. sub_84E670 - lua_rawgeti Fast Path (integer-key cache)
-//
 // ================================================================
 
 #define RAWGETI_CACHE_SIZE 2048
@@ -6253,7 +6227,6 @@ static bool InstallLuaRawGetICache() {
 
 // ================================================================
 // 21e. sub_84E350 - lua_pushstring Fast Path (TString* intern cache)
-//
 // ================================================================
 
 #define PUSHSTR_CACHE_SIZE 4096
@@ -6412,7 +6385,6 @@ static bool InstallLuaPushStringCache() {
 
 // ================================================================
 // 21c. sub_851C30 - table.concat Fast Path (Direct Array + Inline Nums)
-//
 // ================================================================
 
 #define TABLE_CONCAT_BUF_SIZE 8192
@@ -6557,7 +6529,6 @@ static bool InstallTableConcatFastPath() {
 
 // ================================================================
 // 21b. sub_85C430 - Lua Table String-Key Lookup Fast Path (enabled)
-//
 // ================================================================
 
 typedef void* (__cdecl* luaH_getstr_fn)(int table, int tstring);
@@ -6694,7 +6665,6 @@ static bool InstallLuaHGetStrCache() {
 
 // ================================================================
 // 21c. sub_74E290 - CombatLog Event Full Cache
-//
 // ================================================================
 
 #define COMBATLOG_CACHE_SIZE 256
@@ -6937,7 +6907,6 @@ static bool InstallCombatLogFullCache() {
 
 // ================================================================
 // 21. sub_85C6F0 - Lua Table Rehash Prevention (enabled)
-//
 // ================================================================
 
 static inline int luaTable_nextPow2(int n) {
@@ -7448,9 +7417,7 @@ extern "C" void ReleaseLoadingArena() {
     TextureUnloadDelay::Flush();
 }
 
-// ================================================================
 // Batch optimizations: kernel caches and fast paths
-// ================================================================
 
 // #1: GetSystemTimeAsFileTime → cached QPC. Timestamps used for profiling.
 typedef void (WINAPI* GSTAFT_fn)(LPFILETIME);
@@ -9970,7 +9937,6 @@ static bool InstallStreamBufferFastPath() {
 
 // ================================================================
 // 17. GetFileSize / GetFileSizeEx - Cache
-//
 // ================================================================
 
 static constexpr int FSIZE_CACHE_SIZE = 256;
@@ -10003,7 +9969,6 @@ static bool InstallGetFileSizeCache() {
 
 // ================================================================
 // 18. WaitForSingleObject - Spin-First for Short Waits
-//
 // ================================================================
 
 typedef DWORD (WINAPI* WaitForSingleObject_fn)(HANDLE, DWORD);
@@ -10043,7 +10008,6 @@ static bool InstallWaitForSingleObjectHook() {
 
 // ================================================================
 // 19. GetModuleHandleA - Cache
-//
 // ================================================================
 
 static constexpr int MOD_CACHE_SIZE = 1024;
@@ -10114,7 +10078,6 @@ static bool InstallGetModuleHandleCache() {
 
 // ================================================================
 // 20. lstrcmpA / lstrcmpiA - Fast Path
-//
 // ================================================================
 
 typedef int (WINAPI* lstrcmpA_fn)(LPCSTR, LPCSTR);
@@ -10214,7 +10177,6 @@ static bool InstallLstrcmpHook() {
 
 // ================================================================
 // 21. GetPrivateProfileStringA - Cache
-//
 // ================================================================
 
 static constexpr int PROF_CACHE_SIZE = 128;
@@ -10302,10 +10264,8 @@ static bool InstallGetPrivateProfileCache() {
 #endif
 }
 
-// ================================================================
 // lstrlenA/W - fast inline string length
 //
-// ================================================================
 
 typedef int (WINAPI* lstrlenA_fn)(LPCSTR);
 typedef int (WINAPI* lstrlenW_fn)(LPCWSTR);
@@ -10487,10 +10447,8 @@ static bool InstallWowStrlenHook() {
 static bool InstallWowStrlenHook() { return false; }
 #endif
 
-// ================================================================
 // MultiByteToWideChar / WideCharToMultiByte - ASCII fast path
 //
-// ================================================================
 
 typedef int (WINAPI* MultiByteToWideChar_fn)(UINT, DWORD, LPCCH, int, LPWSTR, int);
 typedef int (WINAPI* WideCharToMultiByte_fn)(UINT, DWORD, LPCWCH, int, LPSTR, int, LPCCH, LPBOOL);
@@ -10714,7 +10672,6 @@ static bool InstallMBWCHooks() {
 // ================================================================
 // GetProcAddress - 4-way set-associative cache (strcmp-based,
 // Wine security-module bypass)
-//
 // ================================================================
 
 typedef FARPROC (WINAPI* GetProcAddress_fn)(HMODULE, LPCSTR);
@@ -10911,10 +10868,8 @@ static bool InstallGetProcAddressCache() {
 #endif
 }
 
-// ================================================================
 // GetModuleFileNameA/W - cache
 //
-// ================================================================
 
 typedef DWORD (WINAPI* GetModuleFileNameA_fn)(HMODULE, LPSTR, DWORD);
 typedef DWORD (WINAPI* GetModuleFileNameW_fn)(HMODULE, LPWSTR, DWORD);
@@ -10988,10 +10943,8 @@ static bool InstallGetModuleFileNameCache() {
 #endif
 }
 
-// ================================================================
 // GetEnvironmentVariableA - cache
 //
-// ================================================================
 
 typedef DWORD (WINAPI* GetEnvironmentVariableA_fn)(LPCSTR, LPSTR, DWORD);
 
@@ -11064,10 +11017,8 @@ static bool InstallEnvironmentVariableCache() {
 #endif
 }
 
-// ================================================================
 //  Thread Affinity - Background Worker CPU Pinning
 //
-// ================================================================
 
 static int __cdecl Hooked_ThreadWorker(void* outHandle, LPTHREAD_START_ROUTINE start, LPVOID param, int priority, int a5, int a6, HMODULE hMod) {
     int ret = orig_ThreadWorker(outHandle, start, param, priority, a5, a6, hMod);

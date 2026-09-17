@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: script_handler_cache.cpp
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -26,9 +22,7 @@ static constexpr uint32_t fnv1a(const char* s) {
     return h;
 }
 
-// ----------------------------------------------------------------
 // Known script handler hashes
-// ----------------------------------------------------------------
 enum ScriptHash : uint32_t {
     H_ONLOAD              = fnv1a("OnLoad"),
     H_ONSIZECHANGED       = fnv1a("OnSizeChanged"),
@@ -51,9 +45,7 @@ enum ScriptHash : uint32_t {
     H_ONDISABLE           = fnv1a("OnDisable"),
 };
 
-// ----------------------------------------------------------------
 // Statistics
-// ----------------------------------------------------------------
 // Plain 32-bit counters, and the width is the point as much as the atomicity.
 //
 // These were std::atomic<uint64_t>, incremented with fetch_add on every call
@@ -72,9 +64,7 @@ enum ScriptHash : uint32_t {
 static long g_total_calls = 0;
 static long g_fast_path = 0;
 
-// ----------------------------------------------------------------
 // Hook state
-// ----------------------------------------------------------------
 typedef int (__thiscall *orig_handler_resolver_t)(void* self, char* name, void** out);
 static orig_handler_resolver_t g_orig_resolver = nullptr;
 
@@ -89,9 +79,7 @@ static inline bool streq(const char* a, const char* b) {
     return *a == *b;
 }
 
-// ----------------------------------------------------------------
 // Hooked resolver: hash-dispatch instead of linear strcmp chain
-// ----------------------------------------------------------------
 static int __fastcall Hooked_ScriptHandlerResolver(void* self, void* /*edx*/, char* name, void** out)
 {
     ++g_total_calls;
@@ -184,9 +172,7 @@ static int __fastcall Hooked_ScriptHandlerResolver(void* self, void* /*edx*/, ch
     return g_orig_resolver(self, name, out);
 }
 
-// ----------------------------------------------------------------
 // Install / Uninstall
-// ----------------------------------------------------------------
 bool InstallScriptHandlerCache()
 {
     // Disabled: the hook never actually replaced the resolver. The original

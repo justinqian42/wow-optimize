@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_getlocal_fast.cpp
-// Description: Accelerates Lua runtime calls in `lua_getlocal_fast.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include <windows.h>
 #include <cstdint>
 #include "MinHook.h"

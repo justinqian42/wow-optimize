@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: string_ops_fast.cpp
-// Description: SSE2 vectorized replacement for legacy CRT function `string_ops_fast.cpp`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
 #include <windows.h>
 #include <MinHook.h>
 #include <cstdint>
@@ -13,9 +7,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Statistics
-// ================================================================
 static volatile long g_jenkins_calls = 0;
 static volatile long g_jenkins_fast = 0;
 
@@ -28,9 +20,7 @@ static bool g_installed = false;
 // "switched off" from "asked to install and could not".
 static bool g_initRan = false;
 
-// ================================================================
 // Original function pointers
-// ================================================================
 typedef uint32_t (__cdecl* JenkinsHash_t)(const uint8_t*, uint32_t, uint32_t);
 
 static JenkinsHash_t  pOrigJenkins = nullptr;
@@ -176,9 +166,7 @@ static uint32_t __cdecl HookJenkinsHash(const uint8_t* key, uint32_t length, uin
 #endif
 }
 
-// ================================================================
 // Installation
-// ================================================================
 bool InitStringOpsFast() {
 #if TEST_DISABLE_STRING_OPS_FAST
     Log("[StringOps] DISABLED via feature flag");
@@ -215,9 +203,7 @@ bool InitStringOpsFast() {
 #endif
 }
 
-// ================================================================
 // Statistics dump
-// ================================================================
 void DumpStringOpsStats() {
 #if TEST_DISABLE_STRING_OPS_FAST
     Log("[StringOps] not measured: compiled out at build time.");
@@ -256,9 +242,7 @@ void DumpStringOpsStats() {
 #endif
 }
 
-// ================================================================
 // Cleanup
-// ================================================================
 void ShutdownStringOpsFast() {
 #if !TEST_DISABLE_STRING_OPS_FAST
     MH_DisableHook((void*)0x0076F420);

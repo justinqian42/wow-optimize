@@ -1,9 +1,7 @@
 // ============================================================================
 // Module: ray_triangle_sse2
 // Description: SSE2 double transcription of the client's ray-triangle test.
-// Safety & Threading: Main thread, same as the function it replaces.
 // ============================================================================
-//
 // sub_983490 is Moller-Trumbore, and it is the shared ray-triangle test for the
 // whole collision family: sub_7C6600, sub_7C6790, sub_7C6C30 and sub_7C6D50 all
 // call it, plus sub_81E110. That family is about 6.4% of executing main-thread
@@ -14,7 +12,6 @@
 // is a status word round trip feeding a conditional jump, and the jumps are on
 // whether a ray misses a triangle, which is not predictable. The transcription
 // below has no fnstsw and no stack juggling: comisd sets the flags directly.
-//
 // ---------------------------------------------------------------------------
 // The width, which is measured rather than assumed
 //
@@ -33,7 +30,6 @@
 // the first handful of calls rather than after ninety thousand byte-exact
 // agreements. x87_precision_check.cpp now reads the register and prints it, so
 // a machine where this is not true says so.
-//
 // ---------------------------------------------------------------------------
 // Which intermediates the client rounds to float, and which it does not
 //
@@ -55,7 +51,6 @@
 //
 // So the same quantity appears at two widths within one call, on purpose or by
 // accident, and both have to be reproduced. F() below is that rounding.
-//
 // ---------------------------------------------------------------------------
 // The associations, also traced
 //
@@ -77,7 +72,6 @@
 // Left operand first in every sum. Multiplication is exactly commutative in
 // IEEE so the order inside a product does not matter; the order of the two
 // additions does, and it is not the order the algebra is usually written in.
-//
 // ---------------------------------------------------------------------------
 // The predicates, read from the raw disassembly
 //
@@ -88,7 +82,6 @@
 //
 // The barycentric tests are the same shape: reject on an ordered comparison
 // only, continue on unordered.
-//
 // ---------------------------------------------------------------------------
 // The return value is one byte
 //
@@ -96,7 +89,6 @@
 // EAX. Reading all thirty-two bits of a hooked original like this one is what
 // retired the sort key cache on its first comparison in every session; the
 // verification here compares AL.
-//
 // ---------------------------------------------------------------------------
 // Measured, before any of it reaches a client
 //
@@ -126,7 +118,6 @@
 // This is the function measured, not a frame. What share of a frame it is
 // depends on how often the collision family runs, which is what the A/B harness
 // answers.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

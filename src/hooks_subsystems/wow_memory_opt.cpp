@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: wow_memory_opt.cpp
-// Description: Installs and manages target intercepts for subsystem `wow_memory_opt.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #include "wow_memory_opt.h"
 #include "version.h"
 #include <mimalloc.h>

@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: frame_bench.cpp
 // Description: Frame-time distribution benchmark.
 // Safety & Threading: Main thread only (called from the present path).
 // ============================================================================

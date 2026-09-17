@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: nameplate_batch.cpp
-// ============================================================================
-
 #include "nameplate_batch.h"
 #include "lua_optimize.h"
 #include "version.h"
@@ -13,9 +9,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // Function Pointers for Detoured WoW Subsystems
-// ================================================================
 typedef void* (__cdecl *ClntObjMgrObjectPtr_fn)(uint64_t guid, int type);
 static ClntObjMgrObjectPtr_fn ClntObjMgrObjectPtr = (ClntObjMgrObjectPtr_fn)0x004D4DB0;
 
@@ -53,16 +47,12 @@ static constexpr int UNIT_FIELD_HEALTH = 18;
 static constexpr int UNIT_FIELD_MAXHEALTH = 26;
 
 
-// ================================================================
 // Constants
-// ================================================================
 static constexpr int QUEUE_SIZE = 4096;
 static constexpr int QUEUE_MASK = QUEUE_SIZE - 1;
 static constexpr int WORKER_THREAD_COUNT = 2;
 
-// ================================================================
 // Statistics (atomic counters)
-// ================================================================
 static volatile LONG g_tasksQueued = 0;
 static volatile LONG g_tasksProcessed = 0;
 static volatile LONG g_tasksDropped = 0;
@@ -110,18 +100,14 @@ static volatile LONG g_inputTail = 0;  // Producer index (main thread)
 static volatile LONG g_outputHead = 0; // Consumer index (main thread)
 static volatile LONG g_outputTail = 0; // Producer index (worker threads)
 
-// ================================================================
 // Worker Thread State
-// ================================================================
 static HANDLE g_workerThreads[WORKER_THREAD_COUNT] = {NULL};
 static volatile bool g_workerShutdown = false;
 static HANDLE g_workerEvent = NULL;
 static LARGE_INTEGER g_qpcFreq = {0};
 static bool g_initialized = false;
 
-// ================================================================
 // Memory Validation Helpers
-// ================================================================
 static bool IsReadable(uintptr_t addr) {
     if (addr == 0) return false;
     MEMORY_BASIC_INFORMATION mbi;
@@ -139,9 +125,7 @@ static bool IsExecutable(uintptr_t addr) {
                             PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
 }
 
-// ================================================================
 // Lock-Free Queue Operations
-// ================================================================
 
 struct SRWLockGuard {
     SRWLOCK* srw;
@@ -245,9 +229,7 @@ static bool DequeueNameplateResult(NameplateMT::NameplateResult* result) {
     return true;
 }
 
-// ================================================================
 // Nameplate Processing Functions (Worker Thread)
-// ================================================================
 
 // Process health update task
 static void ProcessHealthUpdate(const NameplateMT::NameplateTask* task, NameplateMT::NameplateResult* result) {
@@ -367,9 +349,7 @@ static void ProcessVisibilityUpdate(const NameplateMT::NameplateTask* task, Name
     }
 }
 
-// ================================================================
 // Worker Thread Procedure
-// ================================================================
 static DWORD WINAPI WorkerThreadProc(LPVOID threadIndex) {
     DWORD workerIndex = (DWORD)(uintptr_t)threadIndex;
     Log("[NameplateMT] Worker thread %d started (TID: %d)", workerIndex, GetCurrentThreadId());
@@ -420,9 +400,7 @@ static DWORD WINAPI WorkerThreadProc(LPVOID threadIndex) {
     return 0;
 }
 
-// ================================================================
 // Detoured Hook Functions
-// ================================================================
 static void SaveDistanceToCache(void* ecx, float distance) {
     uint32_t hash = ((uint32_t)(uintptr_t)ecx >> 4) & DISTANCE_CACHE_MASK;
     AcquireSRWLockExclusive(&g_distanceSRW);
@@ -561,9 +539,7 @@ void __fastcall Hooked_NameplateUpdate(void* ecx, void* edx, float dt) {
     }
 }
 
-// ================================================================
 // Public API Implementation
-// ================================================================
 namespace NameplateMT {
 
 bool Init() {

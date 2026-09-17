@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: hooks_memory.cpp
-// Description: Installs and manages target intercepts for subsystem `hooks_memory.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -185,9 +179,7 @@ static void Aligned64Free(void* ptr) {
 // to inject 64-byte alignment. For now, expose the allocator
 // as a utility. Wire into specific allocation sites via hot_patch.
 
-// ================================================================
 // Memory validation
-// ================================================================
 static bool IsReadable(uintptr_t addr) {
     if (addr == 0) return false;
     MEMORY_BASIC_INFORMATION mbi;
@@ -243,9 +235,7 @@ static bool IsReadable(uintptr_t addr) {
 // and the memset at startup committed every page of it. Sicsoo's sessions report
 // that half down to a 5 MB largest free block, twice, at BAD severity.
 
-// ================================================================
 // Public API
-// ================================================================
 #if !TEST_DISABLE_CRT_MIMALLOC
 typedef void* (__cdecl* malloc_t)(size_t);
 typedef void (__cdecl* free_t)(void*);

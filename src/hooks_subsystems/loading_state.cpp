@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: loading_state.cpp
 // Description: Native loading-screen / combat state detection.
 // Safety & Threading: Main thread only (FrameScript event dispatch).
 //

@@ -1,20 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: hooks_simd.h
-// Description: Installs and manages target intercepts for subsystem `hooks_simd.h`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 bool InstallSimdHooks(void);
 void ShutdownSimdHooks(void);
 

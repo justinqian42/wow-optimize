@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: high_tables.h
 // Description: Allocates a large lookup table outside this DLL's image, as
 //              high in the address space as Windows will place it.
 // Safety & Threading: Called from init, before the table is used.

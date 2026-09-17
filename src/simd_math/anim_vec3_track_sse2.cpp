@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: anim_vec3_track_sse2.cpp
 // Description: SSE2 rewrite of the M2 vector track evaluator.
-// Safety & Threading: Main thread, inside the per-model animation pass.
 // ============================================================================
-//
 // sub_82B0A0 evaluates one three-float animation track - the translation of a
 // bone, and the same routine is reused for every other vector-valued track. It
 // has eight call sites, six of them inside sub_82F0F0, which is the largest
@@ -14,7 +11,6 @@
 //
 // The work is three linear interpolations, done one component at a time on the
 // x87 stack, and up to two stages of them.
-//
 // ---------------------------------------------------------------------------
 // Where the client rounds, and where it does not
 //
@@ -49,7 +45,6 @@
 // The association is uniform across all three components - (b - a) * t + a - and
 // the two places the client writes `t * (b - a)` instead are the same value,
 // because IEEE multiplication is exactly commutative.
-//
 // ---------------------------------------------------------------------------
 // The argument the decompiler dropped, again
 //
@@ -63,7 +58,6 @@
 // arg_0 is the object the keyframe search needs in ECX, at both call sites.
 // Fourth time in this project that a register argument has been missing from a
 // prototype, and the second in this same family of functions.
-//
 // ---------------------------------------------------------------------------
 // The zero test is a comparison, not a threshold
 //
@@ -73,7 +67,6 @@
 // a NaN weight - enters as well. C's `!= 0.0f` answers identically for all four,
 // including NaN and negative zero, so the plain comparison is exact here and
 // needs no special case.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

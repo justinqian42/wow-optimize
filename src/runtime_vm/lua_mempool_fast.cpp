@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: lua_mempool_fast.cpp
 // Description: Starts the Lua pool's free-chunk search where it last succeeded.
 // Safety & Threading: Lua/main thread only, same as the function it replaces.
 // ============================================================================
-//
 // sub_855820 is the block allocator of a memory pool that is not part of stock
 // Lua: its own assert string is ".\src\lmemPool.cpp". It came second in a
 // CPU-bound tester profile at 4.29% of executing time, behind a per-frame

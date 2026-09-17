@@ -1,7 +1,5 @@
 // ============================================================================
-// Module: lua_getn_fast.cpp
 // Description: Accelerates table boundary search (the '#' operator) in Lua.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
 // ============================================================================
 
 #include "lua_getn_fast.h"

@@ -1,20 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_stack_fast.h
-// Description: Accelerates Lua runtime calls in `lua_stack_fast.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 // Inline replacements for trivially-inlinable Lua C-API push/query
 // functions. Each is verified against the stock 3.3.5a binary disassembly.
 //

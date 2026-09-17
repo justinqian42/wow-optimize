@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: rcu_obj_mgr.cpp
 // Description: Lock-Free Read-Copy-Update (RCU) Shadow Object Manager Cache
 // Safety & Threading: Frame-boundary snapshotting without list mutation hooks.
 // ============================================================================

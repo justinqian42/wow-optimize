@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_vm_engine.cpp
-// Description: Accelerates Lua runtime calls in `lua_vm_engine.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -78,16 +72,12 @@ enum OpCode {
     OP_CLOSURE,      OP_VARARG
 };
 
-// ================================================================
 // Statistics
-// ================================================================
 static LuaVMEngineStats g_stats = {};
 
 LuaVMEngineStats GetLuaVMEngineStats() { return g_stats; }
 
-// ================================================================
 // Inline Cache System
-// ================================================================
 static constexpr int IC_ENTRIES_PER_SITE = 4;
 static constexpr int IC_TOTAL_SITES = 8192;
 
@@ -157,9 +147,7 @@ void LuaVMEngine_FrameTick() {
     InterlockedIncrement(&g_icGeneration);
 }
 
-// ================================================================
 // Original function pointers & internal Lua APIs
-// ================================================================
 typedef int (__cdecl* luaV_execute_fn)(void* L, int nexeccalls);
 static luaV_execute_fn g_orig_luaV_execute = nullptr;
 
@@ -328,9 +316,7 @@ static inline void LuaC_Barrier(void* L, void* p, const TValue* v) {
     }
 }
 
-// ================================================================
 // Optimized gettable with inline cache
-// ================================================================
 static void* __fastcall FastGetTable(void* L, TValue* table, TValue* key, TValue* result) {
     ++g_stats.gettableFastPath;
     
@@ -422,18 +408,14 @@ static void* __fastcall FastSetTable(void* L, TValue* table, TValue* key, TValue
 
 
 
-// ================================================================
 // Thread-local VM execution state
-// ================================================================
 static constexpr int MAX_OPCODES_PER_SLICE = 100000;
 
 static __declspec(thread) void* t_currentL = nullptr;
 static __declspec(thread) int t_opcodesRemaining = 0;
 static __declspec(thread) bool t_inOptimizedExecution = false;
 
-// ================================================================
 // The Hooked Interpreter Core
-// ================================================================
 static inline bool IsTeardownState() {
     uintptr_t gL = *(uintptr_t*)0x00D3F78C;
     return (gL < 0x10000 || gL > 0xFFE00000);
@@ -1011,9 +993,7 @@ static int __cdecl Hooked_luaV_execute(void* L, int nexeccalls) {
 }
 #pragma warning(pop)
 
-// ================================================================
 // Install / Uninstall
-// ================================================================
 bool InstallLuaVMEngine()
 {
     g_inlineCache = (ICEntry*)HighTables::Reserve("lua_vm_engine", IC_BYTES);

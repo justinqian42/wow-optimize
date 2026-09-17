@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: mimalloc_high_arena.cpp
-//
 // A 32-bit client allocates from below 2GB. Everything it asks the OS for -
 // textures, model data, the Lua heap, the filename buffer it writes
 // SavedVariables with - has to come from there, and when the largest free run
@@ -22,7 +20,6 @@
 //
 // One VirtualAlloc with MEM_TOP_DOWN, one mi_manage_os_memory. No hooks, no
 // patches, nothing to go wrong at runtime.
-//
 // ---------------------------------------------------------------------------
 // Why it can be handed memory this project keeps
 //
@@ -32,7 +29,6 @@
 // is true. mimalloc will use the block and never release it, which is what a
 // reservation this module owns requires. Checked against mimalloc 3.3.2's
 // arena.c, os.c and types.h rather than assumed.
-//
 // ---------------------------------------------------------------------------
 // The guard that matters
 //

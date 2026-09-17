@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_toboolean_inline.cpp
-// Description: Accelerates Lua runtime calls in `lua_toboolean_inline.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "lua_toboolean_inline.h"
 #include <windows.h>
 #include <cstdint>

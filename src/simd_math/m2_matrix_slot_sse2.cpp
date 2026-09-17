@@ -18,7 +18,6 @@
 //
 // Thirty-two x87 instructions to move sixty-four bytes. Four movups loads and
 // four stores do the same thing.
-//
 // ---------------------------------------------------------------------------
 // Why this needs no precision measurement
 //
@@ -32,7 +31,6 @@
 // This is the same argument bone_matrix_upload_sse2 shipped on, and the same
 // shape: a pure-move block found by the fld/fstp scan inside a function the
 // profile had already named.
-//
 // ---------------------------------------------------------------------------
 // What the profile did and did not say
 //
@@ -47,7 +45,6 @@
 // They are off by default and an A/B subject for exactly that reason: the
 // harness says what they were worth, and if the answer is nothing then nothing
 // is what they cost to leave off.
-//
 // ---------------------------------------------------------------------------
 // The register contracts, read off the disassembly rather than assumed
 //
@@ -75,7 +72,6 @@
 //
 // Neither range is jumped into. Every cross-reference inside site A is ordinary
 // flow, and site B has exactly one, the jump to its first byte from 0x0082F7B1.
-//
 // ---------------------------------------------------------------------------
 // What is checked, and what is not
 //

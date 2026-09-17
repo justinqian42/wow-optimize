@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: frustum_aabb_sse2.cpp
 // Description: SSE2 rewrite of CFrustum::IsAABBVisible.
 // Safety & Threading: Main thread, inside world visibility traversal.
 // ============================================================================
-//
 // sub_9839E0 tests a box against six frustum planes. It is 0.82% of executing
 // time in a tester's uncapped session, reached from the world visibility
 // traversal, and it is forty-six instructions of which the arithmetic is the
@@ -22,7 +20,6 @@
 // Eighteen of those per call: a sign test, an indexed load, and a dependent load
 // through its result. The selection is a blend, and SSE2 does a blend with the
 // sign bits themselves as the mask - no branch, no table, no dependent load.
-//
 // ---------------------------------------------------------------------------
 // The association, and why it is safe to reproduce
 //
@@ -36,7 +33,6 @@
 // what a double lane carries, so each multiply and add rounds where the client's
 // does. Nothing is stored to float in between, and nothing here needs to be -
 // the value is compared, not kept.
-//
 // ---------------------------------------------------------------------------
 // The comparison passes NaN, and that is deliberate
 //
@@ -56,7 +52,6 @@
 // written here as a literal - the decompiler prints it as -0.019444443, and this
 // project has already been bitten once by a printed literal that differed from
 // the bytes on 29.6% of possible inputs.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

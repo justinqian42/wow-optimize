@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: quat_lerp_sse2.cpp
 // Description: SSE2 replacement for the M2 quaternion lerp + renormalise.
-// Safety & Threading: Main thread, same as the function it replaces.
 // ============================================================================
-//
 // sub_982630 is called once per animated bone per frame from the quaternion
 // track, and it is four independent lerps followed by a renormalise. The client
 // evaluates each component separately on the x87 stack:
@@ -19,7 +16,6 @@
 // a different schedule would be a different function.
 //
 // What changes is that the four components move together.
-//
 // ---------------------------------------------------------------------------
 // The precision question, which this project has got wrong before.
 //

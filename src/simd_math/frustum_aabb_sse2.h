@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: frustum_aabb_sse2.h
 // Description: SSE2 rewrite of CFrustum::IsAABBVisible.
 // Safety & Threading: Main thread, inside world visibility traversal.
 // ============================================================================

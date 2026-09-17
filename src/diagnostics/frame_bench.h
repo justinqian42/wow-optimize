@@ -1,7 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: frame_bench.h
 // Description: Frame-time distribution benchmark - the instrument that lets one
 //              build be compared against another.
 //

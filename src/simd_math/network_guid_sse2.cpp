@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: network_guid_sse2.cpp
 // Description: Vectorized and branchless network GUID parser hook (CDataStore::GetWowGUID at 0x0076DC20).
 // Safety & Threading: Thread-safe. Range checks must validate pointers up to 0xFFE00000 under LAA.
 // ============================================================================

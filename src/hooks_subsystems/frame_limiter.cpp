@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: frame_limiter.cpp
 // Description: Custom high-precision hybrid frame rate limiter.
 // Safety & Threading: Thread-safe. Integrates with the main render thread.
 // ============================================================================

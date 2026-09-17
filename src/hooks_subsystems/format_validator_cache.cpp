@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: format_validator_cache.cpp
-// ============================================================================
-
 #include "format_validator_cache.h"
 #include <windows.h>
 #include <MinHook.h>

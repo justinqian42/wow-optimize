@@ -1,7 +1,4 @@
-// ============================================================================
-// Module: combatlog_parser.cpp
 // Description: C-level combat log event parser and aggregator
-// ============================================================================
 
 #include "combatlog_parser.h"
 #include "version.h"

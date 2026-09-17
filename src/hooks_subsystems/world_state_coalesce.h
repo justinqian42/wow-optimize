@@ -1,7 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: world_state_coalesce.h
 // Description: Coalescing network/field updates to reduce redundant UI redraws.
 // Safety & Threading: Thread-safe, queues updates and flushes on main thread.
 // ============================================================================

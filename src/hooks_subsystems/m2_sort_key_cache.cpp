@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: m2_sort_key_cache.cpp
 // Description: Caches the sort key a render-batch comparator re-derives.
 // Safety & Threading: Main thread, inside the model render sort.
 // ============================================================================
-//
 // sub_824B70 is 2.44% of executing time in a tester's uncapped, CPU-bound
 // session - ninth in the profile, above every Lua entry. It is eighty-one
 // instructions and does no arithmetic worth the name. It is a comparator.
@@ -27,7 +25,6 @@
 //
 // So the derived descriptor is remembered per (object, submesh index) and the
 // key read straight out of it. Three of the five links go away.
-//
 // ---------------------------------------------------------------------------
 // What the comparator actually says
 //
@@ -39,7 +36,6 @@
 // all unsigned. Worth writing out because the disassembly expresses it as nested
 // `>=` tests with fallthrough, which reads as though the equal cases go
 // somewhere else, and they do not.
-//
 // ---------------------------------------------------------------------------
 // Staleness, which is the whole risk
 //
@@ -53,7 +49,6 @@
 // Within a single frame the material a submesh points at does not move - the
 // animation pass has finished before the render sort begins - so a hit inside
 // the generation is answering with data derived this frame.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

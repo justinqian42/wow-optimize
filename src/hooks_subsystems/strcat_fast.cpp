@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: strcat_fast.cpp
-// Description: SSE2 vectorized replacement for legacy CRT function `strcat_fast.cpp`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
 #include "strcat_fast.h"
 #include "version.h"
 #include "MinHook.h"

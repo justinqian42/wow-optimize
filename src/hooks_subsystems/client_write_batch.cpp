@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: client_write_batch.cpp
-//
 // A tester's loading screen: 16828 ms, of which 2470 ms - fifteen percent - was
 // inside the client's own file writes. 593,557 of them, for 5.6 MB. Nine bytes
 // a call.
@@ -13,7 +11,6 @@
 //
 // This gathers those writes and issues them in 64 KB pieces. The saving is the
 // syscall count: 593,557 becomes about ninety.
-//
 // ---------------------------------------------------------------------------
 // The part that has to be right
 //
@@ -45,7 +42,6 @@
 // opened for append, or seeked before writing, will not match - so a seek on the
 // handle flushes and stops the file being verified rather than reporting a
 // failure that is not one.
-//
 // ---------------------------------------------------------------------------
 // What changes for the client, said plainly
 //

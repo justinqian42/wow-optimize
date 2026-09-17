@@ -1,8 +1,6 @@
 #pragma once
 
 // ============================================================================
-// Module: strncmp_sse2.h
-//
 // SSE2 replacement for the CRT strncmp linked into the client at 0x004180A6,
 // measured at 1.55% of executing main-thread time. Sixteen bytes per compare,
 // with page-boundary-safe loads.

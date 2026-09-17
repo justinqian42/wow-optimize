@@ -1,18 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: d3d9_state_manager.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 bool InstallD3D9StateManager(void);
 void ShutdownD3D9StateManager(void);
 

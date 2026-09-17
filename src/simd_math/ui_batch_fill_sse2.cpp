@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: ui_batch_fill_sse2.cpp
-//
 // The per-vertex and per-index fill in the client's UI batch draw, sub_484B00.
 //
 // UI_BatchDraw is 2.3% of executing time in the corrected combat profile, and

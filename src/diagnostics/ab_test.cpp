@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: ab_test.cpp
-//
 // This project has around fifty optimizations and not one of them has a measured
 // frame-time gain. The README said so under a heading called "Still not claimed"
 // for two releases. The reason is not that nobody tried - it is that the only
@@ -15,7 +13,6 @@
 // single consumer of main-thread time in the profile - 9.06% of executing time
 // in an ElvUI session, first place by more than double - and in every tester log
 // collected so far it reads LayoutRelinkFast=0.
-//
 // ---------------------------------------------------------------------------
 // What removes the noise
 //
@@ -27,7 +24,6 @@
 //
 // This is the same shape as the learning-phase and predict-then-compare checks
 // used for correctness elsewhere in the project, pointed at performance instead.
-//
 // ---------------------------------------------------------------------------
 // The two things that would make it lie, and what is done about them
 //
@@ -48,7 +44,6 @@
 // percentile differences of 0.00 or 0.50 ms at three hundred frames a second.
 // Anything above 120 ms goes in one overflow bucket that is named rather than
 // folded into the last one.
-//
 // ---------------------------------------------------------------------------
 // What this cannot tell you
 //

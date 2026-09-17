@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: combatlog_optimize.cpp
-// ============================================================================
-
 #include "combatlog_optimize.h"
 #include "combatlog_incremental.h"
 #include "combatlog_buffer.h"

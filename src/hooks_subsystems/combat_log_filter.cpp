@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: combat_log_filter.cpp
 // Description: Drops COMBAT_LOG_EVENT_UNFILTERED by affiliation before it reaches
 //              Lua. Only reachable through the event coalescer.
 //

@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: aabb_overlap_sse2.cpp
 // Description: SSE2 replacement for the client's box-overlap predicate.
-// Safety & Threading: Main thread, same as the function it replaces.
 // ============================================================================
-//
 // sub_78F370 asks whether two axis-aligned boxes overlap. It is 39 instructions,
 // eight basic blocks, and seventeen functions call it - the scene-graph culling
 // walks (sub_7A50C0 and its five siblings at 0x7A5xxx), the visibility passes at
@@ -22,7 +19,6 @@
 // an integer register, and there are six of them; each of the six branches is
 // then decided by scene data, so a walk over a mixed set of nodes mispredicts on
 // most of them.
-//
 // ---------------------------------------------------------------------------
 // Why this one is bit-exact rather than close
 //
@@ -33,7 +29,6 @@
 // including every NaN. That is the one shape in this project needing no
 // tolerance, no error table and no harness. The same reasoning carries the
 // collision outcode replacement in this directory.
-//
 // ---------------------------------------------------------------------------
 // The predicate, read out of the disassembly rather than the decompiler
 //
@@ -60,7 +55,6 @@
 // _mm_cmpge_ps and _mm_cmple_ps are both ordered and both false on a NaN operand,
 // so the replacement rejects a NaN box exactly where the client does. Signed zero
 // compares equal under fcom and under cmpps alike.
-//
 // ---------------------------------------------------------------------------
 // Reading twenty-four bytes where the client sometimes reads twelve
 //
@@ -76,7 +70,6 @@
 // already fault in the client whenever two boxes overlap - and boxes overlap
 // constantly. A pointer this hook can crash on is one the client crashes on
 // first.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

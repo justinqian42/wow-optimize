@@ -1,9 +1,7 @@
 #pragma once
 
 // ============================================================================
-// Module: crt_free_hook.h
 // Description: Removes the discarded _msize call from WoW's CRT free wrapper.
-// Safety & Threading: Concurrent execution safe.
 // ============================================================================
 
 #include <cstdint>

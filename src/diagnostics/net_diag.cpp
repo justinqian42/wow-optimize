@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: net_diag.cpp
-//
 // Disconnects are the longest-standing complaint against this project and the
 // only one never explained. Reports arrive as "dropped after ten minutes", the
 // log around that moment shows nothing unusual, and that is the whole problem:

@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_rawgeti_inline.cpp
-// Description: Accelerates Lua runtime calls in `lua_rawgeti_inline.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -53,9 +47,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ----------------------------------------------------------------
 // Statistics (diagnostic only; plain increments)
-// ----------------------------------------------------------------
 // Whether the hook actually went in, so the report can tell a guard
 // that never fired from one that was never installed.
 static bool g_statsInstalled = false;
@@ -68,9 +60,7 @@ void ClearRawGetIInlineCache() {
     // Cache removed to prevent GC/reload invalidation hazards.
 }
 
-// ----------------------------------------------------------------
 // Original function pointer
-// ----------------------------------------------------------------
 typedef int (__cdecl *lua_rawgeti_fn)(int L, int idx, int n);
 static lua_rawgeti_fn g_orig_rawgeti = nullptr;
 // LUA_REGISTRYINDEX and LUA_GLOBALSINDEX. LUA_ENVIRONINDEX (-10001) is not here
@@ -105,9 +95,7 @@ static __declspec(naked) int* __cdecl ClientIndex2Adr(int /*idx*/, void* /*L*/) 
 }
 
 
-// ----------------------------------------------------------------
 // Optimized replacement — SAFE (no pointer caching)
-// ----------------------------------------------------------------
 #include "../allocators/loading_defrag.h"
 
 static __forceinline int RawGetICore(int L, int idx, int n)
@@ -275,9 +263,7 @@ static int __cdecl Optimized_RawGetI(int L, int idx, int n)
     return RawGetIGuarded(L, idx, n);
 }
 
-// ----------------------------------------------------------------
 // Install / Uninstall
-// ----------------------------------------------------------------
 bool InstallLuaRawGetIInline()
 {
     void* target = (void*)0x0084E670;

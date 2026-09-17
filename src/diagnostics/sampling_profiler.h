@@ -1,21 +1,6 @@
 #pragma once
 
-// ============================================================================
-// Module: sampling_profiler.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
-// ================================================================
 // Sampling Profiler — lightweight in-DLL EIP sampler
-// ================================================================
 // A background thread samples the main thread's EIP every ~1ms via
 // SuspendThread/GetThreadContext/ResumeThread, buckets each sample
 // by the nearest known function, and dumps the top-N hot functions

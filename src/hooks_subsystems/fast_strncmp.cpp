@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: fast_strncmp.cpp
 // Description: SSE2 case-insensitive string comparison helper (overriding _strnicmp at 0x0076E780).
 // Safety & Threading: Concurrent safe. Restricts SSE scans near page boundaries to prevent page faults.
 // ============================================================================

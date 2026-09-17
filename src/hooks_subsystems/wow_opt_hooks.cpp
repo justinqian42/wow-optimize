@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: wow_opt_hooks.cpp
-// Description: Installs and manages target intercepts for subsystem `wow_opt_hooks.cpp`.
-// Safety & Threading: Stack layouts and register conventions must match target function definitions exactly.
-// ============================================================================
-
 #include "wow_opt_hooks.h"
 #include "MinHook.h"
 #include "version.h"
@@ -78,10 +72,6 @@ static void __stdcall Hooked_ObjDestroy(void* obj) {
 // W3: sub_771870 - Error/assert handler (called on every error path)
 // In production builds, skip non-critical error formatting.
 // sub_771870 is __stdcall.
-// ================================================================
-
-
-// ================================================================
 // W4: sub_424B50 - File read dispatcher (21 callers, texture/model loads)
 // Cache last successful file read result to avoid re-reading same data.
 // ================================================================
@@ -149,9 +139,6 @@ static BlockCopy_fn orig_BlockCopy = nullptr;
 //
 // Deleted rather than fixed. The engine's own rule is better than any rule we
 // can reconstruct from outside it, and it is already running.
-// ================================================================
-
-// ================================================================
 // W8: sub_4B9DE0 - Async file read destroy (17 xrefs, 16 callers)
 // Fast-path null checks before expensive cleanup.
 // ================================================================
@@ -195,10 +182,6 @@ static volatile int g_w11LastName = 0;
 // ================================================================
 // W12: sub_47C240 - Memory allocator wrapper (called by SysMessage)
 // Batch small allocations to reduce allocator overhead.
-// ================================================================
-
-
-// ================================================================
 // W13: sub_47C0F0 - Buffer validity check (called before every buffer op)
 // Inline the common case: buffer is valid (non-null, flag set).
 // ================================================================
@@ -232,9 +215,6 @@ static volatile uintptr_t g_w14Keys[16] = {};
 // ================================================================
 // W15: sub_8799E0 - Sound channel deallocator (called by sub_4C6A40)
 // SKIPPED/DISABLED: This is a deallocator; skipping it causes channel leaks.
-// ================================================================
-
-// ================================================================
 // W16: sub_878610 - Sound mix/update (called every frame by sound system)
 // Skip mix update when no sounds are playing.
 // ================================================================
@@ -272,9 +252,6 @@ static volatile int g_w19LastTrack = 0;
 // DISABLED: 0x4C5990 is a camera/audio properties constructor with a signature of
 // BOOL __thiscall sub_4C5990(float *this), not an SFX priority calculator.
 // Hooking it as a cdecl function causes registers (ECX) to be clobbered.
-// ================================================================
-
-// ================================================================
 // Installation / Shutdown / Stats
 // ================================================================
 namespace WowOptHooks {

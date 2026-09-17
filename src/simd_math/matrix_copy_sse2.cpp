@@ -1,7 +1,3 @@
-// ============================================================================
-// Module: matrix_copy_sse2.cpp
-// ============================================================================
-
 #include <windows.h>
 #include <MinHook.h>
 #include <cstdint>
@@ -1289,9 +1285,7 @@ static float* __fastcall Hooked_MatTranslateLocal(float* self, void* edx, float*
 }
 #endif
 
-// ================================================================
 // Install hooks
-// ================================================================
 bool InstallMatrixCopySSE2() {
     g_abSubject = AbTest::IsSubject("M2MatrixSimd", &g_abSubject);
     if (g_abSubject) {
@@ -1509,9 +1503,7 @@ bool InstallMatrixCopySSE2() {
 #endif
 }
 
-// ================================================================
 // Statistics
-// ================================================================
 //
 // Fifteen counters, printed only from ShutdownMatrixCopySSE2 until now, which
 // nothing calls - the DLL leaves through TerminateProcess and the linker had
@@ -1583,9 +1575,7 @@ void MatrixCopySSE2_LogStats(void) {
 #endif
 }
 
-// ================================================================
 // Cleanup
-// ================================================================
 void ShutdownMatrixCopySSE2() {
     MH_DisableHook((void*)0x00407F80);
     MH_DisableHook((void*)0x00407F40);

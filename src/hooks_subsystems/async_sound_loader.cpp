@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: async_sound_loader.cpp
 // Description: Preloads and caches FMOD sound files in memory to bypass disk I/O.
 //              Uses a safe background task queue and worker thread to prevent thread leaks.
 // Safety & Threading: Thread-safe cache and queue using mutex protection.

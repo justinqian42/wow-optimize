@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_vm_cache.cpp
-// Description: Accelerates Lua runtime calls in `lua_vm_cache.cpp`. Caches structures to bypass parser overhead.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "version.h"
 #include "lua_optimize.h"
 #include "frame_limiter.h"

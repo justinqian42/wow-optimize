@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: strtod_fast.cpp
-// Description: SSE2 vectorized replacement for legacy CRT function `strtod_fast.cpp`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
 #include "strtod_fast.h"
 #include <windows.h>
 #include <cstdint>

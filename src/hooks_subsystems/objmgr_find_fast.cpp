@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: objmgr_find_fast.cpp
 // Description: Hoists the loop invariant out of Storm's templated hash find.
 // Safety & Threading: Same thread as the functions it replaces (main).
 // ============================================================================
-//
 // This started as one function and turned out to be eleven.
 //
 // sub_4D4BB0 - the object manager's find-by-GUID, 2.22% of executing time in a

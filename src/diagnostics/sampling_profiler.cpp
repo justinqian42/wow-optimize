@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: sampling_profiler.cpp
 // Description: Samples thread contexts periodically to trace hot execution execution paths.
 // Safety & Threading: Dedicated profiler thread.
 // ============================================================================

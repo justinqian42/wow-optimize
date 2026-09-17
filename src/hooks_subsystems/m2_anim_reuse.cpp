@@ -4,7 +4,6 @@
 // Skips the bone loop in sub_82F0F0 when the model is being asked for an
 // animation state it was already asked for, and the bone array it produced is
 // still sitting there from last time.
-//
 // ---------------------------------------------------------------------------
 // The number this exists for
 //
@@ -22,7 +21,6 @@
 // The census called that a ceiling rather than a promise, because a matching
 // argument tuple is evidence the bones match and not proof, and said what
 // proving it needs: the bone array compared. That is what this does.
-//
 // ---------------------------------------------------------------------------
 // Why this is not the stride again
 //
@@ -38,7 +36,6 @@
 // rule that claim is checkable, which is what the whole verification below is.
 //
 // The two cannot both be installed; they overwrite the same five bytes.
-//
 // ---------------------------------------------------------------------------
 // The cut, which the client already has
 //
@@ -80,7 +77,6 @@
 // A source check is not enough on its own, so the thunk also reads the x87 TOP
 // field either side of the call and refuses to hold when it moved. That turns a
 // future edit from silently wrong geometry into a counted refusal.
-//
 // ---------------------------------------------------------------------------
 // What the loop writes, and the models that must never be held
 //
@@ -106,7 +102,6 @@
 // something besides the work being skipped. It is the reason the rule in
 // CLAUDE.md exists, and the reason the hash covers the entire record rather
 // than just the matrices.
-//
 // ---------------------------------------------------------------------------
 // Proving a repeat really is a repeat, from one patch site
 //

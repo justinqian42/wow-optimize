@@ -1,19 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lua_internals.h
-// Description: Accelerates Lua runtime calls in `lua_internals.h`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
-
-
-
-
-
-
-
-
 #ifndef LUA_INTERNALS_H
 #define LUA_INTERNALS_H
 

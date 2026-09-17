@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: lua_optimize.cpp
 // Description: Lua garbage collection optimizer. Monitors and paces Lua GC cycles within the rendering loop to prevent garbage collection stalls.
 // Safety & Threading: Main render thread only. Disabling pacing will cause heap growth until memory is exhausted.
 // ============================================================================
@@ -296,10 +295,8 @@ static lua_State* ReadLuaState() {
     }
 }
 
-// ================================================================
 //  Lua Allocator Replacement - mimalloc for Lua VM
 //
-// ================================================================
 
 typedef void* (__cdecl *lua_Alloc_fn)(void* ud, void* ptr, size_t osize, size_t nsize);
 
@@ -631,7 +628,6 @@ static bool PreSizeStringTable(lua_State* L) {
 
 // ================================================================
 //  GC Optimization - 4-tier adaptive stepping
-//
 // ================================================================
 static bool OptimizeGC(lua_State* L) {
     if (!Api.lua_gc) return false;
@@ -1071,7 +1067,6 @@ static void TryTrimForLoadingScreen(lua_State* L) {
 
 // ================================================================
 //  Addon State Reader - reads globals set by !LuaBoost addon
-//
 // ================================================================
 static void ReadAddonStateFromLua(lua_State* L) {
     if (!Api.lua_getfield || !Api.lua_toboolean || !Api.lua_settop || !Api.lua_gettop) return;

@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: lua_hget_dispatch.cpp
 // Description: Removes luaH_get's x87 round-trip on integer table keys.
 // Safety & Threading: Lua thread; the function is a read-only lookup.
 // ============================================================================
-//
 // sub_85C470 is luaH_get, the generic table lookup, at 0.67% of executing time
 // in a tester's uncapped session. It does almost no work itself - it reads the
 // key's type tag and hands off to the string lookup, the integer lookup, or the
@@ -24,7 +22,6 @@
 // "is this key an integer". The first pair is not even a conversion - it stores
 // the value to a stack slot and reloads it unchanged. SSE2 does the whole thing
 // in registers: cvtsd2si, cvtsi2sd, ucomisd, and the flags are already set.
-//
 // ---------------------------------------------------------------------------
 // The conversion rounds, it does not truncate
 //
@@ -44,7 +41,6 @@
 //
 // `_mm_cvtsd_si32` is used anyway, because it rounds the way the instruction it
 // replaces rounds. Matching the mechanism costs nothing and removes the question.
-//
 // ---------------------------------------------------------------------------
 // What is not reimplemented
 //
@@ -53,7 +49,6 @@
 // its own path - it reaches sub_85BCB0 through registers rather than the stack,
 // and copying a __usercall boundary to save a branch on the rare path would be
 // trading a real risk for nothing.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

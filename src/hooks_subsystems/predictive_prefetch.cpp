@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: predictive_prefetch.cpp
 // Description: Predicts player movement trajectory and pre-caches terrain (ADT)
 //              files on a background thread using private Storm archive handles.
 // Safety & Threading: Thread-safe. Uses separate archive handles to avoid races.

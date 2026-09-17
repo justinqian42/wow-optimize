@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_precall_cache.cpp
-// Description: Accelerates Lua runtime calls in `lua_precall_cache.cpp`. Caches structures to bypass parser overhead.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include <windows.h>
 #include <intrin.h>
 #include <cstdint>

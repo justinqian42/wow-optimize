@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: strncmp_null_guard.cpp
-// Description: SSE2 vectorized replacement for legacy CRT function `strncmp_null_guard.cpp`.
-// Safety & Threading: Concurrent execution safe. Ensure page boundary alignment checks are active.
-// ============================================================================
-
 #include <windows.h>
 #include <cstdint>
 #include "MinHook.h"

@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: anim_lod.cpp
 // Description: Spreads M2 model animation across frames when the scene is crowded.
 // Safety & Threading: Main thread, alongside the render loop.
 // ============================================================================
-//
 // Animating models is the largest single block of frame time this client spends,
 // and it is the one place where no amount of instruction-level work can reach it.
 // Measured on txtsd's sessions with a fixed census:
@@ -16,7 +14,6 @@
 // AnimateModel 0.30, Interp 0.27. The cost is spread so thin that vectorising any
 // one of them buys about two tenths of a percent. The only way to reach it is to
 // do less of it.
-//
 // ---------------------------------------------------------------------------
 // Why skipping a call is safe, which was the open question
 //
@@ -30,7 +27,6 @@
 // time, never accumulated, so a call that does not happen delays when a pose
 // refreshes and cannot make an animation drift, stall or run at the wrong rate.
 // The next call lands on the correct pose for the current time.
-//
 // ---------------------------------------------------------------------------
 // What a skip has to look like
 //
@@ -47,7 +43,6 @@
 // on the stack and it ends in `retn 14h`, so the callee cleans them. IDA reports
 // it as __cdecl with five arguments and misses the object entirely, which is why
 // its callers appear to pass inconsistent first arguments.
-//
 // ---------------------------------------------------------------------------
 // The policy, and why it is not distance
 //
@@ -68,7 +63,6 @@
 // A model is never skipped the first time it is seen. Its bone matrices are
 // whatever the allocation happened to contain until the first evaluation writes
 // them, and rendering that is not a stutter, it is garbage.
-//
 // ---------------------------------------------------------------------------
 // The table is keyed by a pointer the engine can free and reuse
 //

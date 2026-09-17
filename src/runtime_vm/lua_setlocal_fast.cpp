@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: lua_setlocal_fast.cpp
 // Description: lua_setlocal fast path - PERMANENTLY DISABLED
 // Safety & Threading: N/A - feature disabled due to unknown target address
 // ============================================================================

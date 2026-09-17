@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_objlen_inline.cpp
-// Description: Accelerates Lua runtime calls in `lua_objlen_inline.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "lua_objlen_inline.h"
 #include <windows.h>
 #include <cstdint>

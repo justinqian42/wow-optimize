@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: adaptive_farclip.cpp
 // Description: Hosts the CVar::Register detour. It no longer scales anything -
 //              draw distance is the quality governor's now.
 //

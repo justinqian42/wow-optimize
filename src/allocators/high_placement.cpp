@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: high_placement.cpp
-//
 // Who holds the address space, and moving the large reservations above 2GB.
 //
 // Every out-of-memory report from this client ends the same way: the process

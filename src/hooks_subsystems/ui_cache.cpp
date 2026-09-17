@@ -1,15 +1,9 @@
-// ============================================================================
-// Module: ui_cache.cpp
-// ============================================================================
-
 #include "ui_cache.h"
 #include <windows.h>
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // UICache namespace - stub implementation (disabled).
-// ================================================================
 namespace UICache {
 
 static bool g_active = false;

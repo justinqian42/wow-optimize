@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: segment_aabb_sse2.cpp
 // Description: Replaces the segment/box test's x87 status-word round-trips.
 // Safety & Threading: Main thread; the function is pure.
 // ============================================================================
-//
 // sub_7F9480 tests a line segment against an axis-aligned box. It is 0.88% of
 // executing time in a tester's uncapped session, and the profile's weight sits
 // at 0x7F94FD - which is not arithmetic:
@@ -20,7 +18,6 @@
 // function. SSE2 has no status word in the path at all - comiss puts the answer
 // straight into EFLAGS - so what is being removed here is a mechanism, not a
 // calculation. The same shape of finding as the Lua pool's chunk walk.
-//
 // ---------------------------------------------------------------------------
 // Two tests decide by bits, and ten decide about NaN
 //
@@ -47,7 +44,6 @@
 // is not reproduced and the comparison is. This is the third time in this
 // project that an x87 value has been used at full width after being stored
 // narrower, and it is the detail that makes a naive rewrite wrong.
-//
 // ---------------------------------------------------------------------------
 // Why double, and why that is enough
 //
@@ -56,7 +52,6 @@
 // written in double - provided the roundings to float happen where the client
 // puts them, which is on the delta array and on the parameter array, and
 // nowhere else.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

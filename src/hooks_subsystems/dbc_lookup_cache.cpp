@@ -1,7 +1,5 @@
 // ============================================================================
-// Module: dbc_lookup_cache.cpp
 // Description: Fast O(1) transformed row cache for DBC database queries.
-// Safety & Threading: Thread-safe, executes on main/render threads.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN

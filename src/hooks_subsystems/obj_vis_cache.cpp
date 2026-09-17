@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: obj_vis_cache.cpp
 // Description: Cache lookup for Client Object Manager queries to optimize
 //              GUID-to-Object lookups.
 // Safety & Threading: Thread-safe pool of TLB slots. Invalidated on unlink.

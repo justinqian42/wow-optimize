@@ -1,9 +1,7 @@
 // ============================================================================
-// Module: lua_pool_fast.cpp
 // Description: Removes the linear chunk scan from every Lua pool free.
 // Safety & Threading: Runs wherever the client frees Lua memory.
 // ============================================================================
-//
 // WoW does not use stock Lua's allocator. It has its own pool, and the pool
 // names itself in an assert: ".\src\lmemPool.cpp". sub_8558E0 picks one of nine
 // size classes and hands the block to sub_855670, which has to work out which
@@ -26,7 +24,6 @@
 // earlier measurement of this pool put it at 972 chunks and 16 million calls in
 // thirty minutes, and this is the second freeze sample from a tester to land on
 // the `jb found` at 0x85569F.
-//
 // ---------------------------------------------------------------------------
 // Why a cache beats the scan by more than it looks
 //
@@ -37,7 +34,6 @@
 // already in registers beat a hundred chunks reached through pointers, and the
 // garbage collector frees a chunk's objects together, so the same few chunks
 // answer call after call.
-//
 // ---------------------------------------------------------------------------
 // A torn entry cannot corrupt the heap
 //
@@ -57,7 +53,6 @@
 // client answers "not mine" when a block is handed to the wrong class's pool,
 // and the caller then routes it to the CRT instead. Matching across pools would
 // quietly change that.
-//
 // ---------------------------------------------------------------------------
 // Verification
 //

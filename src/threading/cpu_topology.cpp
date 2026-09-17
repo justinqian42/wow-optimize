@@ -1,10 +1,8 @@
 // ============================================================================
-// Module: cpu_topology.cpp
 // Description: Core-class topology, main-thread residency, performance pinning.
 // Safety & Threading: Init and PinMainThread on the init thread; NoteFrame on
 //              the main thread only. Nothing here touches client structures.
 // ============================================================================
-//
 // The problem this exists for did not exist when this client shipped.
 //
 // Intel's hybrid parts (Alder Lake, 2021 onward) mix performance cores and

@@ -1,9 +1,3 @@
-// ============================================================================
-// Module: lua_internals.cpp
-// Description: Accelerates Lua runtime calls in `lua_internals.cpp`.
-// Safety & Threading: Thread-safe under Lua VM execution constraints.
-// ============================================================================
-
 #include "lua_internals.h"
 #include <cstdint>
 #include <cstring>
@@ -12,9 +6,7 @@
 
 extern "C" void Log(const char* fmt, ...);
 
-// ================================================================
 // LuaInternals namespace - stub implementation (disabled).
-// ================================================================
 namespace LuaInternals {
 
 bool Init() {

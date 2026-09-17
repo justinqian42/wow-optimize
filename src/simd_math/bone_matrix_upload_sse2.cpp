@@ -1,6 +1,4 @@
 // ============================================================================
-// Module: bone_matrix_upload_sse2.cpp
-//
 // The largest unclaimed entry in the corrected main-thread profile. The sample
 // address is 0x00829D29, which func_profile puts inside sub_829BA0 at 3.35% of
 // executing time - ahead of every M2 animation function already replaced here
@@ -19,7 +17,6 @@
 // dropped: its first three columns written as three consecutive vec4s, the 3x4
 // bone matrix a skinning shader wants. Twenty-four memory operations to move
 // forty-eight bytes.
-//
 // ---------------------------------------------------------------------------
 // There are two of them
 //
@@ -40,7 +37,6 @@
 // that is exactly the shape that vectorises with no precision question to
 // answer. Of the twenty-one, matrix_copy_sse2.cpp already covers the three with
 // the most callers.
-//
 // ---------------------------------------------------------------------------
 // Why this one needs no precision harness
 //
@@ -56,7 +52,6 @@
 // is what the learning phase checks: for the first bones the transpose is done
 // both ways into two buffers and compared byte for byte, and one disagreement
 // hands back the client's answer for every bone after it.
-//
 // ---------------------------------------------------------------------------
 // Why this is a patch and not a hook
 //

@@ -4,7 +4,6 @@
 //              address space instead of in its own image.
 // Safety & Threading: Called from init, before the tables are used.
 // ============================================================================
-//
 // A 32-bit client with the large-address-aware flag gets three gigabytes, and
 // the two halves are not interchangeable. The client's own allocator works out
 // of the low two, and that is the half which has run out on tester machines:

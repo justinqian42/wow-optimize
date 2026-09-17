@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: crash_dumper.cpp
 // Description: Monitors game exception handlers and outputs minidump diagnostic logs on crash.
 // Safety & Threading: Safe across all threads. Do not allocate heap memory inside exception callbacks.
 // ============================================================================
@@ -29,9 +28,7 @@ static LPTOP_LEVEL_EXCEPTION_FILTER s_prevFilter = nullptr;
 // One-shot: only dump the first crash
 static volatile LONG s_dumped = 0;
 
-// ================================================================
 // Feature Registry - tracks all active optimizations
-// ================================================================
 static FeatureState s_features[MAX_TRACKED_FEATURES] = {};
 static volatile LONG s_featureCount = 0;
 static SRWLOCK s_featureLock = SRWLOCK_INIT;
@@ -82,9 +79,7 @@ static void WriteHookTrace(HANDLE hFile);
 static void WriteEventTrace(HANDLE hFile);
 static void WriteMemoryInfo(HANDLE hFile);
 
-// ================================================================
 // Exception code → human-readable name
-// ================================================================
 static const char* ExceptionName(DWORD code) {
     switch (code) {
     case EXCEPTION_ACCESS_VIOLATION:        return "ACCESS_VIOLATION";
@@ -111,9 +106,7 @@ static const char* ExceptionName(DWORD code) {
     }
 }
 
-// ================================================================
 // EBP-chain stack walk (user-mode, no dbghelp)
-// ================================================================
 static void WriteStackWalk(HANDLE hFile, CONTEXT* ctx) {
     char buf[128];
     DWORD written;
@@ -159,9 +152,7 @@ static void WriteStackWalk(HANDLE hFile, CONTEXT* ctx) {
     }
 }
 
-// ================================================================
 // Raw ESP stack scan (user-mode, no dbghelp)
-// ================================================================
 static void WriteRawStackScan(HANDLE hFile, CONTEXT* ctx) {
     char buf[256];
     DWORD written;
@@ -208,9 +199,7 @@ static void WriteRawStackScan(HANDLE hFile, CONTEXT* ctx) {
     }
 }
 
-// ================================================================
 // Instructions at EIP (user-mode, no dbghelp)
-// ================================================================
 static void WriteInstructions(HANDLE hFile, CONTEXT* ctx) {
     char buf[128];
     DWORD written;
@@ -238,9 +227,7 @@ static void WriteInstructions(HANDLE hFile, CONTEXT* ctx) {
     }
 }
 
-// ================================================================
 // Loaded module enumeration (user-mode, no dbghelp)
-// ================================================================
 static void WriteModuleMap(HANDLE hFile) {
     char buf[256];
     DWORD written;
@@ -264,9 +251,7 @@ static void WriteModuleMap(HANDLE hFile) {
     CloseHandle(hSnap);
 }
 
-// ================================================================
 // Register dump
-// ================================================================
 static void WriteRegisters(HANDLE hFile, CONTEXT* ctx) {
     char buf[512];
     DWORD written;
@@ -336,9 +321,7 @@ static void WriteTextReport(EXCEPTION_POINTERS* ep) {
         code, ExceptionName(code), addr, filename);
 }
 
-// ================================================================
 // Windows minidump (no ScanMemory to avoid loader-lock slowness)
-// ================================================================
 // MiniDumpWriteDump is resolved from the copy of dbghelp.dll in System32, never
 // from whatever sits next to Wow.exe.
 //
@@ -416,9 +399,7 @@ static void WriteMinidump(EXCEPTION_POINTERS* ep) {
         code, ExceptionName(code), addr, filename);
 }
 
-// ================================================================
 // Write Feature States to crash report
-// ================================================================
 static void WriteFeatureStates(HANDLE hFile) {
     char buf[512];
     DWORD written;
@@ -457,9 +438,7 @@ static void WriteFeatureStates(HANDLE hFile) {
     }
 }
 
-// ================================================================
 // Write Hook Call Trace to crash report
-// ================================================================
 static void WriteHookTrace(HANDLE hFile) {
     char buf[256];
     DWORD written;
@@ -517,9 +496,7 @@ static void WriteEventTrace(HANDLE hFile) {
     }
 }
 
-// ================================================================
 // Write Process Memory Info to crash report
-// ================================================================
 static void WriteMemoryInfo(HANDLE hFile) {
     char buf[512];
     DWORD written;
@@ -724,9 +701,7 @@ static BOOL WINAPI Hooked_TerminateProcess(HANDLE hProcess, UINT uExitCode) {
     return orig_TerminateProcess(hProcess, uExitCode);
 }
 
-// ================================================================
 // ExitProcess Hook (fallback for any abnormal exit)
-// ================================================================
 typedef void (WINAPI *ExitProcess_fn)(UINT uExitCode);
 static ExitProcess_fn orig_ExitProcess = nullptr;
 
@@ -754,9 +729,7 @@ static void WINAPI Hooked_ExitProcess(UINT uExitCode) {
 // Forward declaration
 static LONG WINAPI WowOpt_UnhandledExceptionFilter(EXCEPTION_POINTERS* ep);
 
-// ================================================================
 // SetUnhandledExceptionFilter Hook (prevents overriding our handler)
-// ================================================================
 typedef LPTOP_LEVEL_EXCEPTION_FILTER (WINAPI *SetUnhandledExceptionFilter_fn)(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter);
 static SetUnhandledExceptionFilter_fn orig_SetUnhandledExceptionFilter = nullptr;
 
@@ -775,9 +748,7 @@ static LPTOP_LEVEL_EXCEPTION_FILTER WINAPI Hooked_SetUnhandledExceptionFilter(LP
     return old;
 }
 
-// ================================================================
 // Top-level unhandled exception filter
-// ================================================================
 // For an access violation the exception record carries the two facts that actually
 // identify the bug: whether the faulting instruction was reading or writing, and
 // which address it touched. Only the instruction pointer was ever logged, so a
@@ -1092,9 +1063,7 @@ static LONG WINAPI WowOpt_UnhandledExceptionFilter(EXCEPTION_POINTERS* ep) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-// ================================================================
 // Public API
-// ================================================================
 namespace CrashDumper {
 
 bool Init() {

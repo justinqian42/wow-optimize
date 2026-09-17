@@ -1,18 +1,5 @@
 #pragma once
 
-// ============================================================================
-// Module: lock_tuning.h
-// ============================================================================
-
-
-
-
-
-
-
-
-
-
 // Reduces lock-contention stalls by giving WoW's critical sections a userspace
 // spin count. WoW's static MSVC CRT created its locks (heap, stdio, errno, ...)
 // with InitializeCriticalSection -- spin count 0 -- so every contended acquisition

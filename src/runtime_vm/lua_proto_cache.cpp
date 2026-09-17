@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: lua_proto_cache.cpp
 // Description: Skips luaY_parser for source the client has already compiled.
-// Safety & Threading: Main thread only, alongside the Lua state.
 // ============================================================================
-//
 // The compile census answered this one with a number. Over txtsd's sessions:
 //
 //     43129 chunks compiled (447262 KB) - 38037 of them (88%) were source
@@ -15,7 +12,6 @@
 // the sampling profiler puts the Lua code generator (sub_862390, the ten
 // instructions that write an emitted opcode into fs->f->code) at 4.94% of
 // executing main-thread time.
-//
 // ---------------------------------------------------------------------------
 // Why the obvious route does not work here
 //
@@ -25,7 +21,6 @@
 // WoW's f_parser (0x00856190) has no lookahead and no undump call at all - it
 // goes straight to luaY_parser. Bytecode loading is gone from the client, so a
 // dumped chunk has nothing to load it.
-//
 // ---------------------------------------------------------------------------
 // What this does instead: keep the Proto, let the client build the closure
 //
@@ -53,7 +48,6 @@
 // Two closures over one Proto is what the client itself produces whenever the
 // same function is created twice at runtime. Sharing the compiled code shares
 // no ownership, no environment and no taint.
-//
 // ---------------------------------------------------------------------------
 // What the parser does besides parse, since skipping a call has gone wrong here
 // before
@@ -67,7 +61,6 @@
 //   - It can raise a syntax error. A hit is source that compiled cleanly once,
 //     so there is no error to raise.
 //   - It allocates, which is the point of not running it.
-//
 // ---------------------------------------------------------------------------
 // Keeping the Proto alive
 //
@@ -80,7 +73,6 @@
 // The anchoring happens in a second hook on luaL_loadbuffer, one level out,
 // where the closure is on the stack and we are at an API boundary rather than
 // halfway through a parse.
-//
 // ---------------------------------------------------------------------------
 // Identity
 //

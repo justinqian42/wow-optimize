@@ -1,10 +1,8 @@
 // ============================================================================
-// Module: object_unlink_safety.cpp
 // Description: SEH guard for the generic intrusive-list unlink helper sub_5C6800.
 // Safety & Threading: main-thread only (object manager reaping); on a fault it
 //              finishes the unlink from the object's own side only.
 // ============================================================================
-//
 // sub_5C6800 is __thiscall(this), no other args, returns this+4. It unlinks
 // `this` from up to two intrusive doubly-linked lists it may be a member of:
 //   block 1: this[3]/this[4]  (this+0xC / this+0x10)

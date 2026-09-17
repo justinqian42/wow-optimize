@@ -1,5 +1,4 @@
 // ============================================================================
-// Module: lua_index2adr.cpp
 // Description: Out-of-line definition for WowIndex2Adr to prevent MSVC
 //              calling convention promotions (Whole Program Optimization).
 // Safety & Threading: Thread-safe.

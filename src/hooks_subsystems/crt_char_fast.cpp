@@ -1,7 +1,5 @@
 // ============================================================================
-// Module: crt_char_fast.cpp
 // Description: SSE2 vectorized replacement for legacy CRT character/string functions.
-// Safety & Threading: Concurrent execution safe.
 // ============================================================================
 
 #include "crt_char_fast.h"

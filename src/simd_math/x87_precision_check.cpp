@@ -4,7 +4,6 @@
 //              replacement in this project assumes.
 // Safety & Threading: Reads two registers. Called from init and the frame path.
 // ============================================================================
-//
 // Eight modules here replace client x87 code with SSE2 and argue bit-exactness
 // from one sentence: "the x87 control word is left at 53-bit precision, which
 // is exactly what a double lane carries." anim_quat_unpack, anim_vec3_track,

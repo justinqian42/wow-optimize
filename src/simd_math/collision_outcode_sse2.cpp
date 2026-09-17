@@ -1,9 +1,6 @@
 // ============================================================================
-// Module: collision_outcode_sse2.cpp
 // Description: SSE2 AABB outcode classification for the collision reject pass.
-// Safety & Threading: Main thread, same as the function it replaces.
 // ============================================================================
-//
 // sub_7C7230 is 3.8% of executing main-thread time in a corrected tester profile,
 // the largest single client function left after the animation path. It takes a
 // collision model and a query box, classifies every vertex against the box as a
@@ -15,7 +12,6 @@
 // box bounds pinned on the x87 stack for the whole loop. That is what a shape
 // scan reads as dense floating-point maths - there is no arithmetic in it at all,
 // only comparisons.
-//
 // ---------------------------------------------------------------------------
 // Why this one and not its sibling
 //
@@ -31,7 +27,6 @@
 // is exact and order-preserving, so an ordered packed-single compare of the same
 // two floats gives the same answer as fcom on the widened pair, for every input
 // including every NaN. Bit-exact, with nothing to measure.
-//
 // ---------------------------------------------------------------------------
 // The outcode, read out of the disassembly rather than the decompiler
 //
@@ -50,7 +45,6 @@
 //
 // So b[0..2] is the minimum corner and b[3..5] the maximum, and a triangle is
 // rejected when its three codes share a bit: entirely outside one plane.
-//
 // ---------------------------------------------------------------------------
 // Verifying a function that mutates globals
 //
