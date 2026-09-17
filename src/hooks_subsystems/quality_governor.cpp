@@ -66,13 +66,10 @@ static Setting g_set[M_COUNT] = {
     { "farclip",          true,  nullptr, 0.0, 0.0, false },
 };
 
-// A setting with an existing owner is left alone.
-//
-// Nothing else writes these three any more. DynamicShadowScaler was removed,
-// AdaptiveFarclip and ParticleDensityScaler have been reduced to the CVar
-// bookkeeping they also did, so there is one controller per setting rather than
-// two with different opinions. The table stays because that guarantee is worth
-// checking rather than assuming, and startup logs what it took charge of.
+// A setting with an existing owner is left alone: one controller per setting,
+// never two with different opinions. Nothing else writes these three today, and
+// the table stays so that stays checked rather than assumed. Startup logs what
+// it took charge of.
 static bool g_managed[M_COUNT] = { false, true, false };
 
 static void DecideOwnership() {

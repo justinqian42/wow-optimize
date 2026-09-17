@@ -24,11 +24,10 @@
 // attribute, and exactly the kind of report that arrives as "the screen flickers
 // occasionally after changing a graphics setting".
 //
-// So two changes over the previous version. The D43024 test now matches what the
-// original actually dereferences - the original only indexes it when D43020 is
-// set - instead of demanding it unconditionally. And every suppression is
-// counted and attributed, because until now this could fire on every draw call
-// in the game and nothing anywhere would have said so.
+// So the D43024 test matches what the original actually dereferences: it only
+// indexes that when D43020 is set. And every suppression is counted and
+// attributed, because otherwise this can fire on every draw call in the game
+// with nothing anywhere saying so.
 //
 // The IsDeviceReady check is left as it was. sub_873060 never touches the D3D9
 // device pointer itself, so on the face of it that check guards something this

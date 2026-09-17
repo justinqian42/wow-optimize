@@ -29,11 +29,10 @@
 // large animation fills the screen at any range, so it stepped visibly on the
 // lava in Ironforge.
 //
-// Distance is a guess about whether anyone would notice a stale pose. This does
-// not guess. It holds a pose only when the inputs that produced it are
-// identical, so the pose is not stale - it is the pose the loop would have
-// recomputed. There is no visual difference to notice, and unlike a distance
-// rule that claim is checkable, which is what the whole verification below is.
+// Distance is a guess about whether anyone would notice a stale pose. This holds
+// a pose only when the inputs that produced it are identical, so the pose is the
+// one the loop would have recomputed. That claim is checkable, which is what the
+// verification below does.
 //
 // The two cannot both be installed; they overwrite the same five bytes.
 // ---------------------------------------------------------------------------

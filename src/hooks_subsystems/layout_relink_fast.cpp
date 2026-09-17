@@ -71,13 +71,9 @@
 // reorders the list on every call, so any key it maintained would be invalidated
 // by the next relink - including its own.
 //
-// A second reason used to stand here and it was wrong, which is worth keeping
-// rather than quietly deleting. It said an anchor cannot name the node that owns
-// it, so even a single unique match could not be identified: sub_489C30
-// allocates sixteen bytes with `.?AUFRAMENODE@CLayoutFrame@@` and fills two link
-// words, a frame at +8 and a word at +12, with no fifth word for an owner.
-//
-// All of that is true and none of it is about the anchor. Two different
+// Note that a node carries no owner field: sub_489C30 allocates sixteen bytes
+// with `.?AUFRAMENODE@CLayoutFrame@@` and fills two link words, a frame at +8
+// and a word at +12. That is about the node, not the anchor. Two different
 // sixteen-byte objects in this cluster have a frame at +8 and a word at +0x0C.
 // The anchor is a CFramePoint, built by sub_49CA40, sitting in one of nine slots
 // at frame+0x0C..0x2C; its +8 is the frame it points at. The FRAMENODE is the
@@ -102,29 +98,21 @@
 // nothing. Those are 25.4 million deferred calls a session, each one walking an
 // average of 43.3 nodes at nine dereferences apiece.
 // ---------------------------------------------------------------------------
-// This is the second attempt. The first one crashed the game on login and is
-// worth writing down.
-//
-// It made the original take its own not-found path by setting dword_AC1020 to 0
-// for the duration of the call and restoring it afterwards, reasoning that
-// sub_489710 contains no call instructions so nothing could observe the global
-// inside that window. Nothing reads it, true. But off_AC101C at 0xAC101C and
-// dword_AC1020 at 0xAC1020 are adjacent dwords forming ONE link pair - the root
-// node of the list - and the not-found path *writes* to the second of them:
+// Do not force the not-found path by zeroing dword_AC1020 for the duration of
+// the call. Nothing reads it inside sub_489710, but off_AC101C at 0xAC101C and
+// dword_AC1020 at 0xAC1020 are adjacent dwords forming one link pair - the root
+// node of the list - and the not-found path writes to the second of them:
 //
 //     489827  mov esi, offset off_AC101C
 //     48982c  mov edx, [esi]          ; edx = off_AC101C
 //     489836  mov [edx+4], ecx        ; <-- when edx is the root, this IS AC1020
 //
-// So the restore clobbered the client's own write and the layout list lost a
-// link. EIP 0x00489873, `mov [ebx], esi` with EBX = 0, on the next relink.
+// Restoring afterwards clobbers the client's own write and the layout list loses
+// a link: EIP 0x00489873, `mov [ebx], esi` with EBX = 0, on the next relink.
 //
-// I had checked that nothing reads the global. I had not checked that something
-// writes it.
-//
-// This version writes to no client global. It reads one word to decide, and
-// when it decides yes it performs the same pointer surgery the client would
-// have performed, transcribed instruction by instruction from the tail below.
+// So this writes to no client global. It reads one word to decide, and when it
+// decides yes it performs the same pointer surgery the client would have,
+// transcribed instruction by instruction from the tail below.
 // ---------------------------------------------------------------------------
 // And it does not believe itself. For the first calls of every session it takes
 // no shortcut at all: it makes its prediction, calls the original, and then
