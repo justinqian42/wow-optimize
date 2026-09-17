@@ -1150,14 +1150,10 @@ static float* __cdecl Hooked_QuatSlerp(float* result, float t, float* q1, float*
 
 // Self-test against the function being replaced, on the machine it will run on.
 //
-// It used to accept a tolerance of 1e-5, because the implementation it guarded
-// was packed single and could not do better. That tolerance is gone: the
-// replacement now reproduces the client's width and its summation order, so the
-// only acceptable answer is the same bits. Checked offline against the 36
-// instructions transcribed verbatim as inline asm - 4,000,000 quaternions, zero
-// differing - and the packed-single version it replaces differed on 1,535,779 of
-// the roughly two million that actually normalise. Three quarters of them, under
-// a comment that called it one ULP.
+// No tolerance: the replacement reproduces the client's width and summation
+// order, so the only acceptable answer is the same bits. Checked offline against
+// the 36 instructions transcribed verbatim as inline asm, 4,000,000 quaternions,
+// zero differing.
 //
 // That is still a test of my reading of the disassembly rather than of the client
 // sitting in memory right now. This calls the real function at the real address,

@@ -87,19 +87,12 @@
 // `sub_489C30(a3, this, 1 << a2)`, so the frame it hands the index is the frame
 // whose slot it just filled.
 //
-// The ordering argument in the paragraph above still stands on its own, so the
-// found case is still left to the client and still counted as `deferred`. What
-// changed is that the single-candidate case is now answerable in principle, and
-// the counters below measure how often it arises before any surgery is written
-// for it.
-// ---------------------------------------------------------------------------
-// The same conflation made the second predicate dead code for a whole field
-// session. It read 0x800 out of the index entry's +0x0C, believing that word to
-// be the anchor flags the scan masks. It is the point mask: sub_48A260 passes
-// `1 << a2` for a point index in 0..8 and sub_48A3E0 passes 0x101, so the mask
-// cannot exceed 0x1FF and bit 11 is not reachable through it. The predicate
-// therefore answered false every time, and the report line that would have said
-// so was written behind `if (g_rejectShortcut > 0)`.
+// The found case is left to the client and counted as `deferred`; the counters
+// below measure how often the single-candidate case arises.
+//
+// The word at the index entry's +0x0C is the point mask, not the anchor flags:
+// sub_48A260 passes `1 << a2` for a point index in 0..8 and sub_48A3E0 passes
+// 0x101, so the mask cannot exceed 0x1FF and bit 11 is unreachable through it.
 //
 // NoDependantCanMatch below does what that predicate was meant to do. For each
 // frame the index names it applies the scan's own three tests to that frame's

@@ -19,13 +19,8 @@ bool Running();
 const char* Subject();
 
 // Register this module as a possible subject and hand over the flag its hot path
-// tests. Call once at init.
-//
-// The flag is owned by the harness from that point on. With one subject named in
-// the ini it is set once and never changes. With AbTestSubject=all the harness
-// rotates: the flag of the subject currently being measured is true and every
-// other one is false, so only one feature alternates at a time and none of them
-// confound each other. A module needs no idea which mode it is in.
+// tests. Call once at init; the harness owns the flag from then on. With
+// AbTestSubject=all it rotates, so only one feature alternates at a time.
 //
 // Returns the flag's initial value, so a caller can log that it is the subject
 // without reading the flag back.

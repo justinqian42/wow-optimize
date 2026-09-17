@@ -1022,16 +1022,10 @@ static float* __cdecl Hooked_PointXformInPlace(float* a1, float* a2, float* a3) 
 // r2*(-tz) lands (out12,out13,out14,0). All reads stay inside the 64-byte input
 // matrix; the full 16-float output is written exactly as the original.
 //
-// This used to carry the line "only x87 80-bit vs SSE 32-bit intermediates
-// differ (sub-ULP, invisible for a rigid transform)". Both halves of that are
-// wrong. The CRT runs x87 at 53-bit, not 80, so the original accumulates in
-// double; and the gap between a double accumulation and a single one over three
-// products is not sub-ULP - it is the same divergence found in the matrix
-// multiply, the quaternion normalise and both vector normalises in this same
-// tree, each of which had a comment saying much the same thing. This one builds
-// the inverse of a view transform, which is to say it feeds the camera, and a
-// wrong camera matrix is precisely the artifact this project has already shipped
-// once.
+// The client runs x87 at 53 bits, so the original accumulates in double, and the
+// gap between a double accumulation and a single one over three products is far
+// wider than a ULP. This one builds the inverse of a view transform, so it feeds
+// the camera, where a wrong matrix is a visible artifact.
 //
 // The three dot products now accumulate in double, which removes the width
 // difference. What is not proven here is the order of the three terms: the

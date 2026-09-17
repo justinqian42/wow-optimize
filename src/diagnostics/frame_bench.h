@@ -1,24 +1,10 @@
 #pragma once
 
-// ============================================================================
-// Description: Frame-time distribution benchmark - the instrument that lets one
-//              build be compared against another.
-//
-// This project has around fifty optimization toggles and no way to tell whether
-// any of them helps. Every feature has been justified by theory; the README's
-// "Performance Metrics" section contains no numbers. Two of the largest findings
-// this month were cases where our own code made the game slower, and both were
-// found by measurement rather than review.
-//
-// So: record every presented frame, and report the distribution in a form two
-// runs can be diffed on. Percentiles, not an average - an average hides exactly
-// the stutters players complain about. Loading screens are excluded, because a
-// single zone load would dominate the tail and make runs incomparable.
-//
-// The config fingerprint in the report is what makes an A/B honest: it is a hash
-// of the whole settings block, so a log can be checked to have actually run the
-// configuration it claims to.
-// ============================================================================
+// Frame-time distribution, so one build can be compared against another.
+// Percentiles rather than an average, because an average hides the stutters.
+// Loading screens are excluded: one zone load would own the tail. The report
+// carries a hash of the whole settings block, so a log can be checked to have
+// run the configuration it claims.
 
 namespace FrameBench {
 

@@ -513,16 +513,11 @@ namespace WowPerfHooks {
             {(void*)0x0042E3B0, (void*)Hooked_MemStormBlockFree, (void**)&orig_MemStormBlockFree, "P9 memorystorm block free"},
             {(void*)0x004270F0, (void*)Hooked_VirtualDispatch,   (void**)&orig_VirtualDispatch,   "P10 virtual dispatch"},
             {(void*)0x004283D0, (void*)Hooked_DelCSWrapper,      (void**)&orig_DelCSWrapper,      "P11 deleteCS wrapper"},
-            // P12 STAYS REMOVED, and the first half of this reason has expired.
-            // W14 is gone - it was one of ten passthroughs deleted from
-            // wow_opt_hooks - so 0x878760 is free now. The second half has not
-            // expired and is the real one: P12 declares __cdecl where the client
-            // function is __fastcall, so installing it corrupts the stack.
+            // P12 stays out: it declares __cdecl where the client function is
+            // __fastcall, so installing it corrupts the stack.
             // {(void*)0x00878760, (void*)Hooked_SoundVolumeLookup, (void**)&orig_SoundVolumeLookup, "P12 sound volume lookup"},
-            // P13 STAYS REMOVED. W16 is gone too, so the collision that this
-            // originally cited no longer exists and 0x878610 is free. Nothing
-            // has established that P13 is correct, only that it used to lose a
-            // race; reinstating it needs the same evidence any new hook needs.
+            // P13 stays out: nothing has established it is correct. Reinstating
+            // it needs the evidence any new hook needs.
             // {(void*)0x00878610, (void*)Hooked_SoundMixUpdate,    (void**)&orig_SoundMixUpdate,    "P13 sound mix update"},
             {(void*)0x008799E0, (void*)Hooked_SoundChannelAlloc, (void**)&orig_SoundChannelAlloc, "P14 sound channel alloc"},
             // P15 REMOVED: 0x879390 already hooked by W17 (wow_opt_hooks). Duplicate = MH_ERROR_ALREADY_CREATED.

@@ -3,11 +3,8 @@
 #ifndef CRASH_DUMPER_H
 #define CRASH_DUMPER_H
 
-// Feature tracking for crash diagnosis
-// Each optimization registers itself so crash dumps show exactly what was active
-// The 3.17.0 logs registered exactly 128 - the old cap - so the registry was full
-// and possibly already dropping names. Overflow is now logged rather than silent;
-// raise this again when that line appears.
+// Each optimization registers itself, so a crash dump says what was active.
+// Overflow is logged; raise this when that line appears.
 #define MAX_TRACKED_FEATURES 192
 
 struct FeatureState {
@@ -30,40 +27,20 @@ namespace CrashDumper {
     // FeatureHit, or -1 if the table is full.
     int RegisterFeature(const char* name);
 
-    // Claims a token for counting, by the same name dllmain already registered.
-    // Resolving the name costs one scan, done once at install time; registration
-    // itself lives in dllmain for every feature, so looking up beats registering
-    // again and ending up with two rows for one feature. Registers the name if it
-    // is not present yet.
-    //
-    // Claiming also marks the feature as reporting its activity, so a zero count
-    // means "it never ran" rather than "nobody instrumented it". Without that
-    // distinction the report accuses every uninstrumented feature of doing
-    // nothing, which is the same lie as a feature logging success while installing
-    // no hook.
-    // hitStride is how many calls each FeatureHit stands for. Features on a hot
-    // path only report one in a few thousand, and the report used to print those
-    // raw sample counts in the same column as the ones that count every call:
-    // txtsd's five-hour session listed MatrixVectorSSE2 at 807878 next to
-    // HotFunctions at 485862648, when the first samples one call in 8192 and is
-    // really the larger of the two by an order of magnitude. Pass the divisor
-    // the call site uses, or 1 when it counts every call.
+    // Claims a token for counting, by the name dllmain already registered, and
+    // registers it if absent. Claiming marks the feature as reporting its
+    // activity, so a zero count means it never ran rather than that nobody
+    // instrumented it. hitStride is how many calls each FeatureHit stands for:
+    // pass the divisor a sampled call site uses, or 1 when it counts every call.
     int FeatureTokenForCounting(const char* name, unsigned hitStride = 1);
 
-    // O(1) increment at a known index. The old by-name API below scans the table
-    // and strcmps every entry, which is why in practice it was wired into three
-    // call sites out of a hundred features and everything else reported zero.
-    //
-    // Deliberately not atomic and deliberately 32-bit. This sits on paths that
-    // run millions of times a session: a lock cmpxchg8b per call would cost more
-    // than the work being counted, and a torn 64-bit read would print a number
-    // far more misleading than a lost increment under contention.
+    // O(1) increment at a known index. Not atomic and 32-bit on purpose: this
+    // sits on paths that run millions of times a session, where a locked 64-bit
+    // add costs more than the work being counted and can tear.
     void FeatureHit(int token);
 
-// How many features are actually registered. The startup banner used to print
-// MAX_TRACKED_FEATURES here, so it read "Registered 128 features" against a cap of
-// 128 and "Registered 192" against a cap of 192 - a constant wearing a count's
-// clothing, which looked exactly like a registry overflowing every time.
+// How many features are registered. Not the cap: printing the cap here read as
+// a registry overflowing on every startup.
 int RegisteredFeatureCount();
 
     // Writes the "what actually ran" section to the log.
@@ -96,18 +73,10 @@ void RefreshBenignModuleRanges();
     // and evict the rarer, riskier hooks we actually want in a crash trace.
     void RecordHookCallHot(const char* hookName, uintptr_t addr);
 
-    // ------------------------------------------------------------------
-    // Event trace ("flight recorder")
-    //
-    // RecordHookCall answers "which hook ran last", but only the handful of
-    // opt-in features that call it - so in practice a crash report showed an
-    // empty trace. This ring records STATE TRANSITIONS instead: loading screen
-    // boundaries, lua_State swaps, D3D9 device resets, cache invalidations,
-    // watchdogs firing. Those are what actually explain a crash here, they are
-    // rare enough that formatting one costs nothing, and they are recorded
-    // unconditionally so the trail exists no matter which features are enabled.
-    //
-    // Safe from any thread; never allocates. Keep messages short and factual.
+    // Event trace. Records state transitions - loading screen boundaries,
+    // lua_State swaps, D3D9 device resets, cache invalidations, watchdogs -
+    // unconditionally, so the trail exists whatever is enabled. Safe from any
+    // thread, never allocates. Keep messages short and factual.
     void Trace(const char* fmt, ...);
 
     // Writes the most recent `count` events to the log, newest first.

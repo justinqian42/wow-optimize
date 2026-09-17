@@ -6072,25 +6072,15 @@ extern "C" void WowOpt_OnFrameBoundary() {
     CpuTopology::NoteFrame();
 
     // The animation census divides models counted by frames counted, so it has to
-    // close its frame here and nowhere else. It used to close it on the hooked
-    // Sleep tick, which is throttled to a few milliseconds and only runs when the
-    // client sleeps at all - and a CPU-bound client barely does. Everything the
-    // hook counted between two sleeps was then charged to one frame. The reported
-    // rate tracked how CPU-bound the session was rather than how many models were
-    // on screen: one log climbed 860, 906, 1092, 1909 models per frame as the main
-    // thread went 85.9%, 91.3%, 95.5%, 99.0% executing, and ended up claiming
-    // 72 ms of animation inside a 53 ms frame.
+    // close its frame here and nowhere else. Closing it on the hooked Sleep tick
+    // charges everything between two sleeps to one frame, and a CPU-bound client
+    // barely sleeps.
     AnimCensus::OnFrame();
 
-    // Moved out of MainThreadPump, which is not a frame. M2AnimReuse counts a
-    // repeat only when the same model is asked for the same pose in a LATER
-    // frame, and with the pump's clock it counted 2 repeats in 4348 calls
-    // against the census's 91.6% on the same workload - two of our own
-    // instruments disagreeing by four orders of magnitude, which is information
-    // rather than noise. The freeze catcher has the same dependency in a worse
-    // direction: it measures how long the current frame has been running, and a
-    // clock that ticks on Sleep would have had it arming on frames that never
-    // happened.
+    // These need a real frame too. M2AnimReuse counts a repeat only when the same
+    // model is asked for the same pose in a LATER frame, and the freeze catcher
+    // measures how long the current frame has been running, so a clock that ticks
+    // on Sleep would arm it on frames that never happened.
     X87Precision::Sample("with frames running");
     FreezeCatcher::OnFrame();
     M2AnimStride::OnFrame();
@@ -11490,19 +11480,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
                     // Best-effort - if unhooking fails, the process is terminating anyway
                 }
 
-                // MinHook is not the only thing pointing at this module. The D3D9
-                // state manager writes sixteen of its own function pointers
-                // directly into the device vtable, which lives inside d3d9.dll -
-                // and this path used to break out before ShutdownD3D9StateManager
-                // ever ran, so those sixteen entries survived our unload. d3d9
-                // then releases the device through a vtable still calling into an
-                // unmapped module, on the way out of the process, which is where a
-                // crash lands after the player has already quit and is the hardest
-                // kind to attribute.
+                // MinHook is not the only thing pointing at this module: the D3D9
+                // state manager writes sixteen of its own function pointers into
+                // the device vtable inside d3d9.dll. Left in place, d3d9 releases
+                // the device through a vtable calling into an unmapped module,
+                // after the player has already quit.
                 //
-                // Restoring them is cheap and self-checking: each slot is put back
-                // only if it still holds our hook, so a third-party hook layered on
-                // top is left alone, and the whole walk is inside SEH.
+                // Each slot is put back only if it still holds our hook, so a
+                // third-party hook layered on top is left alone, and the whole
+                // walk is inside SEH.
                 //
                 // The process-exit variant, not the ordinary one: every other
                 // thread is already dead here, possibly holding the vtable lock,
