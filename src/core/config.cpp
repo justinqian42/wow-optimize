@@ -714,11 +714,9 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptWorldStateCoalesce  = GetPrivateProfileIntA("Graphics_Sound", "WorldStateCoalesce", 0, iniPath.c_str()) != 0;
         g_settings.OptD3d9RenderThread    = GetPrivateProfileIntA("Graphics_Sound", "D3d9RenderThread", 0, iniPath.c_str()) != 0;
         // Skipping a SetRenderState that changes nothing has nothing to do with
-        // running under a translation layer, but it was gated on VulkanDXVK or
-        // D3d9RenderThread, so a player on native D3D9 could not have it without
-        // claiming to use something else. It has its own key now and inherits
-        // the pair it used to hang off, so an absent key keeps today's behaviour
-        // exactly.
+        // running under a translation layer, so it has its own key. An absent key
+        // inherits the pair it used to be gated on, which keeps an existing ini
+        // behaving the same.
         g_settings.OptRenderStateDedup    = GetPrivateProfileIntA("Graphics_Sound", "RenderStateDedup",
                                               (g_settings.OptVulkanDXVK || g_settings.OptD3d9RenderThread) ? 1 : 0,
                                               iniPath.c_str()) != 0;

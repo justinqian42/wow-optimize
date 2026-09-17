@@ -122,14 +122,11 @@ DWORD WINAPI WatchdogProc(LPVOID) {
         // This frame has already overrun. Sample it until it ends; the main
         // thread is only suspended from here.
         //
-        // The ring used to end the sampling when it filled, which meant a stall
-        // was described by its first 512 milliseconds and nothing else. That is
-        // 27% of the 1918 ms frame this module was written for and 9% of a 5860
-        // ms loading screen - and the loading screen is the case that matters
-        // most, because a field session reports one with 168 ms inside ReadFile,
-        // no file writes at all, and no account of the other 5.7 seconds.
+        // A full ring must not end the sampling: that describes a stall by its
+        // first 512 milliseconds and nothing else, which is 9% of a 5860 ms
+        // loading screen and misses the part nothing else accounts for.
         //
-        // So a full ring thins instead of stopping: every other sample is kept,
+        // So a full ring thins instead: every other sample is kept,
         // which leaves 256 spread evenly over the whole elapsed window, and the
         // interval doubles so the next 256 cover twice as long. Repeating that
         // describes a stall of any length with a fixed 512 slots, at a

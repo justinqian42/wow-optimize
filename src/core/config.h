@@ -41,13 +41,11 @@ namespace Config {
         bool OptDefragLf = false;
         bool OptVulkanDXVK = false;
         bool OptTimingFix = false;
-        // Six crash guards, not one, and the key is named after the first of
-        // them: the CVar null write. It also gates the Lua table read guard, the
-        // GUID type check that crashes on battleground load, the object reaper's
-        // null write on unlink, and two more null and bounds checks. The launcher
-        // entry says so now - it used to read "Null Pointer CVar Safeguard", and a
-        // tester turning that off to isolate something would have lost five
-        // unrelated crash fixes without being told.
+        // Six crash guards, not one, and named after the first: the CVar null
+        // write. It also gates the Lua table read guard, the GUID type check that
+        // crashes on battleground load, the object reaper's null write on unlink,
+        // and two more null and bounds checks. Turning this off to isolate one of
+        // them loses the other five.
         bool OptCvarNullGuard = true; // Safe default: enabled
         // Null-callback crash in the client's device callback list. On by
         // default: on a healthy client it is one read-only pointer walk per
@@ -145,17 +143,13 @@ namespace Config {
         // motion from the same spot. Hooks one wow.exe function; off by default.
         bool OptCameraReplay = false;
         int  CameraReplayKey = 0x13;     // VK_PAUSE: press to play, Shift+press to record
-        // Frustum culling and quaternion normalise, in SSE2. These used to hang
-        // off OptStrStrSse2 - a switch named after a string search - so anyone who
-        // left "SSE2 Boyer-Moore strstr" off, which is its default, silently lost
-        // both. Inherits that switch when its own key is absent.
+        // Frustum culling and quaternion normalise, in SSE2. Inherits
+        // OptStrStrSse2 when its own key is absent, which is where it used to be
+        // gated.
         bool OptSimdGeometry = false;
-        // Two things the Lock-Free Heap Defragmenter switch used to gate that have
-        // nothing to do with defragmenting a heap. Each inherits DefragLf when its
-        // own key is absent, so nobody loses a feature they were already running by
-        // updating. A third, RenderHooks, was split out with them and then removed:
-        // the function it gated installs nothing, so the key decided only whether a
-        // log line appeared.
+        // Neither has anything to do with defragmenting a heap. Each inherits
+        // DefragLf when its own key is absent, so an existing ini keeps what it
+        // was already running.
         bool OptAsyncWorkerPool = false;
         bool OptThreadAffinity = false;
         // Alternates one feature on and off inside a session, so its frame times can
@@ -304,16 +298,13 @@ namespace Config {
         // Caches over Win32 calls that answer the same thing every time:
         // GetSystemInfo, GetSystemMetrics, GetVersionEx, RegQueryValueEx,
         // GetProcAddress, GetModuleFileName, GetEnvironmentVariable and
-        // GetPrivateProfile. They hung off OptTimingFix, which is described as
-        // a timing fix and should own the clock hooks, not eight lookups that
-        // have nothing to do with time.
+        // GetPrivateProfile. Inherits OptTimingFix, which owns the clock hooks
+        // and nothing else.
         bool OptWin32ApiCaches = false;
-        // The debug-family Win32 hooks: IsBadReadPtr / IsBadWritePtr answered
-        // from VirtualQuery, OutputDebugString turned into a no-op, and
-        // IsDebuggerPresent forced to false. They hung off OptCvarNullGuard,
-        // which declines CVar writes through uninitialised objects and is
-        // unrelated to any of them.
-        // Defaults on, matching CvarNullGuard, which is what it used to run under.
+        // The debug-family Win32 hooks: IsBadReadPtr and IsBadWritePtr answered
+        // from VirtualQuery, OutputDebugString made a no-op, IsDebuggerPresent
+        // forced to false. Defaults on, matching CvarNullGuard, which it
+        // inherits.
         bool OptDebugApiHooks = true;
         // Spin counts retrofitted onto CriticalSection and WaitForSingleObject.
         // They hung off OptDefragLf, the lock-free heap defragmenter, which is

@@ -2,15 +2,9 @@
 // Description: The client's world streaming centre, and whether it can be read.
 // Safety & Threading: Main thread.
 // ============================================================================
-// Three modules used to read a player position from 0x00BE1F30. No instruction
-// in wow.exe references that address - it has no cross-references and no type
-// information, and it sits in zero-filled storage nothing writes. So all three
-// read 0.0, 0.0 forever:
-//
-//   perf_diagnostics printed "Player position: X=0.00, Y=0.00" on every stutter
-//   anim_census measured every distance from the map origin
-//   predictive_prefetch returned at its own "cx == 0 && cy == 0" guard on every
-//     frame of every session, having logged itself ACTIVE and spawned a worker
+// Do not read a player position from 0x00BE1F30. No instruction in wow.exe
+// references that address: it has no cross-references, no type information, and
+// sits in zero-filled storage nothing writes, so it reads 0.0, 0.0 forever.
 //
 // The real one is the terrain streamer's own centre. sub_780860 stores its
 // argument's three floats to 0x00CD7778, 0x00CD777C and 0x00CD7780, and the

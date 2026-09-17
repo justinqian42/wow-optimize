@@ -451,20 +451,12 @@ static const FuncEntry* FindNearestFunc(uintptr_t eip) {
 
     // A name reaches exactly as far as its function does, and no further.
     //
-    // This was a flat 4KB window, which is room for several functions, and the
-    // report named the wrong one with complete confidence. A tester profile put
-    // "tostring+0xE00" second overall at 4.29% of executing time; tostring is
-    // 229 bytes long, so those samples were 3.5KB past its end, inside the Lua
-    // pool's block allocator. Acting on that line would have meant optimizing a
-    // function that was not running.
+    // No fixed window: function sizes here run from 17 bytes to 6 kilobytes, so
+    // any window names a neighbour with complete confidence. A 4KB one put
+    // "tostring+0xE00" second overall at 4.29% of executing time, 3.5KB past the
+    // end of a 229-byte function and inside the Lua pool's block allocator.
     //
-    // Narrowing the window to 512 bytes was not enough either, and the same log
-    // proved it twice over: "LuaMemPool_NewChunk+0x100" and
-    // "LuaMemPool_Alloc+0x100" were both neighbours of the named function, which
-    // are 97 and 187 bytes long. Any fixed window is wrong, because function
-    // sizes here run from 17 bytes to 6 kilobytes.
-    //
-    // So the table carries each function's exact length, read out of the binary.
+    // The table carries each function's exact length, read out of the binary.
     // Past the end of a function the sample is reported by address, which can be
     // looked up. A wrong name cannot be un-believed.
     uintptr_t delta = eip - g_knownFuncs[best].addr;
@@ -633,17 +625,14 @@ static DWORD WINAPI SamplerThreadProc(LPVOID) {
         // install, MPQ/DBC load) and load-screen page-fault spikes stay out of
         // the "what costs frame time in play" picture.
         //
-        // That decision used to be made *after* the sample was taken. The
-        // discarded ones cost exactly as much as the kept ones: a suspend, a
-        // context read and a resume of the main thread, a thousand times a
-        // second, throughout every loading screen - against a thread that is
-        // decompressing and page-faulting its way through a zone load, and
-        // holding the allocator and archive locks while it does. A reporter
-        // traced their excessive loading screen times to this profiler being
-        // enabled, and turning it off shortened them.
+        // Decide before sampling, not after. A discarded sample costs the same
+        // as a kept one - suspend, context read, resume - a thousand times a
+        // second against a thread decompressing its way through a zone load and
+        // holding the allocator and archive locks. A reporter traced their long
+        // loading screens to this profiler being on.
         //
-        // Decide first. The main thread is now touched only when the sample is
-        // going to be kept, and the loop idles instead of spinning at the
+        // The main thread is touched only when the sample will be kept, and the
+        // loop idles instead of spinning at the
         // sampling rate while there is nothing to record.
         const bool warmedUp = (GetTickCount() - g_samplerStartTick) >= PROFILER_WARMUP_MS;
         if (!warmedUp || LuaOpt::IsLoadingMode()) {
@@ -722,12 +711,10 @@ static int g_modCount = 0;
 // DLL base) so it maps directly to wow_optimize.map.
 
 // Our own functions, by absolute address, so a hot spot inside this DLL prints a
-// name instead of an offset nobody can resolve without the matching .map.
-// Every Lua fast path registers itself, which alone is 55 names, plus the
-// allocator hooks and the caches. 64 was exactly enough to overflow.
-// Raised from 128 when every detour in the project started registering itself.
-// The DLL installs a few hundred, and a table that fills up silently leaves the
-// hot code it would have named indistinguishable from code nobody registered.
+// name instead of an offset nobody can resolve without the matching .map. The
+// DLL installs a few hundred detours and every one registers itself, so leave
+// room: a table that fills up silently leaves the hot code it would have named
+// indistinguishable from code nobody registered.
 static constexpr int MAX_SELF_SYMBOLS = 512;
 struct SelfSymbol { uintptr_t addr; const char* name; };
 static SelfSymbol g_selfSymbols[MAX_SELF_SYMBOLS] = {};
@@ -840,12 +827,10 @@ static constexpr uintptr_t kSelfSymbolTrusted = 0x200;   // 512 bytes
 static constexpr int SELF_PAGES = 4096;   // covers a 16MB image
 static uint32_t g_selfPageCounts[SELF_PAGES];
 
-// The 4KB page above ranks our DLL against everything else, but it cannot answer
-// WHICH hook is hot: at this build's code density a single page holds about
-// nineteen functions, so a page that reads 1.97% could be one expensive hook or
-// nineteen cheap ones. Resolving that from a tester log used to mean rebuilding
-// the exact commit just to read its .map, and even then a page listed too many
-// candidates to choose between.
+// The 4KB page above ranks our DLL against everything else but cannot say WHICH
+// hook is hot: at this build's code density a page holds about nineteen
+// functions, so a page reading 1.97% could be one expensive hook or nineteen
+// cheap ones.
 //
 // So our own image is counted a second time at 256-byte resolution, and reported
 // as its own section rather than merged into the main ranking - splitting our
@@ -1205,13 +1190,10 @@ static void DumpResults() {
     // 4KB WoW page (so unlisted hot code is reported by address, not lumped into
     // a single opaque blob). Too large for the stack because of the page slots.
     //
-    // It used to be a function-local static, which put half a megabyte in this
-    // DLL's image - and the image is mapped into the low 2GB, the half the
-    // client allocates from and the half Sicsoo's sessions report down to a 5MB
-    // largest free block. The profiler is off in every field log to hand, so
-    // that half megabyte was being taken from the scarce half for a report
-    // nobody was running. It is reserved on the first report instead, out of
-    // the top of the address space, and kept for the ones after it.
+    // Not a function-local static: that puts half a megabyte in this DLL's
+    // image, which is mapped into the low 2GB the client allocates from, for a
+    // report most sessions never run. Reserved on the first report instead, out
+    // of the top of the address space, and kept for the ones after it.
     static constexpr int MAX_BUCKETS = MAX_KNOWN_FUNCS + NUM_PAGES + SELF_PAGES + 128 + 24 + 1;
     static SampleBucket* buckets = nullptr;
     if (!buckets) {
@@ -1247,15 +1229,10 @@ static void DumpResults() {
 
     // Walk the ring buffer and bucket each sample.
     //
-    // The ring holds RING_SIZE samples and a long session takes far more, so what
-    // follows describes the last RING_SIZE of them and nothing before that. Every
-    // percentage below is therefore a share of `n`, not of `total`, and getting
-    // that wrong is not a rounding error: a three-hour session took 5853152
-    // samples into a ring of 1048576, so dividing bucket counts by the lifetime
-    // total understated every figure in the report by 5.6x. It made the client
-    // look like it had no hot spot anywhere - the top fifty summed to 12% of a
-    // profile where they are really 67% - and that false flatness was used to
-    // decide what to optimise for a week.
+    // The ring holds the last RING_SIZE samples and a long session takes far
+    // more, so every percentage below is a share of `n`, never of `total`. A
+    // three-hour session put 5853152 samples through a ring of 1048576: dividing
+    // by the lifetime total understates each figure by 5.6x.
     uint64_t n = (total < RING_SIZE) ? total : RING_SIZE;
     uint64_t startIdx = (total <= RING_SIZE) ? 0 : (total - RING_SIZE);
 
@@ -1469,12 +1446,9 @@ static void DumpResults() {
         if (buckets[i].name) {
             name = buckets[i].name;
 
-            // A named symbol claims every sample within 4 KB after it, and the
-            // offset used to be discarded - so a line reading "tostring 4.73%"
-            // could be luaB_tostring itself or any unnamed function in the four
-            // kilobytes following it, with nothing to tell the two apart. That
-            // is a lot of Lua library code to hang on one dispatcher, and it was
-            // read as exact.
+            // Keep the offset. Without it a line reading "tostring 4.73%" could
+            // be that function or any unnamed one after it, with nothing to tell
+            // them apart.
             //
             // So when the samples are not concentrated at the start, say where
             // they actually are. The offset resolves to exactly one function in

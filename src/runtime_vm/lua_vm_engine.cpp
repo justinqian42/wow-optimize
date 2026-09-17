@@ -196,12 +196,10 @@ static get_cycles_fn g_get_cycles = (get_cycles_fn)0x0086AE30;
 //
 // with the zero branch writing the *current* global taint into the result.
 //
-// A plain sixteen-byte copy is what this module used to do, and it is wrong in
-// the direction that matters. An untainted value read through the cache came
-// back with a taint word of zero where the engine would have written the
-// ambient taint, so a read through the cache laundered the context clean. That
-// is not a performance bug; in this client's terms it is a security one, and it
-// is a sufficient reason for the module to have been switched off.
+// A plain sixteen-byte copy is wrong in the direction that matters: it returns a
+// taint word of zero where the engine would have written the ambient taint, so a
+// read through the cache launders the context clean. In this client's terms that
+// is a security bug, not a performance one.
 static const uintptr_t kTaintCell   = 0x00D4139C;
 static const uintptr_t kTaintArmed  = 0x00D413A0;
 static const uintptr_t kTaintFrozen = 0x00D413A4;

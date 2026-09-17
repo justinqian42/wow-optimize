@@ -220,18 +220,12 @@ static constexpr long SELF_CHECK_AFTER = 20000;   // decided releases before jud
 
     // Release a bounded number here, not the whole queue.
     //
-    // Flush runs at both ends of a loading transition, on the main thread, and
-    // it used to hand every held texture to the engine in one go. A tester
-    // reported the loading bar completing and then the screen sitting there for
-    // several seconds before the new scene appeared, and their log has a
-    // thousand textures held at the moment the transition ended. That burst is
-    // the stall.
-    //
-    // It only started happening because this feature began working: until the
-    // self-disabling bug was fixed the queue was always empty here and the flush
-    // cost nothing. Whatever is left stays queued and goes out through the
-    // ordinary five-second sweep in OnFrame, a few per frame, which is where
-    // this work belongs.
+    // Flush runs at both ends of a loading transition, on the main thread.
+    // Handing every held texture to the engine at once stalls there: a tester saw
+    // the loading bar complete and the screen sit for several seconds, with a
+    // thousand textures held at the moment the transition ended. Whatever is left
+    // stays queued and goes out through the five-second sweep in OnFrame, a few
+    // per frame.
     static constexpr size_t FLUSH_BUDGET = 128;
 
         std::vector<void*> toRelease;

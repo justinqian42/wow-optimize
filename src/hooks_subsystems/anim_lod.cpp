@@ -129,25 +129,15 @@ constexpr unsigned kM_stamp     = 0x3C;
 // it maintains bit 0x400 of the flags. Skip the call and every one of those
 // tracks freezes at its last value.
 //
-// A tester saw exactly that on 2026-08-22: characters glowing, shoulder pads and
-// weapons glowing, then snapping back to normal. Turning this feature off stopped
-// it. Emissive and alpha tracks stuck bright until the model was posed again.
+// A tester saw exactly that on 2026-08-22: characters, shoulder pads and weapons
+// glowing, emissive and alpha tracks stuck bright until the model was posed
+// again. Turning this feature off stopped it.
 //
-// The rule in CLAUDE.md is "before skipping an engine call, establish what else
-// that call does", and it records three features that shipped on "skipping this
-// only skips work" and were wrong. This was the fourth. What was established was
-// that skipping cannot affect animation *timing* - true, and beside the point.
-//
-// sub_82E550 is the attachment pass, and it accounts for the rest of the report.
-// Its first loop runs [data+0F0h] attachment points; its second walks the list
-// of attached models at [esi+58h], linked through +60h, and calls sub_82F0F0 on
-// each one. A weapon and a shoulder pad are attached models. Skipping a
-// character skipped its whole attached chain with it.
-//
-// The rule in CLAUDE.md is "before skipping an engine call, establish what else
-// that call does", and it records three features that shipped on "skipping this
-// only skips work" and were wrong. This was the fourth. What was established was
-// that skipping cannot affect animation *timing* - true, and beside the point.
+// sub_82E550 is the attachment pass. Its first loop runs [data+0F0h] attachment
+// points; its second walks the attached models at [esi+58h], linked through
+// +60h, calling sub_82F0F0 on each. A weapon and a shoulder pad are attached
+// models, so skipping a character skipped its whole chain with it. Skipping
+// cannot affect animation timing, which is true and beside the point.
 //
 // So a model is now skipped only when the tail would have done nothing. The test
 // is not the client's own two `cmp` guards above: those over-approximate, and

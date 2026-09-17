@@ -203,15 +203,11 @@
 // Critical fields (fieldId < 0x40) bypass queue for gameplay correctness.
 #define TEST_DISABLE_DEFERRED_FIELD_UPDATES 1
 
-// Hardware cursor fix (ShowCursor + ClipCursor(NULL), no hooks, no WoW memory
-// writes). The diagnosed crash cause was two direct byte patches (0xCABCDD/
-// CABCDE forcing gxCursor=0 + gxFixLag=1) that activated an uninitialized
-// cursor rendering path on private servers (Circle/Warmane) -> NULL deref.
-// Those two patch lines are already commented out in dllmain.cpp; the only
-// code left in this path is ShowCursor(TRUE) and ClipCursor(NULL) (releases
-// any clip region, does not add one — distinct from CONTEXT lesson 13's
-// mouselook-clipping bug, which is about actively clipping the cursor).
-// RE-ENABLED: the actual crash cause is gone from the code.
+// Hardware cursor fix: ShowCursor(TRUE) and ClipCursor(NULL), no hooks and no
+// writes to client memory. ClipCursor(NULL) releases a clip region rather than
+// adding one. Do not reinstate the byte patches at 0xCABCDD/0xCABCDE forcing
+// gxCursor=0 and gxFixLag=1: they reach an uninitialised cursor path on private
+// servers and deref null.
 #define TEST_DISABLE_HARDWARE_CURSOR    0
 
 // Lua VM gettable cache - primitives only (safe), GC-objects pass through

@@ -66,13 +66,10 @@ static CvarWatchEntry g_watch[] = {
     { 0x00D4139C, "Taint cell (secure execution)",    0, false },
 
     // ---- Lua state ----
-    // There used to be a second entry here, 0x00D3F790, called "lua_State stack
-    // pointer (L+4)". It is neither. It is GLOBAL_LUA_STATE + 4 - the global
-    // sitting next to the pointer, not a field of the state - and sub_8192E0
-    // shows what lives there: a 64-bit counter that gets multiplied by
-    // dbl_D3F780. It reported corrupt on every session ever logged. A real
-    // check of the stack would have to load L first and read L+0x0C, because
-    // this client's lua_State is +4-shifted from stock.
+    // Do not add 0x00D3F790 here as a stack pointer. It is the global next to
+    // the lua_State pointer, and sub_8192E0 shows a 64-bit counter multiplied by
+    // dbl_D3F780. Checking the stack means loading L and reading L+0x0C: this
+    // client's lua_State is +4-shifted from stock.
     { 0x00D3F78C, "lua_State* (global Lua state)",    0, true  },
 
     // ---- CRT heap ----

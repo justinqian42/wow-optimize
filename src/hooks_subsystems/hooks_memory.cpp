@@ -223,17 +223,10 @@ static bool IsReadable(uintptr_t addr) {
 #define ADDR_GET_OBJECT_BY_GUID 0x0067D770  // sub_67D770: public GUID resolver
 #endif
 
-// The GUID cache that used to live here is gone, and so are the four functions
-// that worked on it. They were already known to be unreachable - the comment in
-// InstallMemoryHooks said InsertGuid, LookupGuid and RemoveGuid were each
-// defined once and called from nothing, because the addresses they would have
-// been hooked at are unfilled placeholders. What that fix did not do was remove
-// the table.
-//
-// A static array costs its space whether anything reads it or not: 16384 entries
-// of 32 bytes is half a megabyte of this DLL's image, mapped into the low 2GB,
-// and the memset at startup committed every page of it. Sicsoo's sessions report
-// that half down to a 5 MB largest free block, twice, at BAD severity.
+// No GUID cache here. A static array costs its space whether anything reads it
+// or not: 16384 entries of 32 bytes is half a megabyte of this DLL's image,
+// mapped into the low 2GB, and a memset at startup commits every page of it.
+// Field sessions report that half down to a 5 MB largest free block.
 
 // Public API
 #if !TEST_DISABLE_CRT_MIMALLOC

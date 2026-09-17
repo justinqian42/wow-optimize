@@ -591,29 +591,15 @@ void* Classify(void* L, void* z, void* buff, const char* name, bool* checked) {
         g_tooBig++;
         g_bytesTooBig += srcLen;
 
-        // Record the key anyway, which is the whole of what was missing.
+        // Record the key anyway. Without it this early return is blind: a
+        // session that turns away 5 offers totalling 27508 KB cannot say whether
+        // they are five different files or one file compiled five times, and
+        // those are opposite answers about whether the cap costs anything.
         //
-        // The comment on kMaxChunkBytes says the old 128 KB cap refused
-        // fourteen of a session's forty megabytes "before a key was even
-        // recorded for them - so the repeat detection below never saw them
-        // either". The cap was raised and that sentence stayed true, because
-        // the blindness was never in the number. It is in this early return.
-        //
-        // A field session at the 1 MB cap turns away 5 offers totalling
-        // 27508 KB and cannot say whether they are five different files or one
-        // file compiled five times, which are opposite answers: the first means
-        // the cap costs nothing, the second means it is throwing away the
-        // largest parses in the session. Meanwhile the budget door below counts
-        // exactly this and the report says of it "measured and zero, raising it
-        // would have bought nothing" - a sentence a reader carries across to
-        // this door, where nothing of the kind has been measured.
-        //
-        // A key and a length are twelve bytes whatever the source weighs, so
-        // this costs the same for a six-megabyte chunk as for a small one, and
-        // it keeps no source and caches nothing. If the cap is ever raised, a
-        // chunk already known to repeat is then kept the first time it appears
-        // rather than the second, which is the behaviour the small path already
-        // has.
+        // A key and a length are twelve bytes whatever the source weighs, no
+        // source is kept and nothing is cached. If the cap is raised later, a
+        // chunk already known to repeat is kept the first time it appears rather
+        // than the second.
         std::unordered_map<uint64_t, uint32_t>::iterator bseen = g_seenOnce.find(key);
         const bool bsecond = (bseen != g_seenOnce.end() &&
                               bseen->second == (uint32_t)srcLen);

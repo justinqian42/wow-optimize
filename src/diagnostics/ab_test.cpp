@@ -415,13 +415,9 @@ bool Init() {
 
     lstrcpynA(g_subject, Config::g_settings.AbTestSubject, (int)sizeof(g_subject));
 
-    // An empty subject used to stand the harness down and print the list of
-    // names that would have worked. Everything about that was right except what
-    // it cost: the tickbox is in the launcher, the subject is not, so a tester
-    // who ticks the box and plays for an hour gets a list instead of a
-    // measurement, and the session that answers something is the next one.
-    // Rotation is what they would have picked and needs no ini edit, so it is
-    // what an unnamed subject means now.
+    // An unnamed subject means rotation. The tickbox is in the launcher and the
+    // subject name is not, so standing down and printing a list of names costs a
+    // tester a whole session and answers nothing.
     bool subjectWasBlank = (g_subject[0] == 0);
     if (subjectWasBlank || lstrcmpiA(g_subject, "all") == 0 ||
         lstrcmpiA(g_subject, "*") == 0) {

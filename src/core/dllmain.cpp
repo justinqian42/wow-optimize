@@ -1626,12 +1626,10 @@ static void LogOpen() {
     // 1. Standard log (wow_optimize.log) always overwritten to keep latest easy to access
     //
     // Opened deny-write, and when another process already holds it, the next free
-    // numbered name instead. Two clients started from one folder used to open this
-    // file with no sharing restriction and separate write offsets, and wrote over
-    // each other for the whole session: a tester's logs from two accounts came back
-    // as one interleaved file, with one client's closing report at the end of the
-    // other's startup. The numbered names fall outside what PruneSessionLogs
-    // matches and are reused, so they cannot pile up.
+    // numbered name instead. Without the sharing restriction two clients started
+    // from one folder write over each other for the whole session. The numbered
+    // names fall outside what PruneSessionLogs matches and are reused, so they
+    // cannot pile up.
     char logNote[200] = "";
     g_log = _fsopen("Logs\\wow_optimize.log", "w", _SH_DENYWR);
     for (int slot = 2; slot <= 8 && !g_log; slot++) {
@@ -5232,10 +5230,10 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     // Renderer line here too: DXVK's d3d9.dll can load after the startup probe,
     // so re-report it once detection has reliably latched. Makes any mid-session
     // log slice self-describing (GPU is static; logged once at startup).
-    // Three states. "native Direct3D 9" used to cover both "we looked and it is",
-    // and every way the look itself could fail - d3d9.dll not loaded yet, no
-    // version resource, our own version.dll proxy not forwarding. A tester on
-    // DXVK reading "native Direct3D 9" sends the wrong log to the wrong place.
+    // Three states: it is native, it is DXVK, or the look itself failed -
+    // d3d9.dll not loaded yet, no version resource, our proxy not forwarding.
+    // A tester on DXVK reading "native Direct3D 9" sends the log to the wrong
+    // place.
     {
         DXVKBridge::Stats dx = {};
         DXVKBridge::GetStats(&dx);
@@ -6003,9 +6001,8 @@ static bool InstallSwapPresentHook() {
 // ================================================================
 // sub_69E220 is the only true frame boundary available: reached solely through
 // the render vtable, exactly once per presented frame. The optimizing hook above
-// already reports each frame to FrameBench, but it is gated behind OptVulkanDXVK,
-// which is off by default - so without this the benchmark would silently record
-// nothing for most users, which is worse than having no benchmark at all.
+// reports frames too, but it is gated behind OptVulkanDXVK, which is off by
+// default, so without this the benchmark records nothing for most users.
 //
 // Deliberately thin: report the frame, call the original, nothing else. It adds
 // no behaviour of its own, so it cannot influence what it is measuring.
@@ -9540,12 +9537,8 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("--- Async Sound FX Loader ---");
     if (Config::g_settings.OptAudioDecodeMt && !RunningUnderTranslation()) AsyncSoundLoader::Init();
 
-    // A "Lua VM Bytecode JIT Compiler" banner used to print here with nothing
-    // under it - no Init, no module, no such feature anywhere in the source. The
-    // README described it in detail, down to a detour of sub_856370 and a
-    // lock-free cache called g_protoCache, neither of which has ever existed.
-    // This client's Lua has no JIT and no bytecode loader at all; that is why the
-    // chunk cache had to keep Proto objects instead. Removed from both.
+    // No JIT here, and no bytecode loader: this client's Lua has neither, which
+    // is why the chunk cache keeps Proto objects instead.
 
     Log("");
     Log("--- RCU Object Manager Traverser ---");

@@ -67,12 +67,11 @@ static luaH_getstr_fn g_orig_getstr = nullptr;
 // bucket masked by the table's own lsizenode, so it is inside the array the
 // table says it has.
 //
-// What changed about safety, stated plainly: the first-node read is no longer
-// caught if the table pointer is valid-looking but points at freed memory. Three
-// things still stand in front of it - the reload and swap check, the range test
-// on both pointers, and the range test on node_array - and the walk, which is
-// where a corrupt chain actually leads, is still guarded. If a fault ever
-// appears at this address, this is the change to revisit first.
+// The first-node read is not guarded against a table pointer that looks valid
+// and points at freed memory. Three things stand in front of it - the reload and
+// swap check, the range test on both pointers, the range test on node_array -
+// and the walk, where a corrupt chain actually leads, is guarded. A fault at
+// this address means revisiting that.
 static __declspec(noinline) void* WalkChainGuarded(int table, int tstring,
                                                    void* first)
 {

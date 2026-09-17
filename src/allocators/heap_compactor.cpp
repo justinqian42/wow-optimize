@@ -249,17 +249,14 @@ static DWORD WINAPI MonitorThread(LPVOID) {
         // The low half is what actually runs out, and it is what the trigger
         // reads now.
         //
-        // This used to trigger on the full-range figure and log the discrepancy
-        // instead of acting on it, because the cost of acting was unknown. An
-        // eight-hour session settled it: that line fired 66 times with the low
-        // half at 10-14 MB - under the 16 MB threshold the whole time - while
-        // the full range sat at 1857 MB and no compaction ever ran. The client
-        // spent the session with the resource it actually allocates from
-        // exhausted, and this module watched.
+        // Triggering on the full-range figure instead misses it entirely: an
+        // eight-hour session sat with the low half at 10-14 MB, under the 16 MB
+        // threshold the whole time, while the full range read 1857 MB and no
+        // compaction ran.
         //
-        // Acting on it needs a brake, which is the reason it was left alone
-        // before: a client parked below the threshold would otherwise compact on
-        // every tick, and a full mi_collect plus a HeapCompact of every process
+        // Acting on it needs a brake: a client parked below the threshold would
+        // otherwise compact on every tick, and a full mi_collect plus a
+        // HeapCompact of every process
         // heap is exactly the kind of stall this project keeps chasing. So the
         // request is rate limited, and the module measures whether its own work
         // achieves anything - see the recovery check in RunPendingWork.

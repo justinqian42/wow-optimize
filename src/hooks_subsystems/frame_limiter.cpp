@@ -74,21 +74,12 @@ unsigned int __fastcall Hooked_EngineFrameLimit(void* This, void* unused) {
     }
 
 #if !TEST_DISABLE_FRAME_LIMITER
-    // Everything this DLL does per frame - the liveness stamp the freeze
-    // watchdog reads, periodic maintenance, dropping caches when the lua_State
-    // changes, every subsystem's OnFrame - used to hang off the client calling
-    // Sleep, because that is where the hook was. This function's wait moved to a
-    // waitable timer, Sleep stopped being called on that path, and the heartbeat
-    // went with it.
-    //
-    // It has to be here, at the top, before anything can return. The first
-    // attempt at this put it beside the wait, inside the branch that only runs
-    // when there is time left in the frame, behind two earlier exits: one when
-    // no FPS cap is set at all, and one whenever a frame overruns its budget. A
-    // two-minute session with the cap raised produced 156 Sleep-hook calls and
-    // two freeze reports whose "silent for" figure matched the hook's last-call
-    // figure to the millisecond - the same signature as before the fix, because
-    // for that configuration the fix was never reached.
+    // Everything this DLL does per frame - the liveness stamp the freeze watchdog
+    // reads, periodic maintenance, dropping caches on a lua_State change, every
+    // subsystem's OnFrame - hangs off this call. It must stay here, at the top,
+    // before anything can return: put it beside the wait instead and it sits
+    // behind two exits, one when no FPS cap is set and one whenever a frame
+    // overruns its budget, so for those configurations it never runs at all.
     //
     // This function is the client's own per-frame limiter, so it runs once a
     // frame whatever it decides to do about pacing. The eight-millisecond gate
@@ -149,18 +140,14 @@ unsigned int __fastcall Hooked_EngineFrameLimit(void* This, void* unused) {
         LARGE_INTEGER targetTime;
         targetTime.QuadPart = g_frameStartQpc.QuadPart + (LONGLONG)(targetDuration * g_ticksPerSec);
 
-        // How much of the frame is spent spinning rather than sleeping. This used
-        // to be 1.5 ms, which is not a small number: the spin is entered on every
-        // frame, so at a 200 FPS cap - a 5 ms frame - it burned 1.5 ms of every 5
-        // in a loop that does nothing. That is 30% of a core given away for
-        // timing precision nobody asked for, and it matches a tester reporting
-        // CPU use going from about 15% to about 50% with no other change.
+        // How much of the frame is spent spinning rather than sleeping. Keep it
+        // small: the spin is entered every frame, so at a 200 FPS cap a 1.5 ms
+        // margin burns 1.5 ms of every 5 in a loop that does nothing, which one
+        // tester saw as CPU use going from about 15% to about 50%.
         //
-        // SwitchToThread is what made it that expensive. It yields only to a
-        // thread already runnable on the same processor and returns immediately
-        // when there is none, so with an idle core the loop is a plain busy-wait.
-        // Under Wine, where this was measured, each call is also a good deal
-        // dearer than on Windows.
+        // SwitchToThread does not help. It yields only to a thread already
+        // runnable on the same processor and returns immediately when there is
+        // none, so with an idle core the loop is a plain busy-wait.
         //
         // A high-resolution waitable timer does the waiting in the kernel and
         // wakes within a few hundred microseconds, so the spin only has to cover

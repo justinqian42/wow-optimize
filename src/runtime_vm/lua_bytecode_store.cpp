@@ -55,16 +55,11 @@
 //   bytecode.idx   the same header plus how far into the blob file it vouches
 //                  for, then one record per chunk, rewritten whole
 //
-// The index started out as a trailer inside the one file, which does not
-// survive this client: it exits through TerminateProcess, so a session always
-// ends between a capture and a save, and the next capture after a save would
-// have been written over the index that save had just put there. The reader
-// would then be pointed at blob bytes and would throw the whole store away.
-// Every session would have lost it.
-//
-// Split, that cannot happen. The blob file only grows, the index names the
-// prefix of it that has been vouched for, and a kill loses the captures made
-// since the last save and nothing else.
+// Two files, not an index trailing the blob in one. This client exits through
+// TerminateProcess, so a session always ends between a capture and a save, and a
+// capture after a save would land on the index that save had just written. Split,
+// the blob only grows, the index names the prefix vouched for, and a kill loses
+// the captures made since the last save and nothing else.
 //
 // A pair whose header does not match this build of the DLL, or whose Wow.exe
 // stamp has changed, is discarded and started again. Patching the client

@@ -324,17 +324,10 @@ extern "C" char __cdecl Hooked_ParticleEmitterUpdate(int a1, int a2, int a3, int
     return 1;
 }
 
-// Two SSE2 helpers lived here, SSE2_TransformParticles and SSE2_LerpColors4.
-// Both were static with no caller anywhere in the tree - they never ran, and
-// they made this file read as though particle transforms and colour blending
-// were accelerated when nothing of the sort was wired up.
-//
-// SSE2_LerpColors4 was also wrong, which is the reason for saying so here
-// rather than deleting them quietly: it computed aHi32 from aLo16 instead of
-// aHi16 and did the same for b, so it read the low eight bytes twice, ignored
-// the high eight entirely, and still stored a full sixteen. If anyone had
-// wired it up expecting four particles it would have blended two and
-// overwritten the rest. They are in the history if the work is ever picked up.
+// Nothing here accelerates particle transforms or colour blending. Two SSE2
+// helpers that claimed to are in the history, uncalled; one of them read the low
+// eight bytes twice and stored a full sixteen, so picking that work up means
+// starting from the disassembly rather than from them.
 
 // ================================================================
 // 2. Map (.ADT) Terrain Pre-parsing

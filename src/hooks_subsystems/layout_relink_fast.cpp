@@ -149,14 +149,10 @@
 //                                              correct. We merely paid for a
 //                                              scan we could have skipped.
 //
-// The original check was `actualNotFound != predictNotFound`, which retired on
-// both. A tester's log (nobus, v3.18.2) shows the cost: the module disabled
-// itself three seconds into the session on the *second* kind, having taken zero
-// shortcuts, and the client's 9%-of-profile scan ran unaided for the rest of the
-// session. A divergence that cannot produce a wrong answer must not be able to
-// switch the module off. It is counted instead, because a high count means the
-// dependants list holds entries the scan rejects and there is more win available
-// than we are taking.
+// So retire on the first only. A divergence that cannot produce a wrong answer
+// must not be able to switch the module off; it is counted instead, and a high
+// count means the dependants list holds entries the scan rejects, which is win
+// still on the table.
 // ---------------------------------------------------------------------------
 // ============================================================================
 
