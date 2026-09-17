@@ -1515,6 +1515,9 @@ static volatile LONG g_logDropped = 0;
 // Lines the formatter had to cut short. Zero on every log measured so far; if it
 // stops being zero, LOG_LINE_MAX is the thing to change.
 static volatile LONG g_logTruncated = 0;
+// The first truncated line's format string, so the report can name the caller
+// instead of printing a count nobody can trace.
+static char g_logTruncatedFirst[96] = {0};
 // For the per-reporter timing in the periodic dump.
 static LARGE_INTEGER g_statsFreq = {};
 static volatile LONG g_logReadPos = 0;
@@ -1805,7 +1808,14 @@ void LogFlushImmediate() {
     va_end(args);
     if (msgLen < 0) {
         msgLen = LOG_LINE_MAX - 2 - offset;
-        InterlockedIncrement(&g_logTruncated);
+        // Keep the first one's format string. A count on its own cannot be acted
+        // on: a tester session reported sixteen truncated lines and the longest
+        // line in the file was 597 characters against a budget of about 970, so
+        // nothing in the log said which line had lost its tail.
+        if (InterlockedIncrement(&g_logTruncated) == 1) {
+            lstrcpynA(g_logTruncatedFirst, fmt ? fmt : "(null format)",
+                      (int)sizeof(g_logTruncatedFirst));
+        }
     }
     offset += msgLen;
 
@@ -5211,7 +5221,8 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
         LONG cut = g_logTruncated;
         if (cut > 0) {
             Log("[Wrong] %ld log line(s) were longer than a ring slot and lost "
-                "their tail.", (long)cut);
+                "their tail. The first was: %s", (long)cut,
+                g_logTruncatedFirst[0] ? g_logTruncatedFirst : "(not recorded)");
         }
         Log("========================================");
     }

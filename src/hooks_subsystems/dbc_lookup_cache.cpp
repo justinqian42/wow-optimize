@@ -14,6 +14,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "dbc_lookup_cache.h"
+#include "config.h"
 
 extern "C" void Log(const char* fmt, ...);
 #include "crash_dumper.h"
@@ -462,9 +463,17 @@ void DbcLookupCache_LogStats()
     // counters were empty, so a log carried no line at all whether the cache was
     // switched off, failed to install, or sat installed and untouched.
     if (!g_cache) {
-        Log("[DbcLookupCache] not measured: the table was never allocated, so no "
-            "lookup went through this. The switch is DbcLookupCache and the reason "
-            "an install refused is earlier in this log.");
+        // Which of the two it is, because a tester log said "the reason an install
+        // refused is earlier in this log" for a switch that was simply off, and
+        // there was no such reason to find.
+        if (!Config::g_settings.OptDbcLookupCache) {
+            Log("[DbcLookupCache] not measured: switched off "
+                "(Graphics_Sound/DbcLookupCache).");
+        } else {
+            Log("[DbcLookupCache] NOT active: switched on, and the table was never "
+                "allocated, so no lookup went through this. The reason the install "
+                "refused is earlier in this log.");
+        }
         return;
     }
     if (total == 0 && g_bypassedPlainCopy == 0) {

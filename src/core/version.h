@@ -10,10 +10,19 @@
 
 #define WOW_OPTIMIZE_VERSION_MAJOR  3
 #define WOW_OPTIMIZE_VERSION_MINOR  19
-#define WOW_OPTIMIZE_VERSION_PATCH  1
+#define WOW_OPTIMIZE_VERSION_PATCH  2
 #define WOW_OPTIMIZE_VERSION_BUILD  0
 
-#define WOW_OPTIMIZE_VERSION_STR    "3.19.2"
+// Built from the numbers above rather than written out again. They had drifted:
+// the string said 3.19.2 while FILEVERSION in the resource still said 3.19.1, so
+// every crash dump from every 3.19.2 build reported 3.19.1 in the one field a
+// minidump carries that can identify a build. Working out which build a tester
+// was on took a comparison of image sizes instead.
+#define WOWOPT_VER_STR2(x)          #x
+#define WOWOPT_VER_STR1(x)          WOWOPT_VER_STR2(x)
+#define WOW_OPTIMIZE_VERSION_STR    WOWOPT_VER_STR1(WOW_OPTIMIZE_VERSION_MAJOR) "." \
+                                    WOWOPT_VER_STR1(WOW_OPTIMIZE_VERSION_MINOR) "." \
+                                    WOWOPT_VER_STR1(WOW_OPTIMIZE_VERSION_PATCH)
 #define WOW_OPTIMIZE_AUTHOR         "SUPREMATIST"
 
 #ifndef CRASH_TEST_DISABLE_PHASE2
