@@ -156,6 +156,7 @@ static const BoolSetting kBoolSettings[] = {
     { "General", "ClientWriteBatch", &Settings::OptClientWriteBatch },
     { "Graphics_Sound", "AabbOverlap", &Settings::OptAabbOverlap },
     { "Graphics_Sound", "AabbTransform", &Settings::OptAabbTransform },
+    { "Graphics_Sound", "ColorUnpack", &Settings::OptColorUnpack },
     { "Graphics_Sound", "AnimQuatUnpack", &Settings::OptAnimQuatUnpack },
     { "UI_Lua", "LuaPoolFast", &Settings::OptLuaPoolFast },
     { "Graphics_Sound", "AnimVec3Track", &Settings::OptAnimVec3Track },
@@ -715,6 +716,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         if (g_settings.HighPlacementMinKB > 65536) g_settings.HighPlacementMinKB = 65536;
         g_settings.OptAabbOverlap         = GetPrivateProfileIntA("Graphics_Sound", "AabbOverlap", 1, iniPath.c_str()) != 0;
         g_settings.OptAabbTransform       = GetPrivateProfileIntA("Graphics_Sound", "AabbTransform", 1, iniPath.c_str()) != 0;
+        g_settings.OptColorUnpack         = GetPrivateProfileIntA("Graphics_Sound", "ColorUnpack", 1, iniPath.c_str()) != 0;
         g_settings.OptAnimQuatUnpack      = GetPrivateProfileIntA("Graphics_Sound", "AnimQuatUnpack", 1, iniPath.c_str()) != 0;
         g_settings.OptLuaPoolFast     = GetPrivateProfileIntA("UI_Lua", "LuaPoolFast", 1, iniPath.c_str()) != 0;
         g_settings.OptAnimVec3Track   = GetPrivateProfileIntA("Graphics_Sound", "AnimVec3Track", 1, iniPath.c_str()) != 0;

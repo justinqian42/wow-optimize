@@ -369,6 +369,8 @@ static void BuildKnownFuncTable() {
         { 0x00982400,    85, "CQuaternion::FromAngleAxis" },
         { 0x00982460,   268, "CQuaternion::Slerp" },
         { 0x00982630,   111, "Quat_Lerp" },
+        { 0x00982970,    61, "Color_UnpackBGR" },
+        { 0x009829B0,    61, "Vec3_DominantAxis" },
         { 0x00982FB0,   283, "RayPlaneIntersect" },
         { 0x009830D0,   957, "PointInPolygon2D" },
         { 0x00983490,   537, "RayTriIntersect16" },
@@ -380,6 +382,7 @@ static void BuildKnownFuncTable() {
         { 0x00983D20,    79, "CFrustum::IsSphereVisible" },
         { 0x00983D70,   241, "CFrustum::IsPointVisible" },  // vectorized by frustum_aabb_sse2.cpp
         { 0x00984930,   829, "AABB_FromVertices" },
+        { 0x00984C90,    76, "Color_UnpackBGRA" },
 
         // --- CRT string/memory (static) ---
         { 0x0076E5A0,    36, "free_wrapper" },

@@ -465,6 +465,10 @@ namespace Config {
         // Replaces 18 serialized x87 status-word transfers (fnstsw ax) and 9
         // data-dependent branches per box with hardware double-precision SSE2.
         bool OptAabbTransform = true;
+        // Vectorized color unpacking (sub_984C90 and sub_982970) and vector
+        // dominant axis calculation (sub_9829B0). Converts packed BGRA/BGR bytes
+        // into normalized floats using SSE2, and evaluates dominant axis via bitwise fabs.
+        bool OptColorUnpack = true;
         // The bone rotation track (sub_828680), run once per animated bone per
         // frame from the largest entry in the main-thread profile. Keyframes are
         // four uint16 expanded as v * K - 1.0, and x86 has no register path from
