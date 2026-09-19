@@ -11634,6 +11634,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             CombatLogFilter::Shutdown();
             SoundVolumeLimit::Shutdown();
             TerrainHeightCache::Shutdown();
+            HorizonOcclusion::Shutdown();
             QualityGovernor::Shutdown();
             ReportHotFunctionStats();
             CrashDumper::ReportFeatureActivity();

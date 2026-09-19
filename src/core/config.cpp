@@ -624,7 +624,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptSavedVarsAsync      = GetPrivateProfileIntA("Combat_Net", "SavedVarsAsync", 0, iniPath.c_str()) != 0;
         g_settings.OptSavedVarsPretoken   = GetPrivateProfileIntA("Combat_Net", "SavedVarsPretoken", 0, iniPath.c_str()) != 0;
         g_settings.OptUnitAuraFast        = GetPrivateProfileIntA("Combat_Net", "UnitAuraFast", 0, iniPath.c_str()) != 0;
-        g_settings.OptNetworkGuidSse2     = GetPrivateProfileIntA("Combat_Net", "NetworkGuidSse2", 0, iniPath.c_str()) != 0;
+        g_settings.OptNetworkGuidSse2     = GetPrivateProfileIntA("Combat_Net", "NetworkGuidSse2", 1, iniPath.c_str()) != 0;
         g_settings.OptApiCache   = GetPrivateProfileIntA("Combat_Net", "ApiCache", 1, iniPath.c_str()) != 0;
         g_settings.OptGuidLookupCache   = GetPrivateProfileIntA("Combat_Net", "GuidLookupCache", 1, iniPath.c_str()) != 0;
         g_settings.OptPacketOffload       = GetPrivateProfileIntA("Combat_Net", "PacketOffload", 0, iniPath.c_str()) != 0;
@@ -670,7 +670,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptLuaAddonProfile     = GetPrivateProfileIntA("UI_Lua", "LuaAddonProfile", g_settings.OptSamplingProfiler ? 1 : 0, iniPath.c_str()) != 0;
         g_settings.OptCpuTopology         = GetPrivateProfileIntA("General", "CpuTopology", 1, iniPath.c_str()) != 0;
         g_settings.OptPinMainThread       = GetPrivateProfileIntA("General", "PinMainThread", 0, iniPath.c_str()) != 0;
-        g_settings.OptLuaMemPoolFast      = GetPrivateProfileIntA("UI_Lua", "LuaMemPoolFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptLuaMemPoolFast      = GetPrivateProfileIntA("UI_Lua", "LuaMemPoolFast", 1, iniPath.c_str()) != 0;
         g_settings.OptVertexFmtInline     = GetPrivateProfileIntA("Graphics_Sound", "VertexFmtInline", 1, iniPath.c_str()) != 0;
         g_settings.OptObjMgrFindFast      = GetPrivateProfileIntA("General", "ObjMgrFindFast", 1, iniPath.c_str()) != 0;
         g_settings.OptQuatLerpSse2        = GetPrivateProfileIntA("Graphics_Sound", "QuatLerpSse2", 1, iniPath.c_str()) != 0;
@@ -762,7 +762,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2AnimReuse  = GetPrivateProfileIntA("Graphics_Sound", "M2AnimReuse", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaAllocCensus = GetPrivateProfileIntA("UI_Lua", "LuaAllocCensus", 0, iniPath.c_str()) != 0;
         g_settings.OptAnimCensus = GetPrivateProfileIntA("Graphics_Sound", "AnimCensus", 0, iniPath.c_str()) != 0;
-        g_settings.OptHorizonOcclusionSse2 = GetPrivateProfileIntA("Graphics_Sound", "HorizonOcclusionSse2", 0, iniPath.c_str()) != 0;
+        g_settings.OptHorizonOcclusionSse2 = GetPrivateProfileIntA("Graphics_Sound", "HorizonOcclusionSse2", 1, iniPath.c_str()) != 0;
         g_settings.OptNetDiag = GetPrivateProfileIntA("Combat_Net", "NetDiag", 1, iniPath.c_str()) != 0;
         g_settings.OptCrtFreeMsize = GetPrivateProfileIntA("General", "CrtFreeMsize", 1, iniPath.c_str()) != 0;
         g_settings.OptCrtAllocMsize = GetPrivateProfileIntA("General", "CrtAllocMsize", 1, iniPath.c_str()) != 0;

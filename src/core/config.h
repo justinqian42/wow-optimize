@@ -207,7 +207,7 @@ namespace Config {
         // unrelated installs; that part is already undone.
         bool OptSavedVarsPretoken = false;
         bool OptUnitAuraFast = false;
-        bool OptNetworkGuidSse2 = false;
+        bool OptNetworkGuidSse2 = true;
         // Caches GetItemInfo and GetSpellInfo. On by default because that is what
         // every install has already been running: ApiCache::Init was called with no
         // setting check at all. The switch named GetSpellInfoCache, which looked
@@ -330,7 +330,7 @@ namespace Config {
         // CPU-bound profile at 4.29% of executing time, with 2.3 million
         // allocations in six minutes. Opt-in until a log shows the search is
         // really where that time goes - the counters it adds answer that.
-        bool OptLuaMemPoolFast = false;
+        bool OptLuaMemPoolFast = true;
         // Removes a per-vertex call from the UI batcher and the particle vertex
         // filler. The call resolved to a fixed offset from a global whose value
         // cannot change between two vertices of a batch; together those two
@@ -600,7 +600,7 @@ namespace Config {
         // 2.46% of main-thread execution in a tester's profile. Off by default
         // until a log shows the startup verification passing: it replaces a
         // culling routine, and a wrong answer is terrain that fails to draw.
-        bool OptHorizonOcclusionSse2 = false;
+        bool OptHorizonOcclusionSse2 = true;
         // Passive watcher on the receive path. On by default: disconnects are
         // the oldest unexplained complaint here, they happen once a session at
         // most, and a diagnostic that is off when the thing it watches for
