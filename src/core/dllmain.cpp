@@ -43,6 +43,7 @@
 #include "lua_undump.h"
 #include "anim_lod.h"
 #include "collision_outcode_sse2.h"
+#include "collision_model_cache_sse2.h"
 #include "collision_ray_outcode_sse2.h"
 #include "high_tables.h"
 #include "x87_precision_check.h"
@@ -5638,6 +5639,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaBytecodeStore::SaveIfDirty", LuaBytecodeStore::SaveIfDirty());
     STAT_TIME("AnimLod::LogStats", AnimLod::LogStats());
     STAT_TIME("CollisionOutcode::LogStats", CollisionOutcode::LogStats());
+    STAT_TIME("CollisionModelCache::LogStats", CollisionModelCache::LogStats());
     STAT_TIME("CollisionRayOutcode::LogStats", CollisionRayOutcode::LogStats());
     STAT_TIME("HighTables::LogStats", HighTables::LogStats());
     STAT_TIME("X87Precision::LogStats", X87Precision::LogStats());
@@ -8439,6 +8441,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     LuaBytecodeStore::Init();
     AnimLod::Init();
     CollisionOutcode::Init();
+    CollisionModelCache::Init();
     X87Precision::Sample("at DLL init");
     CollisionRayOutcode::Init();
     RayTriangle::Init();

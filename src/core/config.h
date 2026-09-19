@@ -388,6 +388,10 @@ namespace Config {
         // applied, so this is bit-exact rather than close. Opt-in, and it
         // predicts the client's whole output and compares before trusting itself.
         bool OptCollisionOutcode = true;
+        // The 8-way set-associative BSP collision model cache lookup (sub_79B1F0).
+        // Uses dual 128-bit SSE2 vector comparisons to test all 8 set slots
+        // simultaneously with zero branch mispredictions and bitscan hit extraction.
+        bool OptCollisionModelCache = true;
         bool OptCollisionRayOutcode = true;
         bool OptRayTriangleSse2 = true;
         // The bone matrix upload loop inside sub_829BA0, 3.35% of executing

@@ -151,6 +151,7 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/objmgr_find_fast.cpp
     src/hooks_subsystems/anim_lod.cpp
     src/simd_math/collision_outcode_sse2.cpp
+    src/simd_math/collision_model_cache_sse2.cpp
     src/simd_math/collision_ray_outcode_sse2.cpp
     src/simd_math/x87_precision_check.cpp
     src/simd_math/ray_triangle_sse2.cpp
