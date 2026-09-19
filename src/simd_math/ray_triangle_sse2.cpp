@@ -142,6 +142,7 @@
 #include "version.h"
 #include "config.h"
 #include "ab_test.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -152,7 +153,8 @@ namespace RayTriangle {
 
 namespace {
 
-constexpr uintptr_t kTarget = 0x00983490;
+constexpr uintptr_t kTarget16 = 0x00983490;
+constexpr uintptr_t kTarget32 = 0x009836B0;
 
 // flt_AA2E70 and flt_A32B48, read out of the image: -1e-6f and +1e-6f.
 const float kDetLo = -9.9999997e-07f;
@@ -164,18 +166,27 @@ constexpr unsigned kResample = 4095;   // one call in this many, as a mask
 typedef int (__cdecl* Compare_t)(const void* ray, const void* verts,
                                  const void* tri, void* outT, void* outUV,
                                  float tol);
-Compare_t orig_Test = nullptr;
 
-bool g_installed = false;
-bool g_armed     = false;
-bool g_dead      = false;
-bool g_abSubject = false;
-int  g_benchSlot = -1;
+struct Channel {
+    const char*   name;
+    const char*   symbolName;
+    uintptr_t     target;
+    Compare_t     origTest;
+    bool          installed;
+    bool          armed;
+    bool          dead;
+    bool          abSubject;
+    int           benchSlot;
 
-unsigned long g_calls    = 0;
-unsigned long g_verified = 0;
-unsigned long g_hits     = 0;   // reported an intersection
-unsigned long g_stood    = 0;
+    unsigned long calls;
+    unsigned long verified;
+    unsigned long hits;
+    unsigned long stood;
+    unsigned long caught;
+};
+
+static Channel g_ch16 = { "16-bit", "RayTriIntersect16_SSE2", kTarget16, nullptr, false, false, false, false, -1, 0, 0, 0, 0, 0 };
+static Channel g_ch32 = { "32-bit", "RayTriIntersect32_SSE2", kTarget32, nullptr, false, false, false, false, -1, 0, 0, 0, 0, 0 };
 
 // Rounds to float and back, which is what an fstp to a dword slot does.
 inline double F(double x) { return (double)(float)x; }
@@ -190,7 +201,8 @@ struct Out {
 
 // A verbatim transcription. Every rounding and every association above is
 // reproduced; nothing here is simplified.
-int Test(const float* ray, const float* verts, const uint16_t* tri,
+template <typename IndexT>
+int Test(const float* ray, const float* verts, const IndexT* tri,
          bool wantT, bool wantUV, float tolIn, Out* out) {
     out->wroteT = false;
     out->wroteUV = false;
@@ -199,9 +211,9 @@ int Test(const float* ray, const float* verts, const uint16_t* tri,
     const double negTol  = -tol;                 // fchs then fstp: exact
     const double onePlus = F(tol + 1.0);         // fadd 1.0 then fstp to float
 
-    const float* v0 = verts + 3 * (unsigned)tri[0];
-    const float* v1 = verts + 3 * (unsigned)tri[1];
-    const float* v2 = verts + 3 * (unsigned)tri[2];
+    const float* v0 = verts + 3 * (size_t)tri[0];
+    const float* v1 = verts + 3 * (size_t)tri[1];
+    const float* v2 = verts + 3 * (size_t)tri[2];
 
     const double e1x = (double)v1[0] - (double)v0[0];
     const double e1y = (double)v1[1] - (double)v0[1];
@@ -284,57 +296,57 @@ bool ReadableRange(const void* p, size_t bytes) {
 //
 // The guard lives in its own function so that Hooked_Test has no __try at all:
 // one anywhere in it puts the frame into its prologue for every call.
-unsigned long g_caught = 0;
-
+template <typename IndexT>
 __declspec(noinline) bool TestGuardedCall(const void* ray, const void* verts,
                                           const void* tri, bool wantT, bool wantUV,
-                                          float tol, Out* o, int* r) {
+                                          float tol, Out* o, int* r,
+                                          unsigned long& caughtCounter) {
     __try {
-        *r = Test((const float*)ray, (const float*)verts, (const uint16_t*)tri,
-                  wantT, wantUV, tol, o);
+        *r = Test<IndexT>((const float*)ray, (const float*)verts, (const IndexT*)tri,
+                          wantT, wantUV, tol, o);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        ++g_caught;
+        ++caughtCounter;
         return false;
     }
 }
 
-int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
-                        void* outT, void* outUV, float tol) {
-    ++g_calls;
+template <typename IndexT>
+inline int Hooked_TestImpl(const void* ray, const void* verts, const void* tri,
+                           void* outT, void* outUV, float tol, Channel& ch) {
+    ++ch.calls;
 
-    if (g_dead || !ray || !verts || !tri)
-        return orig_Test(ray, verts, tri, outT, outUV, tol);
-    if (!ReadableRange(ray, 24) || !ReadableRange(tri, 6))
-        return orig_Test(ray, verts, tri, outT, outUV, tol);
+    if (ch.dead || !ray || !verts || !tri)
+        return ch.origTest(ray, verts, tri, outT, outUV, tol);
+    if (!ReadableRange(ray, 24) || !ReadableRange(tri, sizeof(IndexT) * 3))
+        return ch.origTest(ray, verts, tri, outT, outUV, tol);
 
-    const bool checking = !g_armed || (g_calls & kResample) == 0;
+    const bool checking = !ch.armed || (ch.calls & kResample) == 0;
 
     if (!checking) {
         // Both halves of the A/B run are bracketed by the same pair, so the
         // harness files an ON sample against an OFF one and the report is this
         // function measured against the client's rather than a frame time that
-        // cannot see it. A subject with no bracket is a subject that measures
-        // nothing, which is what three modules shipped as this morning.
+        // cannot see it.
         const unsigned long long t = AbTest::TickIn();
         int r;
-        if (g_abSubject && AbTest::StandAside()) {
-            ++g_stood;
-            r = orig_Test(ray, verts, tri, outT, outUV, tol);
-            if (r & 0xFF) ++g_hits;
+        if (ch.abSubject && AbTest::StandAside()) {
+            ++ch.stood;
+            r = ch.origTest(ray, verts, tri, outT, outUV, tol);
+            if (r & 0xFF) ++ch.hits;
         } else {
             Out o;
-            if (g_caught == 0) {
-                r = Test((const float*)ray, (const float*)verts,
-                         (const uint16_t*)tri, outT != nullptr,
-                         outUV != nullptr, tol, &o);
-            } else if (!TestGuardedCall(ray, verts, tri, outT != nullptr,
-                                        outUV != nullptr, tol, &o, &r)) {
+            if (ch.caught == 0) {
+                r = Test<IndexT>((const float*)ray, (const float*)verts,
+                                 (const IndexT*)tri, outT != nullptr,
+                                 outUV != nullptr, tol, &o);
+            } else if (!TestGuardedCall<IndexT>(ray, verts, tri, outT != nullptr,
+                                                outUV != nullptr, tol, &o, &r, ch.caught)) {
                 AbTest::TickOut(t);
-                return orig_Test(ray, verts, tri, outT, outUV, tol);
+                return ch.origTest(ray, verts, tri, outT, outUV, tol);
             }
             if (r) {
-                ++g_hits;
+                ++ch.hits;
                 if (o.wroteT)  *(float*)outT = o.t;
                 if (o.wroteUV) { ((float*)outUV)[0] = o.u; ((float*)outUV)[1] = o.v; }
             }
@@ -343,9 +355,9 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
         return r;
     }
 
-    if (g_abSubject && AbTest::StandAside()) {
-        ++g_stood;
-        return orig_Test(ray, verts, tri, outT, outUV, tol);
+    if (ch.abSubject && AbTest::StandAside()) {
+        ++ch.stood;
+        return ch.origTest(ray, verts, tri, outT, outUV, tol);
     }
 
     // Checking: work out the answer without touching the caller's buffers, let
@@ -356,17 +368,17 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
     Out mine;
     int ours;
     const uint64_t tOursA = SelfBench::Now();
-    if (!TestGuardedCall(ray, verts, tri, outT != nullptr, outUV != nullptr,
-                         tol, &mine, &ours)) {
-        return orig_Test(ray, verts, tri, outT, outUV, tol);
+    if (!TestGuardedCall<IndexT>(ray, verts, tri, outT != nullptr, outUV != nullptr,
+                                 tol, &mine, &ours, ch.caught)) {
+        return ch.origTest(ray, verts, tri, outT, outUV, tol);
     }
 
     const uint64_t tOursB = SelfBench::Now();
-    const int theirs = orig_Test(ray, verts, tri, outT, outUV, tol);
+    const int theirs = ch.origTest(ray, verts, tri, outT, outUV, tol);
     const uint64_t tTheirsB = SelfBench::Now();
-    SelfBench::Pair(g_benchSlot, tOursB - tOursA, tTheirsB - tOursB);
-    ++g_verified;
-    if (theirs & 0xFF) ++g_hits;   // counted on both paths, or the rate lies
+    SelfBench::Pair(ch.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
+    ++ch.verified;
+    if (theirs & 0xFF) ++ch.hits;   // counted on both paths, or the rate lies
 
     // Only AL is the answer. See the note above about the sort key cache.
     const bool sameAnswer = ((ours & 0xFF) != 0) == ((theirs & 0xFF) != 0);
@@ -379,24 +391,34 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
     }
 
     if (!sameAnswer || !sameData) {
-        g_dead = true;
-        Log("[RayTriangle] DISAGREED with the client after %lu comparisons and "
+        ch.dead = true;
+        Log("[RayTriangle] [%s] DISAGREED with the client after %lu comparisons and "
             "retired for this session. It answered %d and this answered %d%s. "
             "The client's own result stands - nothing of ours was written - so "
             "the session is unaffected.",
-            g_verified, theirs & 0xFF, ours & 0xFF,
+            ch.name, ch.verified, theirs & 0xFF, ours & 0xFF,
             sameAnswer ? ", and the answers matched but a written value did not"
                        : "");
         return theirs;
     }
 
-    if (!g_armed && g_verified >= kVerifyFirst) {
-        g_armed = true;
-        Log("[RayTriangle] armed: %lu comparisons agreed with the client, the "
+    if (!ch.armed && ch.verified >= kVerifyFirst) {
+        ch.armed = true;
+        Log("[RayTriangle] [%s] armed: %lu comparisons agreed with the client, the "
             "returned byte and every float written. Now answering directly and "
-            "rechecking one call in %u.", g_verified, kResample + 1);
+            "rechecking one call in %u.", ch.name, ch.verified, kResample + 1);
     }
     return theirs;
+}
+
+int __cdecl Hooked_Test16(const void* ray, const void* verts, const void* tri,
+                          void* outT, void* outUV, float tol) {
+    return Hooked_TestImpl<uint16_t>(ray, verts, tri, outT, outUV, tol, g_ch16);
+}
+
+int __cdecl Hooked_Test32(const void* ray, const void* verts, const void* tri,
+                          void* outT, void* outUV, float tol) {
+    return Hooked_TestImpl<uint32_t>(ray, verts, tri, outT, outUV, tol, g_ch32);
 }
 
 }  // namespace
@@ -404,76 +426,102 @@ int __cdecl Hooked_Test(const void* ray, const void* verts, const void* tri,
 bool Init() {
     if (!Config::g_settings.OptRayTriangleSse2) return true;
 
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hooked_Test,
-                            (void**)&orig_Test) != MH_OK) {
-        Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget);
-        return false;
-    }
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        Log("[RayTriangle] NOT active: could not enable the hook at 0x%08X.",
-            (unsigned)kTarget);
-        return false;
-    }
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("RayTriangleSse2", &g_abSubject);
-    g_benchSlot = SelfBench::Register("RayTriangle");
-
-    Log("[RayTriangle] ACTIVE on sub_983490, the ray-triangle test every "
-        "collision path shares - four functions in the collision family call it "
-        "and that family is 6.4%% of executing time. It is 231 x87 instructions "
-        "with fifteen register exchanges and five status word round trips, each "
-        "feeding a branch on whether a ray misses a triangle, which does not "
-        "predict. This carries the same values in double, which is the width "
-        "the client's own precision control gives it, and compares with comisd "
-        "instead. Where the client rounds an intermediate to a float this "
-        "rounds it too: the determinant takes a float cross product term, every "
-        "barycentric is scaled by a float reciprocal, and the second cross "
-        "product takes a float edge component while the first takes the wide "
-        "one. The first %ld calls are answered by the client and compared - the "
-        "returned byte and every float written.", kVerifyFirst);
     if (!X87Precision::IsDouble())
         Log("[Wrong] [RayTriangle] the x87 precision control is not 53-bit, so "
             "the width this was written for is not the width the client is "
             "using. Read the FpuState lines above.");
-    if (g_abSubject)
-        Log("[RayTriangle]   under A/B test, and both halves are timed directly "
-            "with rdtsc rather than left to frame time, which cannot see a "
-            "function this size. The report compares ticks a call one way "
-            "against the other.");
-    return true;
+
+    bool abSubject = false;
+    abSubject = AbTest::IsSubject("RayTriangleSse2", &abSubject);
+
+    // 16-bit indices target (0x00983490)
+    if (!IsBadReadPtr((void*)kTarget16, 16)) {
+        const unsigned char* p16 = (const unsigned char*)kTarget16;
+        if (p16[0] == 0x55 && p16[1] == 0x8B && p16[2] == 0xEC) {
+            if (WineSafe_CreateHook((void*)kTarget16, (void*)&Hooked_Test16,
+                                    (void**)&g_ch16.origTest) == MH_OK) {
+                if (WO_EnableHook((void*)kTarget16) == MH_OK) {
+                    g_ch16.installed = true;
+                    g_ch16.abSubject = abSubject;
+                    g_ch16.benchSlot = SelfBench::Register("RayTri16");
+                    SamplingProfiler::RegisterSelfSymbol(g_ch16.symbolName, (const void*)&Hooked_Test16);
+                    Log("[RayTriangle] ACTIVE on 16-bit indices (0x%08X), the shared "
+                        "ray-triangle test for the collision family (sub_7C6600, sub_7C6790, "
+                        "sub_7C6C30, sub_7C6D50, sub_81E110). Verified first %ld calls.",
+                        (unsigned)kTarget16, kVerifyFirst);
+                } else {
+                    Log("[RayTriangle] NOT active: could not enable 16-bit hook at 0x%08X.", (unsigned)kTarget16);
+                }
+            } else {
+                Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget16);
+            }
+        }
+    }
+
+    // 32-bit indices target (0x009836B0)
+    if (!IsBadReadPtr((void*)kTarget32, 16)) {
+        const unsigned char* p32 = (const unsigned char*)kTarget32;
+        if (p32[0] == 0x55 && p32[1] == 0x8B && p32[2] == 0xEC) {
+            if (WineSafe_CreateHook((void*)kTarget32, (void*)&Hooked_Test32,
+                                    (void**)&g_ch32.origTest) == MH_OK) {
+                if (WO_EnableHook((void*)kTarget32) == MH_OK) {
+                    g_ch32.installed = true;
+                    g_ch32.abSubject = abSubject;
+                    g_ch32.benchSlot = SelfBench::Register("RayTri32");
+                    SamplingProfiler::RegisterSelfSymbol(g_ch32.symbolName, (const void*)&Hooked_Test32);
+                    Log("[RayTriangle] ACTIVE on 32-bit indices (0x%08X), terrain/mesh "
+                        "collision paths (sub_7A3570, sub_7C8DD0, sub_7D8730). "
+                        "Verified first %ld calls.",
+                        (unsigned)kTarget32, kVerifyFirst);
+                } else {
+                    Log("[RayTriangle] NOT active: could not enable 32-bit hook at 0x%08X.", (unsigned)kTarget32);
+                }
+            } else {
+                Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget32);
+            }
+        }
+    }
+
+    if (abSubject) {
+        Log("[RayTriangle]   under A/B test, timed directly with rdtsc.");
+    }
+    return g_ch16.installed || g_ch32.installed;
 }
 
 void Shutdown() {
-    if (g_installed) MH_DisableHook((void*)kTarget);
-    g_installed = false;
+    if (g_ch16.installed) MH_DisableHook((void*)kTarget16);
+    if (g_ch32.installed) MH_DisableHook((void*)kTarget32);
+    g_ch16.installed = false;
+    g_ch32.installed = false;
 }
 
 void LogStats() {
     if (!Config::g_settings.OptRayTriangleSse2) return;
-    if (!g_installed) {
-        Log("[RayTriangle] switched on but not installed, so nothing here was "
-            "measured.");
+    if (!g_ch16.installed && !g_ch32.installed) {
+        Log("[RayTriangle] switched on but not installed, so nothing here was measured.");
         return;
     }
-    if (g_calls == 0) {
-        Log("[RayTriangle] installed, and no ray has been cast at a triangle "
-            "yet. This is measured and zero, not unmeasured.");
-        return;
-    }
-    Log("[RayTriangle]   exception guard: %lu fault(s) caught; the armed path runs %s.",
-        g_caught, !g_armed ? "guarded, still checking"
-                  : (g_caught ? "guarded, because the guard has caught something"
-                              : "without an exception frame"));
+    auto reportChannel = [](const Channel& ch) {
+        if (!ch.installed) return;
+        if (ch.calls == 0) {
+            Log("[RayTriangle] [%s] installed, 0 calls measured.", ch.name);
+            return;
+        }
+        Log("[RayTriangle] [%s] exception guard: %lu fault(s) caught; the armed path runs %s.",
+            ch.name, ch.caught, !ch.armed ? "guarded, still checking"
+                                          : (ch.caught ? "guarded, because the guard has caught something"
+                                                       : "without an exception frame"));
+        Log("[RayTriangle] [%s] %lu tests, %lu hit (%.1f%%), %lu compared with client%s.",
+            ch.name, ch.calls, ch.hits, 100.0 * (double)ch.hits / (double)ch.calls, ch.verified,
+            ch.dead ? " - RETIRED on a disagreement"
+                    : (ch.armed ? " - armed" : " - still verifying, the client still answers"));
+        if (ch.stood > 0)
+            Log("[RayTriangle] [%s] %lu calls stood aside for the A/B off stint.",
+                ch.name, ch.stood);
+    };
 
-    Log("[RayTriangle] %lu tests, %lu of them hit (%.1f%%), %lu compared with "
-        "the client%s. Counts are lower bounds.",
-        g_calls, g_hits, 100.0 * (double)g_hits / (double)g_calls, g_verified,
-        g_dead ? " - RETIRED on a disagreement"
-               : (g_armed ? " - armed" : " - still verifying, the client still "
-                                         "answers every one"));
-    if (g_stood > 0)
-        Log("[RayTriangle]   %lu calls stood aside for the A/B off stint.",
-            g_stood);
+    reportChannel(g_ch16);
+    reportChannel(g_ch32);
 }
 
 }  // namespace RayTriangle

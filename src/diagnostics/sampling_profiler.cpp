@@ -355,6 +355,7 @@ static void BuildKnownFuncTable() {
         { 0x00983490,   537, "RayTriIntersect16" },
         { 0x009836B0,   535, "RayTriIntersect32" },
         { 0x009839E0,   124, "CFrustum::IsAABBVisible" },
+        { 0x00983A60,   124, "CFrustum::IsAABBInside" },
         { 0x00983D70,   241, "CFrustum::IsPointVisible" },  // vectorized by frustum_aabb_sse2.cpp
 
         // --- CRT string/memory (static) ---

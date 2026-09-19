@@ -1386,7 +1386,10 @@ bool InstallSimdHooks(void) {
         Log("[SimdHooks] Frustum cull: fill ADDR_WOW_FRUSTUM_CULL");
     }
 
-    if (ADDR_WOW_FRUSTUM_CULL_TYPE2) {
+    if (ADDR_WOW_FRUSTUM_CULL_TYPE2 && Config::g_settings.OptFrustumAabb) {
+        Log("[SimdHooks] Frustum cull type 2: leaving 0x%08X to the verified replacement "
+            "in frustum_aabb_sse2", ADDR_WOW_FRUSTUM_CULL_TYPE2);
+    } else if (ADDR_WOW_FRUSTUM_CULL_TYPE2) {
         Log("[SimdHooks] Frustum cull type 2 hook target: 0x%08X", ADDR_WOW_FRUSTUM_CULL_TYPE2);
 #if !TEST_DISABLE_FRUSTUM_CULL
         if (WineSafe_CreateHook((void*)ADDR_WOW_FRUSTUM_CULL_TYPE2, (void*)Hooked_IsAABBVisibleType2, (void**)&orig_IsAABBVisibleType2) == MH_OK) {
@@ -1402,7 +1405,10 @@ bool InstallSimdHooks(void) {
         Log("[SimdHooks] Frustum cull type 2: fill ADDR_WOW_FRUSTUM_CULL_TYPE2");
     }
 
-    if (ADDR_WOW_FRUSTUM_CULL_POINT) {
+    if (ADDR_WOW_FRUSTUM_CULL_POINT && Config::g_settings.OptFrustumAabb) {
+        Log("[SimdHooks] Frustum cull point: leaving 0x%08X to the verified replacement "
+            "in frustum_aabb_sse2", ADDR_WOW_FRUSTUM_CULL_POINT);
+    } else if (ADDR_WOW_FRUSTUM_CULL_POINT) {
         Log("[SimdHooks] Frustum cull point hook target: 0x%08X", ADDR_WOW_FRUSTUM_CULL_POINT);
 #if !TEST_DISABLE_FRUSTUM_CULL
         if (WineSafe_CreateHook((void*)ADDR_WOW_FRUSTUM_CULL_POINT, (void*)Hooked_IsPointVisible, (void**)&orig_IsPointVisible) == MH_OK) {
@@ -1418,7 +1424,10 @@ bool InstallSimdHooks(void) {
         Log("[SimdHooks] Frustum cull point: fill ADDR_WOW_FRUSTUM_CULL_POINT");
     }
 
-    if (ADDR_WOW_RAY_TRIANGLE_32BIT) {
+    if (ADDR_WOW_RAY_TRIANGLE_32BIT && Config::g_settings.OptRayTriangleSse2) {
+        Log("[SimdHooks] Ray-Triangle 32-bit: leaving 0x%08X to the verified replacement "
+            "in ray_triangle_sse2", ADDR_WOW_RAY_TRIANGLE_32BIT);
+    } else if (ADDR_WOW_RAY_TRIANGLE_32BIT) {
         Log("[SimdHooks] Ray-Triangle 32-bit hook target: 0x%08X", ADDR_WOW_RAY_TRIANGLE_32BIT);
 #if !TEST_DISABLE_RAY_TRIANGLE_SSE2
         if (WineSafe_CreateHook((void*)ADDR_WOW_RAY_TRIANGLE_32BIT, (void*)Hooked_RayTriangle32, (void**)&orig_RayTriangle32) == MH_OK) {
@@ -1432,7 +1441,10 @@ bool InstallSimdHooks(void) {
         Log("[SimdHooks] Ray-Triangle 32-bit: fill ADDR_WOW_RAY_TRIANGLE_32BIT");
     }
 
-    if (ADDR_WOW_RAY_TRIANGLE_16BIT) {
+    if (ADDR_WOW_RAY_TRIANGLE_16BIT && Config::g_settings.OptRayTriangleSse2) {
+        Log("[SimdHooks] Ray-Triangle 16-bit: leaving 0x%08X to the verified replacement "
+            "in ray_triangle_sse2", ADDR_WOW_RAY_TRIANGLE_16BIT);
+    } else if (ADDR_WOW_RAY_TRIANGLE_16BIT) {
         Log("[SimdHooks] Ray-Triangle 16-bit hook target: 0x%08X", ADDR_WOW_RAY_TRIANGLE_16BIT);
 #if !TEST_DISABLE_RAY_TRIANGLE_SSE2
         if (WineSafe_CreateHook((void*)ADDR_WOW_RAY_TRIANGLE_16BIT, (void*)Hooked_RayTriangle16, (void**)&orig_RayTriangle16) == MH_OK) {
