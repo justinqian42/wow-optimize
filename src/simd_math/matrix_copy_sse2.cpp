@@ -7,6 +7,7 @@
 #include "version.h"
 #include "matrix_copy_sse2.h"
 #include "ab_test.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -961,49 +962,209 @@ static float* __fastcall Hooked_MatFrom3x3(float* self, void* edx, float* src) {
     return pOrigMatFrom3x3(self, edx, src);
 }
 
-typedef float* (__cdecl* PointXformIP_t)(float* a1, float* a2, float* a3);
+typedef float* (__cdecl* PointXformIP_t)(float* a1, float* a2, const float* a3);
 static PointXformIP_t pOrigPointXformIP = nullptr;
 static volatile unsigned long g_pointxformip_calls = 0;
+static volatile unsigned long g_pointxformip_agreements = 0;
+static volatile LONG g_pointxformip_armed = 0;
+static volatile LONG g_pointxformip_dead = 0;
 
-static float* __cdecl Hooked_PointXformInPlace(float* a1, float* a2, float* a3) {
+inline void PointTransformInPlace_SSE2(float* result, float* vec, const float* mat) {
+    const double vx = (double)vec[0];
+    const double vy = (double)vec[1];
+    const double vz = (double)vec[2];
+
+    const double m0  = (double)mat[0];
+    const double m4  = (double)mat[4];
+    const double m8  = (double)mat[8];
+    const double m12 = (double)mat[12];
+
+    const double m1  = (double)mat[1];
+    const double m5  = (double)mat[5];
+    const double m9  = (double)mat[9];
+    const double m13 = (double)mat[13];
+
+    const double m2  = (double)mat[2];
+    const double m6  = (double)mat[6];
+    const double m10 = (double)mat[10];
+    const double m14 = (double)mat[14];
+
+    // Matches stock client x87 double-precision accumulation order:
+    // rx = (((vz * m8  + vy * m4) + vx * m0) + m12)
+    // ry = (((vz * m9  + vy * m5) + vx * m1) + m13)
+    // rz = (((vz * m10 + vy * m6) + vx * m2) + m14)
+    const double rx = (((vz * m8  + vy * m4) + vx * m0) + m12);
+    const double ry = (((vz * m9  + vy * m5) + vx * m1) + m13);
+    const double rz = (((vz * m10 + vy * m6) + vx * m2) + m14);
+
+    const float fx = (float)rx;
+    const float fy = (float)ry;
+    const float fz = (float)rz;
+
+    vec[0] = fx; vec[1] = fy; vec[2] = fz;
+    result[0] = fx; result[1] = fy; result[2] = fz;
+}
+
+static float* __cdecl Hooked_PointXformInPlace(float* a1, float* a2, const float* a3) {
     ++g_pointxformip_calls;
+    if (g_pointxformip_dead != 0 || !a1 || !a2 || !a3) {
+        return pOrigPointXformIP(a1, a2, a3);
+    }
+
     uintptr_t p1 = (uintptr_t)a1, p2 = (uintptr_t)a2, p3 = (uintptr_t)a3;
-    if (p1 > 0x10000 && p1 < 0xFFE00000 &&
-        p2 > 0x10000 && p2 < 0xFFE00000 &&
-        p3 > 0x10000 && p3 < 0xFFE00000) {
-        __try {
-            double vx = a2[0];
-            double vy = a2[1];
-            double vz = a2[2];
+    if (p1 < 0x10000 || p1 > 0xFFE00000 ||
+        p2 < 0x10000 || p2 > 0xFFE00000 ||
+        p3 < 0x10000 || p3 > 0xFFE00000) {
+        return pOrigPointXformIP(a1, a2, a3);
+    }
 
-            double m0 = a3[0];
-            double m4 = a3[4];
-            double m8 = a3[8];
-            double m12 = a3[12];
+    if (g_pointxformip_armed != 0 && (g_pointxformip_calls & 4095) != 0) {
+        PointTransformInPlace_SSE2(a1, a2, a3);
+        return a1;
+    }
 
-            double m1 = a3[1];
-            double m5 = a3[5];
-            double m9 = a3[9];
-            double m13 = a3[13];
+    // Shadow verification: stock sub_4C2300 modifies a2 in place, so stage a copy
+    const float orig_vec[3] = { a2[0], a2[1], a2[2] };
+    float client_res[3], client_vec[3];
+    float our_res[3], our_vec[3];
 
-            double m2 = a3[2];
-            double m6 = a3[6];
-            double m10 = a3[10];
-            double m14 = a3[14];
+    __try {
+        pOrigPointXformIP(client_res, a2, a3);
+        client_vec[0] = a2[0]; client_vec[1] = a2[1]; client_vec[2] = a2[2];
 
-            double rx = vx * m0 + vy * m4 + vz * m8 + m12;
-            double ry = vx * m1 + vy * m5 + vz * m9 + m13;
-            double rz = vx * m2 + vy * m6 + vz * m10 + m14;
+        our_vec[0] = orig_vec[0]; our_vec[1] = orig_vec[1]; our_vec[2] = orig_vec[2];
+        PointTransformInPlace_SSE2(our_res, our_vec, a3);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_pointxformip_dead, 1);
+        Log("[MatrixSSE2] PointTransformInPlace faulted during verification, retiring hook\n");
+        return a1;
+    }
 
-            a2[0] = (float)rx; a2[1] = (float)ry; a2[2] = (float)rz;
-            a1[0] = (float)rx; a1[1] = (float)ry; a1[2] = (float)rz;
-            return a1;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+    bool match = true;
+    for (int i = 0; i < 3; ++i) {
+        uint32_t cr, or_, cv, ov;
+        memcpy(&cr, &client_res[i], 4);
+        memcpy(&or_, &our_res[i], 4);
+        memcpy(&cv, &client_vec[i], 4);
+        memcpy(&ov, &our_vec[i], 4);
+        if (cr != or_ || cv != ov) {
+            match = false;
+            break;
         }
     }
-    return pOrigPointXformIP(a1, a2, a3);
+
+    if (!match) {
+        InterlockedExchange(&g_pointxformip_dead, 1);
+        Log("[MatrixSSE2] PointTransformInPlace DISAGREED with client - retiring hook\n");
+        a1[0] = client_res[0]; a1[1] = client_res[1]; a1[2] = client_res[2];
+        a2[0] = client_vec[0]; a2[1] = client_vec[1]; a2[2] = client_vec[2];
+        return a1;
+    }
+
+    a1[0] = client_res[0]; a1[1] = client_res[1]; a1[2] = client_res[2];
+    a2[0] = client_vec[0]; a2[1] = client_vec[1]; a2[2] = client_vec[2];
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_pointxformip_agreements);
+    if (g_pointxformip_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_pointxformip_armed, 1);
+        Log("[MatrixSSE2] PointTransformInPlace armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return a1;
+}
+
+// sub_5FED20: 3x3 vector-matrix rotation  __cdecl(result, vec, mat)  (7 xrefs)
+typedef float* (__cdecl* VectorMatrixRotate_t)(float* result, const float* vec, const float* mat);
+static VectorMatrixRotate_t pOrigVectorMatrixRotate = nullptr;
+static volatile unsigned long g_vecmatrotate_calls = 0;
+static volatile unsigned long g_vecmatrotate_agreements = 0;
+static volatile LONG g_vecmatrotate_armed = 0;
+static volatile LONG g_vecmatrotate_dead = 0;
+
+inline void VectorMatrixRotate_SSE2(float* result, const float* vec, const float* mat) {
+    const double vx = (double)vec[0];
+    const double vy = (double)vec[1];
+    const double vz = (double)vec[2];
+
+    const double m0 = (double)mat[0];
+    const double m1 = (double)mat[1];
+    const double m2 = (double)mat[2];
+    const double m3 = (double)mat[3];
+    const double m4 = (double)mat[4];
+    const double m5 = (double)mat[5];
+    const double m6 = (double)mat[6];
+    const double m7 = (double)mat[7];
+    const double m8 = (double)mat[8];
+
+    // Client sub_5FED20 exact x87 order:
+    // rx = ((vz * m6 + vy * m3) + vx * m0)
+    // ry = ((vx * m1 + vy * m4) + vz * m7)
+    // rz = ((vx * m2 + vy * m5) + vz * m8)
+    const double rx = ((vz * m6 + vy * m3) + vx * m0);
+    const double ry = ((vx * m1 + vy * m4) + vz * m7);
+    const double rz = ((vx * m2 + vy * m5) + vz * m8);
+
+    result[0] = (float)rx;
+    result[1] = (float)ry;
+    result[2] = (float)rz;
+}
+
+static float* __cdecl Hooked_VectorMatrixRotate(float* result, const float* vec, const float* mat) {
+    ++g_vecmatrotate_calls;
+    if (g_vecmatrotate_dead != 0 || !result || !vec || !mat) {
+        return pOrigVectorMatrixRotate(result, vec, mat);
+    }
+
+    uintptr_t pr = (uintptr_t)result, pv = (uintptr_t)vec, pm = (uintptr_t)mat;
+    if (pr < 0x10000 || pr > 0xFFE00000 ||
+        pv < 0x10000 || pv > 0xFFE00000 ||
+        pm < 0x10000 || pm > 0xFFE00000) {
+        return pOrigVectorMatrixRotate(result, vec, mat);
+    }
+
+    if (g_vecmatrotate_armed != 0 && (g_vecmatrotate_calls & 4095) != 0) {
+        VectorMatrixRotate_SSE2(result, vec, mat);
+        return result;
+    }
+
+    float client_res[3];
+    float our_res[3];
+    __try {
+        pOrigVectorMatrixRotate(client_res, vec, mat);
+        VectorMatrixRotate_SSE2(our_res, vec, mat);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_vecmatrotate_dead, 1);
+        Log("[MatrixSSE2] VectorMatrixRotate faulted during verification, retiring hook\n");
+        return pOrigVectorMatrixRotate(result, vec, mat);
+    }
+
+    bool match = true;
+    for (int i = 0; i < 3; ++i) {
+        uint32_t cr, or_;
+        memcpy(&cr, &client_res[i], 4);
+        memcpy(&or_, &our_res[i], 4);
+        if (cr != or_) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_vecmatrotate_dead, 1);
+        Log("[MatrixSSE2] VectorMatrixRotate DISAGREED with client - retiring hook\n");
+        result[0] = client_res[0]; result[1] = client_res[1]; result[2] = client_res[2];
+        return result;
+    }
+
+    result[0] = client_res[0]; result[1] = client_res[1]; result[2] = client_res[2];
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_vecmatrotate_agreements);
+    if (g_vecmatrotate_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_vecmatrotate_armed, 1);
+        Log("[MatrixSSE2] VectorMatrixRotate armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return result;
 }
 #endif
+
 
 // ================================================================
 // sub_4C2FC0: rigid-transform inverse builder  __thiscall(this, out)  (~34 xrefs)
@@ -1416,15 +1577,23 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] CMatrix::Transpose hook FAILED");
     }
 
-    /*
     if (WineSafe_CreateHook((void*)0x004C2300, (void*)Hooked_PointXformInPlace,
                             (void**)&pOrigPointXformIP) == MH_OK &&
         WO_EnableHook((void*)0x004C2300) == MH_OK) {
-        Log("[MatrixSSE2] Hooked PointTransformInPlace at 0x004C2300 (SSE2, 65 callers)");
+        SamplingProfiler::RegisterSelfSymbol("PointXformInPlace_SSE2", (const void*)&Hooked_PointXformInPlace);
+        Log("[MatrixSSE2] Hooked PointTransformInPlace at 0x004C2300 (SSE2 double-precision, verified, 65 callers)");
     } else {
         Log("[MatrixSSE2] PointTransformInPlace hook FAILED");
     }
-    */
+
+    if (WineSafe_CreateHook((void*)0x005FED20, (void*)Hooked_VectorMatrixRotate,
+                            (void**)&pOrigVectorMatrixRotate) == MH_OK &&
+        WO_EnableHook((void*)0x005FED20) == MH_OK) {
+        SamplingProfiler::RegisterSelfSymbol("VectorMatrixRotate_SSE2", (const void*)&Hooked_VectorMatrixRotate);
+        Log("[MatrixSSE2] Hooked VectorMatrixRotate at 0x005FED20 (SSE2 double-precision, verified, 7 callers)");
+    } else {
+        Log("[MatrixSSE2] VectorMatrixRotate hook FAILED");
+    }
 
     if (WineSafe_CreateHook((void*)0x004C1BF0, (void*)Hooked_Scale3x3,
                             (void**)&pOrigScale3x3) == MH_OK &&
@@ -1524,7 +1693,7 @@ void MatrixCopySSE2_LogStats(void) {
         (double)g_quat2mat_calls + (double)g_quat2matfull_calls +
         (double)g_vec3norm_calls + (double)g_mattranspose_calls +
         (double)g_scale3x3_calls + (double)g_matfrom3x3_calls +
-        (double)g_pointxformip_calls + (double)g_matinvrigid_calls
+        (double)g_pointxformip_calls + (double)g_vecmatrotate_calls + (double)g_matinvrigid_calls
 #if !TEST_DISABLE_MATRIX_MISC_SSE2
         + (double)g_matscalarmul_calls
 #endif
@@ -1556,9 +1725,10 @@ void MatrixCopySSE2_LogStats(void) {
         g_matArmed ? "armed" : (g_matFaults ? "held on by a catch"
                                             : "still proving"));
     Log("[MatrixSSE2]   transpose %lu, scale3x3 %lu, from3x3 %lu, "
-        "pointxform-in-place %lu, invert-rigid %lu",
+        "pointxform-in-place %lu (%lu verified), vecmat-rotate %lu (%lu verified), invert-rigid %lu",
         g_mattranspose_calls, g_scale3x3_calls, g_matfrom3x3_calls,
-        g_pointxformip_calls, g_matinvrigid_calls);
+        g_pointxformip_calls, g_pointxformip_agreements,
+        g_vecmatrotate_calls, g_vecmatrotate_agreements, g_matinvrigid_calls);
     // These two are behind feature flags that are off, so the counters do not
     // exist in this build and neither does a line claiming they are zero.
 #if !TEST_DISABLE_MATRIX_MISC_SSE2
@@ -1594,10 +1764,12 @@ void ShutdownMatrixCopySSE2() {
 #if !TEST_DISABLE_MATRIX_EXT_SSE2
     MH_DisableHook((void*)0x004C23D0);
     MH_DisableHook((void*)0x004C2300);
+    MH_DisableHook((void*)0x005FED20);
     MH_DisableHook((void*)0x004C1BF0);
     MH_DisableHook((void*)0x004C3680);
-    Log("[MatrixSSE2] Stats: Transpose=%lu  PointXformIP=%lu  Scale3x3=%lu  From3x3=%lu",
-        g_mattranspose_calls, g_pointxformip_calls, g_scale3x3_calls, g_matfrom3x3_calls);
+    Log("[MatrixSSE2] Stats: Transpose=%lu  PointXformIP=%lu (%lu verified)  VecMatRotate=%lu (%lu verified)  Scale3x3=%lu  From3x3=%lu",
+        g_mattranspose_calls, g_pointxformip_calls, g_pointxformip_agreements,
+        g_vecmatrotate_calls, g_vecmatrotate_agreements, g_scale3x3_calls, g_matfrom3x3_calls);
 #endif
 #if !TEST_DISABLE_MATRIX_INVERT_SSE2
     MH_DisableHook((void*)0x004C2FC0);

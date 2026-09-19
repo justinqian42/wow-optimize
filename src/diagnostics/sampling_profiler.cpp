@@ -354,6 +354,7 @@ static void BuildKnownFuncTable() {
         // pointer surgery with side effects and wants a careful sitting.
         { 0x00489710,   408, "Node_FindOwnerAndRelink" },
         { 0x005FEC70,    60, "C3Vector::Cross" },
+        { 0x005FED20,    84, "VectorMatrixRotate" },
         { 0x00821A20,  5658, "M2_DrawBatchBuilder" },
         { 0x00960D20,   154, "Lua_Model_SetLight" },
         { 0x00979110,    84, "CQuaternion::Normalize" },

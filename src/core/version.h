@@ -717,7 +717,7 @@
 //  Vec3Cross 0x5FEC70, IsSphereVisible 0x983D20, FromAngleAxis 0x982400,
 //  QuatSlerp 0x982460. IsSphereVisible + FromAngleAxis had __fastcall→__thiscall
 //  calling-convention bugs fixed (disassembly-verified). Default ENABLED.
-#define TEST_DISABLE_VEC3_CROSS_SSE2         1
+#define TEST_DISABLE_VEC3_CROSS_SSE2         0
 // IsSphereVisible DISABLED: second-pass _MM_TRANSPOSE4_PS mixes zeros into plane
 // normals (only 2 of 4 inputs are actual planes), corrupting frustum culling for
 // planes 4-5 and causing camera to clip through player character (zoom-in bug).

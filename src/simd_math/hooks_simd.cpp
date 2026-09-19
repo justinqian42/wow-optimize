@@ -1039,19 +1039,9 @@ static void __fastcall Hooked_IsPointVisible(void* ecx, void* edx, const float* 
 // NameplateThrottle, all three of which were removed after testers reported
 // them as visual corruption.
 
-#if !TEST_DISABLE_MATRIX_TRANSFORM_SSE2
-typedef float* (__cdecl *MatrixVectorTransform_t)(float* result, float* vec, float* mat);
-static MatrixVectorTransform_t orig_sub_4C2300 = nullptr;
-static MatrixVectorTransform_t orig_sub_5FED20 = nullptr;
-
-static float* __cdecl Hooked_sub_4C2300(float* result, float* vec, float* mat) {
-    return orig_sub_4C2300 ? orig_sub_4C2300(result, vec, mat) : result;
-}
-
-static float* __cdecl Hooked_sub_5FED20(float* result, float* vec, float* mat) {
-    return orig_sub_5FED20 ? orig_sub_5FED20(result, vec, mat) : result;
-}
-#endif
+// 0x004C2300 (PointTransformInPlace) and 0x005FED20 (VectorMatrixRotate) are owned
+// and implemented by MatrixSSE2 (matrix_copy_sse2.cpp) with bit-exact double precision
+// and dual-run shadow verification.
 
 // ================================================================
 // C3Vector::Cross Hook (0x005FEC70)
@@ -1059,33 +1049,81 @@ static float* __cdecl Hooked_sub_5FED20(float* result, float* vec, float* mat) {
 typedef float* (__cdecl* Vec3Cross_t)(float* result, float* a, float* b);
 static Vec3Cross_t orig_Vec3Cross = nullptr;
 
+static volatile unsigned long g_vec3cross_calls = 0;
+static volatile unsigned long g_vec3cross_agreements = 0;
+static volatile LONG g_vec3cross_armed = 0;
+static volatile LONG g_vec3cross_dead = 0;
+
+inline void Vec3Cross_Double(float* result, const float* a, const float* b) {
+    // Client sub_5FEC70 exact x87 double-precision calculations:
+    // rx = (b[2] * a[1]) - (a[2] * b[1])
+    // ry = (a[2] * b[0]) - (b[2] * a[0])
+    // rz = (b[1] * a[0]) - (b[0] * a[1])
+    const double rx = (double)b[2] * (double)a[1] - (double)a[2] * (double)b[1];
+    const double ry = (double)a[2] * (double)b[0] - (double)b[2] * (double)a[0];
+    const double rz = (double)b[1] * (double)a[0] - (double)b[0] * (double)a[1];
+
+    result[0] = (float)rx;
+    result[1] = (float)ry;
+    result[2] = (float)rz;
+}
 
 static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
+    ++g_vec3cross_calls;
+    if (g_vec3cross_dead != 0 || !result || !a || !b) {
+        return orig_Vec3Cross(result, a, b);
+    }
+
+    uintptr_t pr = (uintptr_t)result, pa = (uintptr_t)a, pb = (uintptr_t)b;
+    if (pr < 0x10000 || pr > 0xFFE00000 ||
+        pa < 0x10000 || pa > 0xFFE00000 ||
+        pb < 0x10000 || pb > 0xFFE00000) {
+        return orig_Vec3Cross(result, a, b);
+    }
+
+    if (g_vec3cross_armed != 0 && (g_vec3cross_calls & 4095) != 0) {
+        Vec3Cross_Double(result, a, b);
+        return result;
+    }
+
+    float client_res[3];
+    float our_res[3];
     __try {
-        if (result && a && b &&
-            (uintptr_t)result > 0x10000 && (uintptr_t)result < 0xFFE00000 &&
-            (uintptr_t)a > 0x10000 && (uintptr_t)a < 0xFFE00000 &&
-            (uintptr_t)b > 0x10000 && (uintptr_t)b < 0xFFE00000) {
-            
-            __m128 va = _mm_setr_ps(a[0], a[1], a[2], 0.0f);
-            __m128 vb = _mm_setr_ps(b[0], b[1], b[2], 0.0f);
+        orig_Vec3Cross(client_res, a, b);
+        Vec3Cross_Double(our_res, a, b);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_vec3cross_dead, 1);
+        Log("[SimdHooks] C3Vector::Cross faulted during verification, retiring hook\n");
+        return orig_Vec3Cross(result, a, b);
+    }
 
-            __m128 a_yzx = _mm_shuffle_ps(va, va, _MM_SHUFFLE(3,0,2,1));
-            __m128 b_yzx = _mm_shuffle_ps(vb, vb, _MM_SHUFFLE(3,0,2,1));
-            __m128 a_zxy = _mm_shuffle_ps(va, va, _MM_SHUFFLE(3,1,0,2));
-            __m128 b_zxy = _mm_shuffle_ps(vb, vb, _MM_SHUFFLE(3,1,0,2));
-
-            __m128 cross = _mm_sub_ps(_mm_mul_ps(a_yzx, b_zxy),
-                                       _mm_mul_ps(a_zxy, b_yzx));
-
-            _mm_store_ss(result,     cross);
-            _mm_store_ss(result + 1, _mm_shuffle_ps(cross, cross, _MM_SHUFFLE(1, 1, 1, 1)));
-            _mm_store_ss(result + 2, _mm_shuffle_ps(cross, cross, _MM_SHUFFLE(2, 2, 2, 2)));
-            return result;
+    bool match = true;
+    for (int i = 0; i < 3; ++i) {
+        uint32_t cr, or_;
+        memcpy(&cr, &client_res[i], 4);
+        memcpy(&or_, &our_res[i], 4);
+        if (cr != or_) {
+            match = false;
+            break;
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-    return orig_Vec3Cross(result, a, b);
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_vec3cross_dead, 1);
+        Log("[SimdHooks] C3Vector::Cross DISAGREED with client - retiring hook\n");
+        result[0] = client_res[0]; result[1] = client_res[1]; result[2] = client_res[2];
+        return result;
+    }
+
+    result[0] = client_res[0]; result[1] = client_res[1]; result[2] = client_res[2];
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_vec3cross_agreements);
+    if (g_vec3cross_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_vec3cross_armed, 1);
+        Log("[SimdHooks] C3Vector::Cross armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return result;
 }
+
 
 // CFrustum::IsSphereVisible (0x00983D20) is owned and implemented by FrustumAabb
 // (frustum_aabb_sse2.cpp) with bit-exact double precision and dual-run verification.
@@ -1446,36 +1484,10 @@ bool InstallSimdHooks(void) {
     // implements it with double-precision SSE2 and shadow verification.
     Log("[SimdHooks] CQuaternion::Slerp is owned by QuatLerp - not hooked from here");
 
-#if !TEST_DISABLE_MATRIX_TRANSFORM_SSE2
-    if (Config::g_settings.OptSimdMatrixTransform) {
-        // 0x004C2300 belongs to matrix_copy_sse2, which hooks it as
-        // PointXformInPlace and installs earlier. Both modules aimed at it; the
-        // conflict is dormant only because this section is excluded from the
-        // build, and restoring that flag would recreate exactly the situation
-        // that hid a broken matrix multiply for months - two implementations,
-        // one silently losing, and the maintained one being the loser.
-        //
-        // Not hooked from here. If this section is ever built again, the
-        // implementation to keep is the one in the module that wins the race.
-        Log("[SimdHooks] sub_4C2300 is owned by MatrixSSE2 - not hooked from here");
-        if (WineSafe_CreateHook((void*)0x005FED20, (void*)Hooked_sub_5FED20, (void**)&orig_sub_5FED20) == MH_OK) {
-            WO_EnableHook((void*)0x005FED20);
-            Log("[SimdHooks] sub_5FED20 (Vector-Matrix Rotate) hook ACTIVE");
-        }
-    }
-#else
-    // Every other compiled-out section in this file says so. This one did not,
-    // and it is the only one of them with a launcher switch: a player could turn
-    // SimdMatrixTransform on, see it echoed in the settings block at the top of
-    // their log, and get no further mention of it anywhere - because the code it
-    // controls is removed by the preprocessor and there was nothing left to run
-    // or to report. Silent is the worst of the three states a feature can be in.
-    if (Config::g_settings.OptSimdMatrixTransform) {
-        Log("[SimdHooks] SimdMatrixTransform is ON in your settings but the code is "
-            "excluded from this build (TEST_DISABLE_MATRIX_TRANSFORM_SSE2) - the "
-            "switch does nothing here");
-    }
-#endif
+    // 0x004C2300 (PointTransformInPlace) and 0x005FED20 (VectorMatrixRotate) belong
+    // to MatrixSSE2 (matrix_copy_sse2.cpp), which implements them with double-precision
+    // SSE2, exact stock x87 accumulation order, and shadow verification.
+    Log("[SimdHooks] sub_4C2300 and sub_5FED20 are owned by MatrixSSE2 - not hooked from here");
 
     return true;
 }
@@ -1490,19 +1502,25 @@ void SimdHooks_LogStats(void) {
         Log("[SimdHooks] not measured: switched off.");
         return;
     }
-    if (!g_matMulCalls && !g_quatNormCalls && !g_frustumCalls && !g_rayTriangleCalls) {
+    if (!g_matMulCalls && !g_quatNormCalls && !g_frustumCalls && !g_rayTriangleCalls && !g_vec3cross_calls) {
         Log("[SimdHooks] measured and zero: no hooked call was seen this "
             "session. Whether that is because the hooks did not install is "
             "earlier in this log.");
         return;
     }
     Log("[SimdHooks] calls, all lower bounds: matMul=%ld quatNorm=%ld "
-        "frustum=%ld (culled %ld, %.1f%%) rayTri=%ld (hit %ld, %.1f%%)",
+        "frustum=%ld (culled %ld, %.1f%%) rayTri=%ld (hit %ld, %.1f%%) vec3cross=%lu",
         g_matMulCalls, g_quatNormCalls,
         g_frustumCalls, g_frustumCulled,
         g_frustumCalls ? 100.0 * g_frustumCulled / g_frustumCalls : 0.0,
         g_rayTriangleCalls, g_rayTriangleIntersects,
-        g_rayTriangleCalls ? 100.0 * g_rayTriangleIntersects / g_rayTriangleCalls : 0.0);
+        g_rayTriangleCalls ? 100.0 * g_rayTriangleIntersects / g_rayTriangleCalls : 0.0,
+        g_vec3cross_calls);
+    if (g_vec3cross_calls > 0) {
+        Log("[SimdHooks] C3Vector::Cross: %lu calls, %lu verified%s",
+            g_vec3cross_calls, g_vec3cross_agreements,
+            g_vec3cross_dead ? " - RETIRED on a disagreement" : (g_vec3cross_armed ? "" : " - still verifying"));
+    }
 #if !TEST_DISABLE_FRUSTUM_CULL
     if (g_frustumMismatch)
         Log("[SimdHooks]   the frustum test disagreed with the client %ld time(s) "
@@ -1513,8 +1531,6 @@ void SimdHooks_LogStats(void) {
 void ShutdownSimdHooks(void) {
     MH_DisableHook((void*)0x005FEC70);
     MH_DisableHook((void*)0x00982400);
-#if !TEST_DISABLE_MATRIX_TRANSFORM_SSE2
-    MH_DisableHook((void*)0x005FED20);
-#endif
     SimdHooks_LogStats();
 }
+
