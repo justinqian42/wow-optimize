@@ -292,6 +292,21 @@ bool FingerprintStillHolds(const Entry& e) {
     }
 }
 
+// The stored Proto's source is the chunk name it was compiled under, and the
+// name is in the blob right after the source copy. WoW's TString is +4-shifted:
+// length at +16, bytes at +20. If this no longer reads as that name the Proto
+// is not the one that was stored, or its name string has gone.
+bool SourceStillNamed(const Entry& e) {
+    __try {
+        const void* s = RDP(e.proto, kP_source);
+        if (!s) return false;
+        if (RD32(s, 16) != e.nameLen) return false;
+        return memcmp((const char*)s + 20, e.blob + e.srcLen + 1, e.nameLen) == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 std::unordered_map<uint64_t, Entry> g_cache;
 size_t g_blobBytes = 0;
 
@@ -326,6 +341,9 @@ unsigned long g_verified = 0, g_firstSighting = 0, g_flushes = 0, g_onSight = 0;
 // number that says whether raising the cap was the right call.
 unsigned long g_keptOnFirstSight = 0;
 unsigned long g_stale = 0;
+// Entries dropped because the name string their Proto points at is not the one
+// the client's string table holds now. A drop, not a flush: see the hit path.
+unsigned long g_sourceMoved = 0;
 unsigned long long g_bytesSaved = 0, g_bytesTooBig = 0;
 
 // What the cache saves, in time rather than in kilobytes.
@@ -415,7 +433,24 @@ void Retire(const char* why) {
 
 // Everything a repeat compile of identical source must reproduce. The bytecode
 // array is the real check; the rest catches a mismatch earlier and names it.
-bool ProtosAgree(void* a, void* b, const char** what) {
+// The chunk name as the TString behind Proto->source holds it. Offsets are
+// WoW's +4-shifted layout: length at +16, bytes at +20.
+bool SourceTextSame(void* a, void* b) {
+    __try {
+        const void* sa = RDP(a, kP_source);
+        const void* sb = RDP(b, kP_source);
+        if (!sa || !sb) return false;
+        const uint32_t la = RD32(sa, 16);
+        const uint32_t lb = RD32(sb, 16);
+        if (la != lb || la > 0x10000) return false;
+        return memcmp((const char*)sa + 20, (const char*)sb + 20, la) == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool ProtosAgree(void* a, void* b, const char** what, bool* sourceMoved) {
+    *sourceMoved = false;
     if (RD32(a, kP_sizecode)        != RD32(b, kP_sizecode))        { *what = "sizecode";        return false; }
     if (RD32(a, kP_sizek)           != RD32(b, kP_sizek))           { *what = "sizek";           return false; }
     if (RD32(a, kP_sizep)           != RD32(b, kP_sizep))           { *what = "sizep";           return false; }
@@ -426,9 +461,21 @@ bool ProtosAgree(void* a, void* b, const char** what) {
     if (RD8 (a, kP_isvararg)        != RD8 (b, kP_isvararg))        { *what = "is_vararg";       return false; }
     if (RD8 (a, kP_maxstacksize)    != RD8 (b, kP_maxstacksize))    { *what = "maxstacksize";    return false; }
 
-    // Identical names intern to one TString, and the cached Proto keeps its own
-    // alive, so these are the same pointer or something is wrong.
-    if (RDP(a, kP_source) != RDP(b, kP_source)) { *what = "source"; return false; }
+    // Identical names intern to one TString - the client's luaS_newlstr matches
+    // on length and bytes and nothing else - so while the stored chunk's name
+    // string is alive both Protos name the same object. A tester's session had
+    // one of these differ 16 seconds in, on "@Interface\SharedXML\AtlasInfo.lua",
+    // and retiring the cache over it cost the whole feature for the next hour.
+    //
+    // The pointers differing means the stored Proto's name string is not the one
+    // the string table holds now, so that Proto is not safe to hand back: the
+    // client reads Proto->source when it formats an error. It is the entry that
+    // is wrong, though, not the module, so the caller drops that entry and keeps
+    // going. Text that differs as well is a real disagreement and still retires.
+    if (RDP(a, kP_source) != RDP(b, kP_source)) {
+        *sourceMoved = true;
+        if (!SourceTextSame(a, b)) { *what = "source text"; return false; }
+    }
 
     uint32_t n = RD32(a, kP_sizecode);
     const void* ca = RDP(a, kP_code);
@@ -501,6 +548,23 @@ void* Classify(void* L, void* z, void* buff, const char* name, bool* checked) {
             memcmp(e.blob, src, srcLen) == 0 &&
             memcmp(e.blob + srcLen + 1, name, nameLen) == 0) {
 
+            // Every reuse, not only the sampled ones: the client reads
+            // Proto->source when it formats an error, so a stored Proto whose
+            // name string the string table no longer holds must not be handed
+            // back at all. One drop, not a flush and not a retirement.
+            if (!SourceStillNamed(e)) {
+                ++g_sourceMoved;
+                if (g_sourceMoved <= 3)
+                    Log("[ProtoCache] Dropped \"%s\": the name string the stored "
+                        "Proto points at is not the one the client's string table "
+                        "holds now. The rest of the cache is untouched and this "
+                        "chunk is kept again on its next compile.", name);
+                free(it->second.blob);
+                g_blobBytes -= (size_t)e.srcLen + e.nameLen + 2;
+                g_cache.erase(it);
+                return nullptr;
+            }
+
             if (!FingerprintStillHolds(e)) {
                 // Do not hand it back and do not trust anything else stored
                 // under the same state either.
@@ -526,11 +590,24 @@ void* Classify(void* L, void* z, void* buff, const char* name, bool* checked) {
             if (!fresh) return nullptr;
 
             const char* what = "";
-            if (!ProtosAgree(e.proto, fresh, &what)) {
+            bool sourceMoved = false;
+            if (!ProtosAgree(e.proto, fresh, &what, &sourceMoved)) {
                 Log("[ProtoCache] Cached and freshly compiled Proto differ in %s "
                     "for \"%s\" (%u bytes of source).",
                     what, name, (unsigned)srcLen);
                 Retire("a cached chunk did not match a fresh compile");
+                return fresh;
+            }
+            if (sourceMoved) {
+                ++g_sourceMoved;
+                free(it->second.blob);
+                g_blobBytes -= (size_t)e.srcLen + e.nameLen + 2;
+                g_cache.erase(it);
+                Log("[ProtoCache] Dropped \"%s\": its bytecode still matches a fresh "
+                    "compile, but the name string it points at is no longer the one "
+                    "the client's string table holds. The rest of the cache is "
+                    "untouched and this chunk will be kept again on its next "
+                    "compile.", name);
                 return fresh;
             }
             g_verified++;
@@ -970,6 +1047,12 @@ void LogStats() {
             "%lu more were rebuilt from it and checked against a real parse "
             "before anything was reused.", g_diskServed, g_diskProved);
     }
+
+    if (g_sourceMoved)
+        Log("[ProtoCache]   %lu kept Proto(s) were dropped because the name "
+            "string they point at is no longer the one the string table holds. "
+            "Each costs one compile and nothing else; a session that ends with "
+            "a large number here is one to look at.", g_sourceMoved);
 
     if (g_stale)
         Log("[ProtoCache]   %lu times a kept Proto had stopped looking like "
