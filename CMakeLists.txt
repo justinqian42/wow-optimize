@@ -169,6 +169,7 @@ add_library(wow_optimize SHARED
     src/simd_math/color_unpack_sse2.h
     src/hooks_subsystems/m2_sort_key_cache.cpp
     src/hooks_subsystems/m2_batch_sort.cpp
+    src/simd_math/collision_poly_clip_sse2.cpp
     src/simd_math/frustum_aabb_sse2.cpp
     src/simd_math/segment_aabb_sse2.cpp
     src/runtime_vm/lua_hget_dispatch.cpp

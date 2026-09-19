@@ -499,6 +499,10 @@ namespace Config {
         // record and runs the client's own heapsort on it. Verified per comparison
         // before it takes over; opt-in until a tester log shows it armed.
         bool OptM2BatchSort = false;
+        // The collision polygon clip: answers the two decisions the client makes
+        // after its distance pass and leaves a real clip to the client. Checked
+        // against the client per call before it takes over; opt-in until run.
+        bool OptCollisionPolyClip = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
