@@ -72,6 +72,8 @@ constexpr uintptr_t kColorUnpackBGRA     = 0x00984C90;
 constexpr uintptr_t kColorUnpackBGR      = 0x00982970;
 constexpr uintptr_t kColorPackBGRA       = 0x0048BD20;
 constexpr uintptr_t kColorPackBGR        = 0x009851A0;
+constexpr uintptr_t kColorRGBToHSV       = 0x00984F60;
+constexpr uintptr_t kColorHSVToRGB       = 0x00985030;
 constexpr uintptr_t kVec3DomAxis         = 0x009829B0;
 constexpr uintptr_t kVec3RecAxis         = 0x009829F0;
 
@@ -80,6 +82,8 @@ typedef float*   (__fastcall* ColorUnpackBGRA_fn)(float* this_out, void* edx, co
 typedef float*   (__fastcall* ColorUnpackBGR_fn)(float* this_out, void* edx, const uint8_t* bgr);
 typedef uint32_t (__fastcall* ColorPackBGRA_fn)(uint32_t* this_out, void* edx, float a, float r, float g, float b);
 typedef uint8_t* (__fastcall* ColorPackBGR_fn)(uint8_t* this_out, void* edx, const float* rgb);
+typedef void     (__cdecl*    ColorRGBToHSV_fn)(const float* rgb, float* hsv);
+typedef void     (__cdecl*    ColorHSVToRGB_fn)(const float* hsv, float* rgb);
 typedef int      (__fastcall* Vec3DominantAxis_fn)(const float* this_vec, void* edx);
 typedef int      (__fastcall* Vec3RecessiveAxis_fn)(const float* this_vec, void* edx);
 
@@ -87,6 +91,8 @@ ColorUnpackBGRA_fn   orig_ColorUnpackBGRA   = nullptr;
 ColorUnpackBGR_fn    orig_ColorUnpackBGR    = nullptr;
 ColorPackBGRA_fn     orig_ColorPackBGRA     = nullptr;
 ColorPackBGR_fn      orig_ColorPackBGR      = nullptr;
+ColorRGBToHSV_fn     orig_ColorRGBToHSV     = nullptr;
+ColorHSVToRGB_fn     orig_ColorHSVToRGB     = nullptr;
 Vec3DominantAxis_fn  orig_Vec3DominantAxis  = nullptr;
 Vec3RecessiveAxis_fn orig_Vec3RecessiveAxis = nullptr;
 
@@ -95,6 +101,8 @@ bool g_armedBgra      = false;
 bool g_armedBgr       = false;
 bool g_armedPackBgra  = false;
 bool g_armedPackBgr   = false;
+bool g_armedRgbToHsv  = false;
+bool g_armedHsvToRgb  = false;
 bool g_armedDomAxis   = false;
 bool g_armedRecAxis   = false;
 bool g_abSubject      = false;
@@ -104,12 +112,16 @@ unsigned long g_callsBgra        = 0;
 unsigned long g_callsBgr         = 0;
 unsigned long g_callsPackBgra    = 0;
 unsigned long g_callsPackBgr     = 0;
+unsigned long g_callsRgbToHsv    = 0;
+unsigned long g_callsHsvToRgb    = 0;
 unsigned long g_callsDomAxis     = 0;
 unsigned long g_callsRecAxis     = 0;
 unsigned long g_verifiedBgra     = 0;
 unsigned long g_verifiedBgr      = 0;
 unsigned long g_verifiedPackBgra = 0;
 unsigned long g_verifiedPackBgr  = 0;
+unsigned long g_verifiedRgbToHsv = 0;
+unsigned long g_verifiedHsvToRgb = 0;
 unsigned long g_verifiedDomAxis  = 0;
 unsigned long g_verifiedRecAxis  = 0;
 
@@ -249,6 +261,135 @@ inline int Vec3_RecessiveAxis_Fast(const float* this_vec) {
         return (ay > az) ? 2 : 1;
     } else {
         return (ax >= az) ? 2 : 0;
+    }
+}
+
+inline void Color_RGBToHSV_SSE2(const float* rgb, float* hsv) {
+    if (!rgb || !hsv) return;
+
+    // Load locally to support in-place buffers (rgb == hsv)
+    float r = rgb[0];
+    float g = rgb[1];
+    float b = rgb[2];
+
+    float local_rgb[3] = { r, g, b };
+    int dom = Vec3_DominantAxis_Fast(local_rgb);
+    int rec = Vec3_RecessiveAxis_Fast(local_rgb);
+
+    float max_val = local_rgb[dom];
+    float min_val = local_rgb[rec];
+
+    hsv[2] = max_val;  // V = max(R, G, B)
+
+    if (max_val == 0.0f) {
+        hsv[1] = 0.0f;  // S
+        hsv[0] = -1.0f; // H undefined
+        return;
+    }
+
+    double d_delta = (double)max_val - (double)min_val;
+    float s = (float)(d_delta / (double)max_val);
+    hsv[1] = s;
+
+    if (s == 0.0f) {
+        hsv[0] = -1.0f; // H undefined
+        return;
+    }
+
+    double d_h;
+    if (dom == 0) {
+        d_h = ((double)g - (double)b) / d_delta;
+    } else if (dom == 1) {
+        d_h = ((double)b - (double)r) / d_delta + 2.0;
+    } else {
+        d_h = ((double)r - (double)g) / d_delta + 4.0;
+    }
+
+    float h = (float)d_h;
+    h *= 60.0f;
+    if (h < 0.0f) {
+        h += 360.0f;
+    }
+    hsv[0] = h;
+}
+
+inline void Color_HSVToRGB_SSE2(const float* hsv, float* rgb) {
+    if (!hsv || !rgb) return;
+
+    // Load locally to support in-place buffers (hsv == rgb)
+    float h = hsv[0];
+    float s = hsv[1];
+    float v = hsv[2];
+
+    if (s == 0.0f) {
+        rgb[0] = v;
+        rgb[1] = v;
+        rgb[2] = v;
+        return;
+    }
+
+    if (h >= 360.0f) {
+        h -= 360.0f;
+    }
+
+    // Multiply by 1.0f / 60.0f using client's exact float constant 0x3C888889 (0.016666668f)
+    const float kInv60 = 0.016666668f;
+    float v12 = h * kInv60;
+
+    // In stock x87: fsub flt_B2D724 (0.5f) followed by fistp (round to nearest even)
+    // In SSE: _mm_cvtss_si32(_mm_sub_ss(v12, 0.5f)) matches fistp rounding
+    __m128 v_v12 = _mm_set_ss(v12);
+    __m128 v_sub = _mm_sub_ss(v_v12, _mm_set_ss(0.5f));
+    int sector = _mm_cvtss_si32(v_sub);
+    if (sector > 5) {
+        sector = 5;
+    }
+
+    float f = v12 - static_cast<float>(sector);
+    float s_clamped = (s >= 1.0f) ? 1.0f : s;
+
+    // Intermediate terms evaluated in 53-bit double precision matching client x87 FPU stack:
+    double d_s = (double)s_clamped;
+    double d_f = (double)f;
+    double d_v = (double)v;
+
+    float v9  = (float)((1.0 - d_s * d_f) * d_v);
+    float v10 = (float)((1.0 - d_s) * d_v);
+    float v11 = (float)((1.0 - d_s * (1.0 - d_f)) * d_v);
+
+    switch (sector) {
+    case 0:
+        rgb[0] = v;
+        rgb[1] = v11;
+        rgb[2] = v10;
+        break;
+    case 1:
+        rgb[0] = v9;
+        rgb[1] = v;
+        rgb[2] = v10;
+        break;
+    case 2:
+        rgb[0] = v10;
+        rgb[1] = v;
+        rgb[2] = v11;
+        break;
+    case 3:
+        rgb[0] = v10;
+        rgb[1] = v9;
+        rgb[2] = v;
+        break;
+    case 4:
+        rgb[0] = v11;
+        rgb[1] = v10;
+        rgb[2] = v;
+        break;
+    case 5:
+        rgb[0] = v;
+        rgb[1] = v10;
+        rgb[2] = v9;
+        break;
+    default:
+        break;
     }
 }
 
@@ -447,6 +588,74 @@ int Hooked_Vec3RecessiveAxisBody(const float* this_vec, void* edx) {
     return Vec3_RecessiveAxis_Fast(this_vec);
 }
 
+void Hooked_ColorRGBToHSVBody(const float* rgb, float* hsv) {
+    g_callsRgbToHsv++;
+    if (g_dead) {
+        orig_ColorRGBToHSV(rgb, hsv);
+        return;
+    }
+
+    if (!g_armedRgbToHsv || (g_callsRgbToHsv & kResampleMask) == 0) {
+        float theirs[3];
+        float mine[3];
+        orig_ColorRGBToHSV(rgb, theirs);
+        Color_RGBToHSV_SSE2(rgb, mine);
+
+        if (memcmp(theirs, mine, sizeof(theirs)) != 0) {
+            g_dead = true;
+            Verdict::Add(Verdict::Bad, "Color_RGBToHSV disagreed with client; retired for session");
+            Log("[ColorUnpack] DISAGREED on Color_RGBToHSV at call %lu - retired for session", g_callsRgbToHsv);
+            memcpy(hsv, theirs, sizeof(theirs));
+            return;
+        }
+
+        g_verifiedRgbToHsv++;
+        if (!g_armedRgbToHsv && g_verifiedRgbToHsv >= kVerifyFirst) {
+            g_armedRgbToHsv = true;
+            Log("[ColorUnpack] Color_RGBToHSV armed: %lu calls agreed with client exactly, now answering directly (resampling 1 in %lu)",
+                g_verifiedRgbToHsv, kResampleMask + 1);
+        }
+        memcpy(hsv, theirs, sizeof(theirs));
+        return;
+    }
+
+    Color_RGBToHSV_SSE2(rgb, hsv);
+}
+
+void Hooked_ColorHSVToRGBBody(const float* hsv, float* rgb) {
+    g_callsHsvToRgb++;
+    if (g_dead) {
+        orig_ColorHSVToRGB(hsv, rgb);
+        return;
+    }
+
+    if (!g_armedHsvToRgb || (g_callsHsvToRgb & kResampleMask) == 0) {
+        float theirs[3];
+        float mine[3];
+        orig_ColorHSVToRGB(hsv, theirs);
+        Color_HSVToRGB_SSE2(hsv, mine);
+
+        if (memcmp(theirs, mine, sizeof(theirs)) != 0) {
+            g_dead = true;
+            Verdict::Add(Verdict::Bad, "Color_HSVToRGB disagreed with client; retired for session");
+            Log("[ColorUnpack] DISAGREED on Color_HSVToRGB at call %lu - retired for session", g_callsHsvToRgb);
+            memcpy(rgb, theirs, sizeof(theirs));
+            return;
+        }
+
+        g_verifiedHsvToRgb++;
+        if (!g_armedHsvToRgb && g_verifiedHsvToRgb >= kVerifyFirst) {
+            g_armedHsvToRgb = true;
+            Log("[ColorUnpack] Color_HSVToRGB armed: %lu calls agreed with client exactly, now answering directly (resampling 1 in %lu)",
+                g_verifiedHsvToRgb, kResampleMask + 1);
+        }
+        memcpy(rgb, theirs, sizeof(theirs));
+        return;
+    }
+
+    Color_HSVToRGB_SSE2(hsv, rgb);
+}
+
 // ============================================================================
 // Hook Detours with AbTest and SEH Protection
 // ============================================================================
@@ -569,6 +778,44 @@ int __fastcall Hooked_Vec3RecessiveAxis(const float* this_vec, void* edx) {
     }
     AbTest::TickOut(t);
     return res;
+}
+
+void __cdecl Hooked_ColorRGBToHSV(const float* rgb, float* hsv) {
+    if (!g_abSubject) {
+        Hooked_ColorRGBToHSVBody(rgb, hsv);
+        return;
+    }
+    const unsigned long long t = AbTest::TickIn();
+    __try {
+        if (AbTest::StandAside()) {
+            orig_ColorRGBToHSV(rgb, hsv);
+        } else {
+            Hooked_ColorRGBToHSVBody(rgb, hsv);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_dead = true;
+        orig_ColorRGBToHSV(rgb, hsv);
+    }
+    AbTest::TickOut(t);
+}
+
+void __cdecl Hooked_ColorHSVToRGB(const float* hsv, float* rgb) {
+    if (!g_abSubject) {
+        Hooked_ColorHSVToRGBBody(hsv, rgb);
+        return;
+    }
+    const unsigned long long t = AbTest::TickIn();
+    __try {
+        if (AbTest::StandAside()) {
+            orig_ColorHSVToRGB(hsv, rgb);
+        } else {
+            Hooked_ColorHSVToRGBBody(hsv, rgb);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_dead = true;
+        orig_ColorHSVToRGB(hsv, rgb);
+    }
+    AbTest::TickOut(t);
 }
 
 // ============================================================================
@@ -804,6 +1051,156 @@ static bool SelfTestRecessiveAxis() {
     return true;
 }
 
+static bool SelfTestRGBToHSV() {
+    ColorRGBToHSV_fn orig_rgb2hsv = (ColorRGBToHSV_fn)kColorRGBToHSV;
+
+    const float kFixedTests[][3] = {
+        { 0.0f, 0.0f, 0.0f },
+        { 1.0f, 1.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f },
+        { 0.0f, 1.0f, 0.0f },
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 1.0f, 0.0f },
+        { 0.0f, 1.0f, 1.0f },
+        { 1.0f, 0.0f, 1.0f },
+        { 0.5f, 0.5f, 0.5f },
+        { 0.25f, 0.5f, 0.75f },
+        { 0.8f, 0.2f, 0.4f },
+        { 0.1f, 0.9f, 0.3f },
+        { 0.001f, 0.001f, 0.001f },
+        { 0.999f, 0.999f, 0.999f },
+    };
+
+    for (const auto& rgb : kFixedTests) {
+        float theirs[3] = { 0 };
+        float mine[3]   = { 0 };
+        orig_rgb2hsv(rgb, theirs);
+        Color_RGBToHSV_SSE2(rgb, mine);
+        if (memcmp(theirs, mine, sizeof(theirs)) != 0) {
+            Log("[ColorUnpack] SelfTestRGBToHSV: FAILED on fixed vector (%.3f, %.3f, %.3f)",
+                rgb[0], rgb[1], rgb[2]);
+            return false;
+        }
+    }
+
+    uint32_t rng = 0x1337BEEFu;
+    auto next_float = [&rng]() -> float {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        return (float)(rng & 0xFFFF) / 65535.0f;
+    };
+
+    constexpr int CASES = 20000;
+    for (int i = 0; i < CASES; ++i) {
+        float rgb[3];
+        rgb[0] = next_float();
+        rgb[1] = next_float();
+        rgb[2] = next_float();
+
+        if ((i % 5) == 0) rgb[1] = rgb[0];
+        if ((i % 7) == 0) rgb[2] = rgb[0];
+        if ((i % 11) == 0) rgb[2] = rgb[1];
+
+        float theirs[3] = { 0 };
+        float mine[3]   = { 0 };
+        orig_rgb2hsv(rgb, theirs);
+        Color_RGBToHSV_SSE2(rgb, mine);
+
+        if (memcmp(theirs, mine, sizeof(theirs)) != 0) {
+            Log("[ColorUnpack] SelfTestRGBToHSV: FAILED at case %d: RGB(%.6f, %.6f, %.6f) theirs(%.6f, %.6f, %.6f) mine(%.6f, %.6f, %.6f)",
+                i, rgb[0], rgb[1], rgb[2],
+                theirs[0], theirs[1], theirs[2],
+                mine[0], mine[1], mine[2]);
+            return false;
+        }
+    }
+
+    Log("[ColorUnpack] SelfTestRGBToHSV: passed %d test cases with 100%% identity match against client.", CASES);
+    return true;
+}
+
+static bool SelfTestHSVToRGB() {
+    ColorHSVToRGB_fn orig_hsv2rgb = (ColorHSVToRGB_fn)kColorHSVToRGB;
+
+    const float kFixedTests[][3] = {
+        {   0.0f, 0.0f, 0.5f },
+        {   0.0f, 1.0f, 1.0f },
+        {  60.0f, 1.0f, 1.0f },
+        { 120.0f, 1.0f, 1.0f },
+        { 180.0f, 1.0f, 1.0f },
+        { 240.0f, 1.0f, 1.0f },
+        { 300.0f, 1.0f, 1.0f },
+        { 360.0f, 1.0f, 1.0f },
+        { 380.0f, 0.8f, 0.9f },
+        {  30.0f, 0.5f, 0.8f },
+        {  90.0f, 0.6f, 0.7f },
+        { 150.0f, 0.4f, 0.6f },
+        { 210.0f, 0.7f, 0.5f },
+        { 270.0f, 0.9f, 0.4f },
+        { 330.0f, 0.3f, 0.9f },
+        {  59.999f, 0.8f, 0.7f },
+        {  60.001f, 0.8f, 0.7f },
+        { 119.999f, 0.8f, 0.7f },
+        { 120.001f, 0.8f, 0.7f },
+        { 179.999f, 0.8f, 0.7f },
+        { 180.001f, 0.8f, 0.7f },
+        { 239.999f, 0.8f, 0.7f },
+        { 240.001f, 0.8f, 0.7f },
+        { 299.999f, 0.8f, 0.7f },
+        { 300.001f, 0.8f, 0.7f },
+        { 359.999f, 0.8f, 0.7f },
+        { 100.0f, 1.5f, 0.8f },
+    };
+
+    for (const auto& hsv : kFixedTests) {
+        float theirs[3] = { 0 };
+        float mine[3]   = { 0 };
+        orig_hsv2rgb(hsv, theirs);
+        Color_HSVToRGB_SSE2(hsv, mine);
+        if (memcmp(theirs, mine, sizeof(theirs)) != 0) {
+            Log("[ColorUnpack] SelfTestHSVToRGB: FAILED on fixed vector (%.3f, %.3f, %.3f)",
+                hsv[0], hsv[1], hsv[2]);
+            return false;
+        }
+    }
+
+    uint32_t rng = 0xCAFEBABEu;
+    auto next_float = [&rng]() -> float {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        return (float)(rng & 0xFFFF) / 65535.0f;
+    };
+
+    constexpr int CASES = 20000;
+    for (int i = 0; i < CASES; ++i) {
+        float hsv[3];
+        hsv[0] = next_float() * 370.0f;
+        hsv[1] = next_float();
+        hsv[2] = next_float();
+
+        if ((i % 10) == 0) hsv[1] = 0.0f;
+        if ((i % 15) == 0) hsv[1] = 1.0f + next_float();
+
+        float theirs[3] = { 0 };
+        float mine[3]   = { 0 };
+        orig_hsv2rgb(hsv, theirs);
+        Color_HSVToRGB_SSE2(hsv, mine);
+
+        if (memcmp(theirs, mine, sizeof(theirs)) != 0) {
+            Log("[ColorUnpack] SelfTestHSVToRGB: FAILED at case %d: HSV(%.6f, %.6f, %.6f) theirs(%.6f, %.6f, %.6f) mine(%.6f, %.6f, %.6f)",
+                i, hsv[0], hsv[1], hsv[2],
+                theirs[0], theirs[1], theirs[2],
+                mine[0], mine[1], mine[2]);
+            return false;
+        }
+    }
+
+    Log("[ColorUnpack] SelfTestHSVToRGB: passed %d test cases with 100%% identity match against client.", CASES);
+    return true;
+}
+
 }  // namespace
 
 #endif  // !TEST_DISABLE_COLOR_UNPACK_SSE2
@@ -822,6 +1219,8 @@ bool Init() {
         !WowOpt_ClientPatchAllowed((const void*)kColorUnpackBGR) ||
         !WowOpt_ClientPatchAllowed((const void*)kColorPackBGRA) ||
         !WowOpt_ClientPatchAllowed((const void*)kColorPackBGR) ||
+        !WowOpt_ClientPatchAllowed((const void*)kColorRGBToHSV) ||
+        !WowOpt_ClientPatchAllowed((const void*)kColorHSVToRGB) ||
         !WowOpt_ClientPatchAllowed((const void*)kVec3DomAxis) ||
         !WowOpt_ClientPatchAllowed((const void*)kVec3RecAxis)) {
         Log("[ColorUnpack] not installed: No Client Patches is active.");
@@ -832,6 +1231,8 @@ bool Init() {
         IsBadReadPtr((void*)kColorUnpackBGR, 16) ||
         IsBadReadPtr((void*)kColorPackBGRA, 16) ||
         IsBadReadPtr((void*)kColorPackBGR, 16) ||
+        IsBadReadPtr((void*)kColorRGBToHSV, 16) ||
+        IsBadReadPtr((void*)kColorHSVToRGB, 16) ||
         IsBadReadPtr((void*)kVec3DomAxis, 16) ||
         IsBadReadPtr((void*)kVec3RecAxis, 16)) {
         Log("[ColorUnpack] unreadable targets - not installing.");
@@ -842,6 +1243,8 @@ bool Init() {
     const unsigned char* pUnpackBgr  = (const unsigned char*)kColorUnpackBGR;
     const unsigned char* pPackBgra   = (const unsigned char*)kColorPackBGRA;
     const unsigned char* pPackBgr    = (const unsigned char*)kColorPackBGR;
+    const unsigned char* pRGBToHSV   = (const unsigned char*)kColorRGBToHSV;
+    const unsigned char* pHSVToRGB   = (const unsigned char*)kColorHSVToRGB;
     const unsigned char* pDom        = (const unsigned char*)kVec3DomAxis;
     const unsigned char* pRec        = (const unsigned char*)kVec3RecAxis;
 
@@ -849,6 +1252,8 @@ bool Init() {
         pUnpackBgr[0]  != 0x55 || pUnpackBgr[1]  != 0x8B || pUnpackBgr[2]  != 0xEC ||
         pPackBgra[0]   != 0x55 || pPackBgra[1]   != 0x8B || pPackBgra[2]   != 0xEC ||
         pPackBgr[0]    != 0x55 || pPackBgr[1]    != 0x8B || pPackBgr[2]    != 0xEC ||
+        pRGBToHSV[0]   != 0x55 || pRGBToHSV[1]   != 0x8B || pRGBToHSV[2]   != 0xEC ||
+        pHSVToRGB[0]   != 0x55 || pHSVToRGB[1]   != 0x8B || pHSVToRGB[2]   != 0xEC ||
         pDom[0]        != 0xD9 || pDom[1]        != 0x01 || pDom[2]        != 0xD9 || pDom[3] != 0xE1 ||
         pRec[0]        != 0xD9 || pRec[1]        != 0x01 || pRec[2]        != 0xD9 || pRec[3] != 0xE1) {
         Log("[ColorUnpack] unexpected prologue bytes - not installing.");
@@ -856,6 +1261,7 @@ bool Init() {
     }
 
     if (!SelfTestColorUnpack() || !SelfTestColorPack() ||
+        !SelfTestRGBToHSV() || !SelfTestHSVToRGB() ||
         !SelfTestDominantAxis() || !SelfTestRecessiveAxis()) {
         Log("[ColorUnpack] startup self-tests failed - not installing.");
         return false;
@@ -890,6 +1296,20 @@ bool Init() {
         SamplingProfiler::RegisterSelfSymbol("ColorPackBGR_SSE2", (const void*)&Hooked_ColorPackBGR);
     }
 
+    if (WineSafe_CreateHook((void*)kColorRGBToHSV, (void*)Hooked_ColorRGBToHSV,
+                            (void**)&orig_ColorRGBToHSV) == MH_OK &&
+        WO_EnableHook((void*)kColorRGBToHSV) == MH_OK) {
+        ok++;
+        SamplingProfiler::RegisterSelfSymbol("ColorRGBToHSV_SSE2", (const void*)&Hooked_ColorRGBToHSV);
+    }
+
+    if (WineSafe_CreateHook((void*)kColorHSVToRGB, (void*)Hooked_ColorHSVToRGB,
+                            (void**)&orig_ColorHSVToRGB) == MH_OK &&
+        WO_EnableHook((void*)kColorHSVToRGB) == MH_OK) {
+        ok++;
+        SamplingProfiler::RegisterSelfSymbol("ColorHSVToRGB_SSE2", (const void*)&Hooked_ColorHSVToRGB);
+    }
+
     if (WineSafe_CreateHook((void*)kVec3DomAxis, (void*)Hooked_Vec3DominantAxis,
                             (void**)&orig_Vec3DominantAxis) == MH_OK &&
         WO_EnableHook((void*)kVec3DomAxis) == MH_OK) {
@@ -912,8 +1332,8 @@ bool Init() {
     g_installed = true;
     g_abSubject = AbTest::IsSubject("ColorUnpack", &g_abSubject);
 
-    Log("[ColorUnpack] ACTIVE on %d of 6 color conversion and vector math routines "
-        "(Color_UnpackBGRA, Color_UnpackBGR, Color_PackBGRA, Color_PackBGR, Vec3_DominantAxis, Vec3_RecessiveAxis). "
+    Log("[ColorUnpack] ACTIVE on %d of 8 color conversion and vector math routines "
+        "(Color_UnpackBGRA, Color_UnpackBGR, Color_PackBGRA, Color_PackBGR, Color_RGBToHSV, Color_HSVToRGB, Vec3_DominantAxis, Vec3_RecessiveAxis). "
         "Verifying first %lu calls bit for bit with ongoing resampling.%s",
         ok, kVerifyFirst,
         Config::g_settings.OptAbTest
@@ -930,6 +1350,8 @@ void Shutdown() {
     MH_DisableHook((void*)kColorUnpackBGR);
     MH_DisableHook((void*)kColorPackBGRA);
     MH_DisableHook((void*)kColorPackBGR);
+    MH_DisableHook((void*)kColorRGBToHSV);
+    MH_DisableHook((void*)kColorHSVToRGB);
     MH_DisableHook((void*)kVec3DomAxis);
     MH_DisableHook((void*)kVec3RecAxis);
     g_installed = false;
@@ -952,7 +1374,8 @@ void LogStats() {
         Log("[ColorUnpack] retired early: evaluation disagreed with the client.");
         return;
     }
-    const unsigned long total = g_callsBgra + g_callsBgr + g_callsPackBgra + g_callsPackBgr + g_callsDomAxis + g_callsRecAxis;
+    const unsigned long total = g_callsBgra + g_callsBgr + g_callsPackBgra + g_callsPackBgr +
+                                g_callsRgbToHsv + g_callsHsvToRgb + g_callsDomAxis + g_callsRecAxis;
     if (total == 0) {
         Log("[ColorUnpack] measured and zero: the hooks are in and none was reached.");
         return;
@@ -961,12 +1384,16 @@ void LogStats() {
         "UnpackBGR=%lu (verified=%lu, armed=%s) | "
         "PackBGRA=%lu (verified=%lu, armed=%s) | "
         "PackBGR=%lu (verified=%lu, armed=%s) | "
+        "RGBToHSV=%lu (verified=%lu, armed=%s) | "
+        "HSVToRGB=%lu (verified=%lu, armed=%s) | "
         "dom_axis=%lu (verified=%lu, armed=%s) | "
         "rec_axis=%lu (verified=%lu, armed=%s)",
         g_callsBgra, g_verifiedBgra, g_armedBgra ? "yes" : "no",
         g_callsBgr, g_verifiedBgr, g_armedBgr ? "yes" : "no",
         g_callsPackBgra, g_verifiedPackBgra, g_armedPackBgra ? "yes" : "no",
         g_callsPackBgr, g_verifiedPackBgr, g_armedPackBgr ? "yes" : "no",
+        g_callsRgbToHsv, g_verifiedRgbToHsv, g_armedRgbToHsv ? "yes" : "no",
+        g_callsHsvToRgb, g_verifiedHsvToRgb, g_armedHsvToRgb ? "yes" : "no",
         g_callsDomAxis, g_verifiedDomAxis, g_armedDomAxis ? "yes" : "no",
         g_callsRecAxis, g_verifiedRecAxis, g_armedRecAxis ? "yes" : "no");
 #endif

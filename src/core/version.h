@@ -391,10 +391,12 @@
 // SSE2 color conversion, packing, and vector coordinate extremum math:
 //   sub_984C90 / Color_UnpackBGRA (12 callers), sub_982970 / Color_UnpackBGR (6 callers),
 //   sub_48BD20 / Color_PackBGRA (21 callers), sub_9851A0 / Color_PackBGR (7 callers),
+//   sub_984F60 / Color_RGBToHSV (5 callers), sub_985030 / Color_HSVToRGB (8 callers),
 //   sub_9829B0 / Vec3_DominantAxis (8 callers), sub_9829F0 / Vec3_RecessiveAxis (1 caller).
 // Unpacks/packs 32-bit BGRA and 24-bit BGR colors in parallel using integer unpack/pack
 // and SSE conversion/multiply, eliminating stack spills and 8 pipeline-flushing fldcw
-// instructions. Evaluates coordinate magnitudes branchlessly using bitwise IEEE fabs.
+// instructions. Vectorizes RGB-to-HSV and HSV-to-RGB color space conversions, evaluating
+// coordinate magnitudes branchlessly using bitwise IEEE fabs.
 #define TEST_DISABLE_COLOR_UNPACK_SSE2          0
 
 // Quaternion -> 3x3 rotation matrix (sub_4C1C40), the arithmetic core behind

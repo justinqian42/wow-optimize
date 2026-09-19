@@ -268,6 +268,7 @@ static void BuildKnownFuncTable() {
         { 0x008B7DA0,     3, "ReturnThis" },
         { 0x00855670,   102, "LuaMemPool_Free" },
         // UI frame hierarchy update and culling traversal
+        { 0x0048BD20,   186, "Color_PackBGRA" },
         { 0x00494A10,   214, "CFrameManager::OnUpdate" },
         { 0x00495320,   230, "CFrameStrataManager::OnUpdate" },
         { 0x007A50C0,   384, "Scene_VisibilityTraverse" },
@@ -392,6 +393,8 @@ static void BuildKnownFuncTable() {
         { 0x00984860,   198, "AABB_TransformAffine" },
         { 0x00984930,   829, "AABB_FromVertices" },
         { 0x00984C90,    76, "Color_UnpackBGRA" },
+        { 0x00984F60,   193, "Color_RGBToHSV" },
+        { 0x00985030,   334, "Color_HSVToRGB" },
         { 0x009851A0,    91, "Color_PackBGR" },
 
         // --- CRT string/memory (static) ---
