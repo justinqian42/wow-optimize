@@ -19,6 +19,7 @@ namespace OccluderSphere {
 namespace {
 
 constexpr uintptr_t kTestSphere   = 0x007CCE00; // int __cdecl sub_7CCE00(const float* sphere)
+constexpr uintptr_t kTestPolygon  = 0x007CCFA0; // int __cdecl sub_7CCFA0(const float* vertices, unsigned int count)
 constexpr uintptr_t kOccluderNum  = 0x00D2DCEC; // uint32_t active occluder count
 constexpr uintptr_t kOccluderList = 0x00D2DCF0; // pointer to OccluderVolume array
 constexpr uintptr_t kPlaneArray   = 0x00D2DCE0; // pointer to plane float array
@@ -32,17 +33,33 @@ struct OccluderVolume {
     uint32_t plane_count;
 };
 
+struct VertexBlock4 {
+    __m128 vx;
+    __m128 vy;
+    __m128 vz;
+};
+
 typedef int (__cdecl* TestSphere_fn)(const float* sphere);
 TestSphere_fn orig_TestSphere = nullptr;
 
-bool g_installed = false;
-bool g_dead      = false;
+typedef int (__cdecl* TestPolygon_fn)(const float* vertices, unsigned int count);
+TestPolygon_fn orig_TestPolygon = nullptr;
 
-unsigned long g_calls    = 0;
-unsigned long g_occluded = 0;
-unsigned long g_visible  = 0;
-unsigned long g_verified = 0;
-unsigned long g_mismatch = 0;
+bool g_installed   = false;
+bool g_sphere_dead = false;
+bool g_poly_dead   = false;
+
+unsigned long g_sphere_calls    = 0;
+unsigned long g_sphere_occluded = 0;
+unsigned long g_sphere_visible  = 0;
+unsigned long g_sphere_verified = 0;
+unsigned long g_sphere_mismatch = 0;
+
+unsigned long g_poly_calls    = 0;
+unsigned long g_poly_occluded = 0;
+unsigned long g_poly_visible  = 0;
+unsigned long g_poly_verified = 0;
+unsigned long g_poly_mismatch = 0;
 
 __forceinline int TestSphere_Fast(const float* sphere) {
     const uint32_t num_occluders = *(const uint32_t*)kOccluderNum;
@@ -123,41 +140,194 @@ __forceinline int TestSphere_Fast(const float* sphere) {
 }
 
 int __cdecl Hooked_TestSphere(const float* sphere) {
-    if (g_dead || !sphere) {
+    if (g_sphere_dead || !sphere) {
         return orig_TestSphere(sphere);
     }
 
-    ++g_calls;
+    ++g_sphere_calls;
     int mine = 0;
 
     __try {
         mine = TestSphere_Fast(sphere);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        Log("[OccluderSphere] Exception during fast test, retiring hook\n");
+        g_sphere_dead = true;
+        Log("[OccluderSphere] Exception during fast sphere test, retiring hook\n");
         return orig_TestSphere(sphere);
     }
 
     if (mine) {
-        ++g_occluded;
+        ++g_sphere_occluded;
     } else {
-        ++g_visible;
+        ++g_sphere_visible;
     }
 
-    const bool should_verify = (g_calls <= kVerifyFirst) || ((g_calls & kResampleMask) == 0);
+    const bool should_verify = (g_sphere_calls <= kVerifyFirst) || ((g_sphere_calls & kResampleMask) == 0);
     if (should_verify) {
         const int orig = orig_TestSphere(sphere);
         if (mine != orig) {
-            ++g_mismatch;
-            Log("[OccluderSphere] Mismatch! sphere=(%.2f, %.2f, %.2f, %.2f) mine=%d orig=%d\n",
+            ++g_sphere_mismatch;
+            Log("[OccluderSphere] Sphere mismatch! sphere=(%.2f, %.2f, %.2f, %.2f) mine=%d orig=%d\n",
                 sphere[0], sphere[1], sphere[2], sphere[3], mine, orig);
-            if (g_mismatch > 10) {
-                g_dead = true;
-                Log("[OccluderSphere] Too many mismatches, retiring hook\n");
+            if (g_sphere_mismatch > 10) {
+                g_sphere_dead = true;
+                Log("[OccluderSphere] Too many sphere mismatches, retiring hook\n");
             }
             return orig;
         }
-        ++g_verified;
+        ++g_sphere_verified;
+    }
+
+    return mine;
+}
+
+__forceinline int TestPolygon_Fast(const float* vertices, unsigned int count) {
+    const uint32_t num_occluders = *(const uint32_t*)kOccluderNum;
+    if (num_occluders == 0) {
+        return 0;
+    }
+
+    const OccluderVolume* occluders = *(const OccluderVolume* const*)kOccluderList;
+    const float* all_planes = *(const float* const*)kPlaneArray;
+    if (!occluders || !all_planes) {
+        return 0;
+    }
+
+    if (count == 0) {
+        return 1;
+    }
+
+    // Typical bounding vertices passed from sub_7A85E0 are <= 12.
+    // Support up to 32 vertices (8 blocks) on stack.
+    if (count > 32) {
+        return orig_TestPolygon(vertices, count);
+    }
+
+    const uint32_t num_blocks = (count + 3) / 4;
+    VertexBlock4 blocks[8];
+
+    if (count == 8) {
+        // Direct fast-path for standard 8-vertex bounding box
+        blocks[0].vx = _mm_set_ps(vertices[9],  vertices[6],  vertices[3],  vertices[0]);
+        blocks[0].vy = _mm_set_ps(vertices[10], vertices[7],  vertices[4],  vertices[1]);
+        blocks[0].vz = _mm_set_ps(vertices[11], vertices[8],  vertices[5],  vertices[2]);
+        blocks[1].vx = _mm_set_ps(vertices[21], vertices[18], vertices[15], vertices[12]);
+        blocks[1].vy = _mm_set_ps(vertices[22], vertices[19], vertices[16], vertices[13]);
+        blocks[1].vz = _mm_set_ps(vertices[23], vertices[20], vertices[17], vertices[14]);
+    } else if (count == 4) {
+        // Direct fast-path for 4-vertex quad / portal
+        blocks[0].vx = _mm_set_ps(vertices[9],  vertices[6],  vertices[3],  vertices[0]);
+        blocks[0].vy = _mm_set_ps(vertices[10], vertices[7],  vertices[4],  vertices[1]);
+        blocks[0].vz = _mm_set_ps(vertices[11], vertices[8],  vertices[5],  vertices[2]);
+    } else {
+        // Pad unused lanes in the final block with vertex 0 coordinates so that
+        // the padding lanes never evaluate dist > 0.0f when vertex 0 is inside.
+        const float pad_x = vertices[0];
+        const float pad_y = vertices[1];
+        const float pad_z = vertices[2];
+
+        for (uint32_t b = 0; b < num_blocks; ++b) {
+            alignas(16) float xs[4];
+            alignas(16) float ys[4];
+            alignas(16) float zs[4];
+            for (uint32_t lane = 0; lane < 4; ++lane) {
+                const uint32_t v_idx = b * 4 + lane;
+                if (v_idx < count) {
+                    xs[lane] = vertices[v_idx * 3 + 0];
+                    ys[lane] = vertices[v_idx * 3 + 1];
+                    zs[lane] = vertices[v_idx * 3 + 2];
+                } else {
+                    xs[lane] = pad_x;
+                    ys[lane] = pad_y;
+                    zs[lane] = pad_z;
+                }
+            }
+            blocks[b].vx = _mm_load_ps(xs);
+            blocks[b].vy = _mm_load_ps(ys);
+            blocks[b].vz = _mm_load_ps(zs);
+        }
+    }
+
+    const __m128 zero = _mm_setzero_ps();
+    for (uint32_t i = 0; i < num_occluders; ++i) {
+        const uint32_t plane_count = occluders[i].plane_count;
+        const float* p = all_planes + (occluders[i].first_plane * 4);
+        bool volume_occluded = true;
+
+        for (uint32_t pi = 0; pi < plane_count; ++pi) {
+            const __m128 nx = _mm_set1_ps(p[0]);
+            const __m128 ny = _mm_set1_ps(p[1]);
+            const __m128 nz = _mm_set1_ps(p[2]);
+            const __m128 nd = _mm_set1_ps(p[3]);
+
+            bool plane_passed = true;
+            for (uint32_t b = 0; b < num_blocks; ++b) {
+                // dot4 = (nx*vx + ny*vy) + (nz*vz + nd)
+                const __m128 dot4 = _mm_add_ps(
+                    _mm_add_ps(_mm_mul_ps(nx, blocks[b].vx), _mm_mul_ps(ny, blocks[b].vy)),
+                    _mm_add_ps(_mm_mul_ps(nz, blocks[b].vz), nd)
+                );
+
+                // If any vertex is in front of the plane (dist > 0.0f), the plane fails
+                const __m128 cmp = _mm_cmpgt_ps(dot4, zero);
+                if (_mm_movemask_ps(cmp) != 0) {
+                    plane_passed = false;
+                    break;
+                }
+            }
+
+            if (!plane_passed) {
+                volume_occluded = false;
+                break;
+            }
+
+            p += 4;
+        }
+
+        if (volume_occluded) {
+            // All planes of this occluder volume contain all vertices: occluded!
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int __cdecl Hooked_TestPolygon(const float* vertices, unsigned int count) {
+    if (g_poly_dead || !vertices) {
+        return orig_TestPolygon(vertices, count);
+    }
+
+    ++g_poly_calls;
+    int mine = 0;
+
+    __try {
+        mine = TestPolygon_Fast(vertices, count);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_poly_dead = true;
+        Log("[OccluderSphere] Exception during fast polygon test, retiring hook\n");
+        return orig_TestPolygon(vertices, count);
+    }
+
+    if (mine) {
+        ++g_poly_occluded;
+    } else {
+        ++g_poly_visible;
+    }
+
+    const bool should_verify = (g_poly_calls <= kVerifyFirst) || ((g_poly_calls & kResampleMask) == 0);
+    if (should_verify) {
+        const int orig = orig_TestPolygon(vertices, count);
+        if (mine != orig) {
+            ++g_poly_mismatch;
+            Log("[OccluderSphere] Polygon mismatch! count=%u mine=%d orig=%d\n",
+                count, mine, orig);
+            if (g_poly_mismatch > 10) {
+                g_poly_dead = true;
+                Log("[OccluderSphere] Too many polygon mismatches, retiring hook\n");
+            }
+            return orig;
+        }
+        ++g_poly_verified;
     }
 
     return mine;
@@ -170,28 +340,41 @@ bool Init() {
         return true;
     }
 
-    if (IsBadReadPtr((void*)kTestSphere, 8)) {
-        Log("[OccluderSphere] 0x%08X unreadable - not installing\n", (unsigned)kTestSphere);
+    if (IsBadReadPtr((void*)kTestSphere, 8) || IsBadReadPtr((void*)kTestPolygon, 8)) {
+        Log("[OccluderSphere] 0x%08X or 0x%08X unreadable - not installing\n",
+            (unsigned)kTestSphere, (unsigned)kTestPolygon);
         return false;
     }
 
     if (WineSafe_CreateHook((void*)kTestSphere, (void*)Hooked_TestSphere,
                             (void**)&orig_TestSphere) != MH_OK) {
-        Log("[OccluderSphere] hook NOT created\n");
+        Log("[OccluderSphere] Sphere hook NOT created\n");
         return false;
     }
 
     if (WO_EnableHook((void*)kTestSphere) != MH_OK) {
-        Log("[OccluderSphere] hook created but could not be enabled\n");
+        Log("[OccluderSphere] Sphere hook created but could not be enabled\n");
+        return false;
+    }
+
+    if (WineSafe_CreateHook((void*)kTestPolygon, (void*)Hooked_TestPolygon,
+                            (void**)&orig_TestPolygon) != MH_OK) {
+        Log("[OccluderSphere] Polygon hook NOT created\n");
+        return false;
+    }
+
+    if (WO_EnableHook((void*)kTestPolygon) != MH_OK) {
+        Log("[OccluderSphere] Polygon hook created but could not be enabled\n");
         return false;
     }
 
     g_installed = true;
     SamplingProfiler::RegisterSelfSymbol("OccluderSphere_SSE2", (const void*)&Hooked_TestSphere);
-    Log("[OccluderSphere] ACTIVE on sub_7CCE00 (0x%08X) - convex occluder volume sphere culling. "
-        "Replaced scalar x87 plane distances with 4-wide transposed SSE2 vector evaluations. "
+    SamplingProfiler::RegisterSelfSymbol("OccluderPolygon_SSE2", (const void*)&Hooked_TestPolygon);
+    Log("[OccluderSphere] ACTIVE on sub_7CCE00 (0x%08X) and sub_7CCFA0 (0x%08X) - convex occluder volume culling. "
+        "Replaced scalar x87 plane distances with 4-wide SSE2 vector evaluations. "
         "Verifying first %lu calls, then 1 in %d.\n",
-        (unsigned)kTestSphere, kVerifyFirst, (int)(kResampleMask + 1));
+        (unsigned)kTestSphere, (unsigned)kTestPolygon, kVerifyFirst, (int)(kResampleMask + 1));
     return true;
 }
 
@@ -203,14 +386,22 @@ void LogStats() {
         Log("[OccluderSphere] not installed - nothing measured\n");
         return;
     }
-    if (g_calls == 0) {
+    if (g_sphere_calls == 0 && g_poly_calls == 0) {
         Log("[OccluderSphere] installed but never called\n");
         return;
     }
-    const double occ_pct = (g_calls > 0) ? (100.0 * (double)g_occluded / (double)g_calls) : 0.0;
-    Log("[OccluderSphere] %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s\n",
-        g_calls, g_occluded, occ_pct, g_visible, g_verified, g_mismatch,
-        g_dead ? " - DISABLED" : (g_calls < kVerifyFirst ? " (still verifying)" : ""));
+    if (g_sphere_calls > 0) {
+        const double occ_pct = 100.0 * (double)g_sphere_occluded / (double)g_sphere_calls;
+        Log("[OccluderSphere] Sphere: %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s\n",
+            g_sphere_calls, g_sphere_occluded, occ_pct, g_sphere_visible, g_sphere_verified, g_sphere_mismatch,
+            g_sphere_dead ? " - DISABLED" : (g_sphere_calls < kVerifyFirst ? " (still verifying)" : ""));
+    }
+    if (g_poly_calls > 0) {
+        const double occ_pct = 100.0 * (double)g_poly_occluded / (double)g_poly_calls;
+        Log("[OccluderSphere] Polygon: %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s\n",
+            g_poly_calls, g_poly_occluded, occ_pct, g_poly_visible, g_poly_verified, g_poly_mismatch,
+            g_poly_dead ? " - DISABLED" : (g_poly_calls < kVerifyFirst ? " (still verifying)" : ""));
+    }
 }
 
 } // namespace OccluderSphere

@@ -257,14 +257,12 @@ static void BuildKnownFuncTable() {
         { 0x00817DB0,     6, "GetLuaState" },
         { 0x008B7DA0,     3, "ReturnThis" },
         { 0x00855670,   102, "LuaMemPool_Free" },
-        // Hot in a CPU-bound profile but not yet understood. Named by address so
-        // a repeat appearance is recognisable rather than looking like noise.
-        { 0x00494A10,   214, "Hot_494A10" },
-        { 0x007A50C0,   384, "Hot_7A50C0" },
+        // UI frame hierarchy update and culling traversal
+        { 0x00494A10,   214, "CFrameManager::OnUpdate" },
+        { 0x00495320,   230, "CFrameStrataManager::OnUpdate" },
+        { 0x007A50C0,   384, "Scene_VisibilityTraverse" },
         { 0x007C6D50,  1166, "Collision_ClipVertsToBox" },
-        // Seventeen callers, once per scene node per culling pass. Its samples
-        // used to be attributed to whichever named function preceded it.
-        { 0x0078F370,    97, "AABB_Overlap" },
+        { 0x0078F370,    39, "AABB_Overlap" },
         // Classifies every vertex of a collision model against the query box
         // as a six-bit outcode, four vertices per unrolled pass, then tests
         // each triangle by ANDing its three. Called once per line-of-sight or
@@ -342,8 +340,8 @@ static void BuildKnownFuncTable() {
         { 0x007F9430,    66, "AABB_Transform" },             // 4x4 matrix * AABB (vectorized by aabb_transform_sse2.cpp)
         { 0x007F93D0,    91, "AABB_Transform3x3" },          // 3x3 matrix * AABB (vectorized by aabb_transform_sse2.cpp)
         { 0x007F9320,   171, "AABB_TransformCore_Arvo" },     // Arvo bounding box transformation core
-        { 0x0078F370,    39, "AABB_Overlap" },               // box-overlap predicate (vectorized by aabb_overlap_sse2.cpp)
-        { 0x007A50C0,   384, "Scene_VisibilityTraverse" },   // scene-graph culling walk
+        { 0x007CCE00,   403, "Occluder_TestSphere" },        // sphere occluder culling (vectorized by occluder_sphere_sse2.cpp)
+        { 0x007CCFA0,   404, "Occluder_TestPolygon" },       // polygon/mesh occluder culling (vectorized by occluder_sphere_sse2.cpp)
         { 0x007BCC00,   796, "World_VisibilityTraverse" },  // 64x64 tiles, 16x16 cells
         { 0x0078F6A0,   601, "Terrain_HorizonOcclusionBuild" },
         { 0x00861D90,   235, "luaK_patchlistaux" },      // Lua code generator jump patching
