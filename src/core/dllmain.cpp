@@ -50,6 +50,7 @@
 #include "self_bench.h"
 #include "freeze_catcher.h"
 #include "ray_triangle_sse2.h"
+#include "occluder_sphere_sse2.h"
 #include "bone_matrix_upload_sse2.h"
 #include "ui_batch_fill_sse2.h"
 #include "particle_fill_sse2.h"
@@ -5646,6 +5647,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("SelfBench::LogStats", SelfBench::LogStats());
     STAT_TIME("FreezeCatcher::LogStats", FreezeCatcher::LogStats());
     STAT_TIME("RayTriangle::LogStats", RayTriangle::LogStats());
+    STAT_TIME("OccluderSphere::LogStats", OccluderSphere::LogStats());
     STAT_TIME("ObjMgrEnumFast::LogStats", ObjMgrEnumFast::LogStats());
     STAT_TIME("MpqOpenCensus::LogStats", MpqOpenCensus::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
@@ -8445,6 +8447,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     X87Precision::Sample("at DLL init");
     CollisionRayOutcode::Init();
     RayTriangle::Init();
+    OccluderSphere::Init();
     BoneMatrixUpload::Init();
     UiBatchFill::Init();
     ParticleFill::Init();

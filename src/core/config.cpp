@@ -144,6 +144,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "CollisionModelCache", &Settings::OptCollisionModelCache },
     { "Graphics_Sound", "CollisionRayOutcode", &Settings::OptCollisionRayOutcode },
     { "Graphics_Sound", "RayTriangleSse2", &Settings::OptRayTriangleSse2 },
+    { "Graphics_Sound", "OccluderSphere", &Settings::OptOccluderSphere },
     { "Graphics_Sound", "BoneMatrixUpload", &Settings::OptBoneMatrixUpload },
     { "Graphics_Sound", "UiBatchFill", &Settings::OptUiBatchFill },
     { "Graphics_Sound", "ParticleFill", &Settings::OptParticleFill },
@@ -681,6 +682,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptCollisionModelCache = GetPrivateProfileIntA("Graphics_Sound", "CollisionModelCache", 1, iniPath.c_str()) != 0;
         g_settings.OptCollisionRayOutcode = GetPrivateProfileIntA("Graphics_Sound", "CollisionRayOutcode", 1, iniPath.c_str()) != 0;
         g_settings.OptRayTriangleSse2     = GetPrivateProfileIntA("Graphics_Sound", "RayTriangleSse2", 1, iniPath.c_str()) != 0;
+        g_settings.OptOccluderSphere      = GetPrivateProfileIntA("Graphics_Sound", "OccluderSphere", 1, iniPath.c_str()) != 0;
         g_settings.OptBoneMatrixUpload    = GetPrivateProfileIntA("Graphics_Sound", "BoneMatrixUpload", 1, iniPath.c_str()) != 0;
         g_settings.OptUiBatchFill         = GetPrivateProfileIntA("Graphics_Sound", "UiBatchFill", 0, iniPath.c_str()) != 0;
         g_settings.OptParticleFill        = GetPrivateProfileIntA("Graphics_Sound", "ParticleFill", 0, iniPath.c_str()) != 0;

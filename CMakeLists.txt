@@ -155,6 +155,7 @@ add_library(wow_optimize SHARED
     src/simd_math/collision_ray_outcode_sse2.cpp
     src/simd_math/x87_precision_check.cpp
     src/simd_math/ray_triangle_sse2.cpp
+    src/simd_math/occluder_sphere_sse2.cpp
     src/simd_math/aabb_overlap_sse2.cpp
     src/simd_math/anim_quat_unpack_sse2.cpp
     src/simd_math/anim_vec3_track_sse2.cpp

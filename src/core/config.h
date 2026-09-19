@@ -394,6 +394,10 @@ namespace Config {
         bool OptCollisionModelCache = true;
         bool OptCollisionRayOutcode = true;
         bool OptRayTriangleSse2 = true;
+        // The convex occluder volume sphere culling test (sub_7CCE00).
+        // Uses 4-wide transposed SSE2 vector dot products to evaluate occluder
+        // planes in parallel instead of serial scalar x87 loops.
+        bool OptOccluderSphere = true;
         // The bone matrix upload loop inside sub_829BA0, 3.35% of executing
         // time and the largest entry in the corrected profile with nothing
         // shipped against it. Twelve x87 load/store pairs a bone transpose a
