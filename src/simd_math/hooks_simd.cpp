@@ -1093,7 +1093,7 @@ static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
         Vec3Cross_Double(our_res, a, b);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_vec3cross_dead, 1);
-        Log("[SimdHooks] C3Vector::Cross faulted during verification, retiring hook\n");
+        Log("[SimdHooks] C3Vector::Cross faulted during verification, retiring hook");
         return orig_Vec3Cross(result, a, b);
     }
 
@@ -1110,7 +1110,7 @@ static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
 
     if (!match) {
         InterlockedExchange(&g_vec3cross_dead, 1);
-        Log("[SimdHooks] C3Vector::Cross DISAGREED with client - retiring hook\n");
+        Log("[SimdHooks] C3Vector::Cross DISAGREED with client - retiring hook");
         result[0] = client_res[0]; result[1] = client_res[1]; result[2] = client_res[2];
         return result;
     }
@@ -1119,7 +1119,7 @@ static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
     unsigned long ok = InterlockedIncrement((volatile long*)&g_vec3cross_agreements);
     if (g_vec3cross_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_vec3cross_armed, 1);
-        Log("[SimdHooks] C3Vector::Cross armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[SimdHooks] C3Vector::Cross armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return result;
 }
@@ -1354,8 +1354,8 @@ bool InstallSimdHooks(void) {
     // and the other logged a duplicate, so which implementation a player got
     // depended on link order.
     //
-    // The verified one wins by name now. The type-2 and point variants below are
-    // not duplicated and are unaffected.
+    // The verified one wins by name now. frustum_aabb_sse2 also replaces the
+    // type-2 and point variants below, so the same rule applies to each of them.
     //
     // Worth saying while here: this whole module is gated on OptStrStrSse2, a
     // switch named after a string search, and it is what decides whether frustum

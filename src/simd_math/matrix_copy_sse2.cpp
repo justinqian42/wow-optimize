@@ -999,7 +999,7 @@ static float* __cdecl Hooked_PointXformInPlace(float* a1, float* a2, const float
         PointTransformInPlace_SSE2(our_res, our_vec, a3);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_pointxformip_dead, 1);
-        Log("[MatrixSSE2] PointTransformInPlace faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] PointTransformInPlace faulted during verification, retiring hook");
         return a1;
     }
 
@@ -1018,7 +1018,7 @@ static float* __cdecl Hooked_PointXformInPlace(float* a1, float* a2, const float
 
     if (!match) {
         InterlockedExchange(&g_pointxformip_dead, 1);
-        Log("[MatrixSSE2] PointTransformInPlace DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] PointTransformInPlace DISAGREED with client - retiring hook");
         a1[0] = client_res[0]; a1[1] = client_res[1]; a1[2] = client_res[2];
         a2[0] = client_vec[0]; a2[1] = client_vec[1]; a2[2] = client_vec[2];
         return a1;
@@ -1030,7 +1030,7 @@ static float* __cdecl Hooked_PointXformInPlace(float* a1, float* a2, const float
     unsigned long ok = InterlockedIncrement((volatile long*)&g_pointxformip_agreements);
     if (g_pointxformip_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_pointxformip_armed, 1);
-        Log("[MatrixSSE2] PointTransformInPlace armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] PointTransformInPlace armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return a1;
 }
@@ -1096,7 +1096,7 @@ static float* __cdecl Hooked_VectorMatrixRotate(float* result, const float* vec,
         VectorMatrixRotate_SSE2(our_res, vec, mat);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_vecmatrotate_dead, 1);
-        Log("[MatrixSSE2] VectorMatrixRotate faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] VectorMatrixRotate faulted during verification, retiring hook");
         return pOrigVectorMatrixRotate(result, vec, mat);
     }
 
@@ -1113,7 +1113,7 @@ static float* __cdecl Hooked_VectorMatrixRotate(float* result, const float* vec,
 
     if (!match) {
         InterlockedExchange(&g_vecmatrotate_dead, 1);
-        Log("[MatrixSSE2] VectorMatrixRotate DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] VectorMatrixRotate DISAGREED with client - retiring hook");
         result[0] = client_res[0]; result[1] = client_res[1]; result[2] = client_res[2];
         return result;
     }
@@ -1122,7 +1122,7 @@ static float* __cdecl Hooked_VectorMatrixRotate(float* result, const float* vec,
     unsigned long ok = InterlockedIncrement((volatile long*)&g_vecmatrotate_agreements);
     if (g_vecmatrotate_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_vecmatrotate_armed, 1);
-        Log("[MatrixSSE2] VectorMatrixRotate armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] VectorMatrixRotate armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return result;
 }
@@ -1430,7 +1430,7 @@ static float* __fastcall Hooked_MatTranslateLocal(float* self, void* edx, float*
         MatTranslateLocal_SSE2(our_mat, orig_vec);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_mattranslate_dead, 1);
-        Log("[MatrixSSE2] MatTranslateLocal faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] MatTranslateLocal faulted during verification, retiring hook");
         return pOrigMatTranslate(self, edx, vec3);
     }
 
@@ -1447,7 +1447,7 @@ static float* __fastcall Hooked_MatTranslateLocal(float* self, void* edx, float*
 
     if (!match) {
         InterlockedExchange(&g_mattranslate_dead, 1);
-        Log("[MatrixSSE2] MatTranslateLocal DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatTranslateLocal DISAGREED with client - retiring hook");
         self[12] = client_mat[12];
         self[13] = client_mat[13];
         self[14] = client_mat[14];
@@ -1461,7 +1461,7 @@ static float* __fastcall Hooked_MatTranslateLocal(float* self, void* edx, float*
     unsigned long ok = InterlockedIncrement((volatile long*)&g_mattranslate_agreements);
     if (g_mattranslate_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_mattranslate_armed, 1);
-        Log("[MatrixSSE2] MatTranslateLocal armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatTranslateLocal armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return vec3;
 }
@@ -1512,7 +1512,7 @@ static float* __fastcall Hooked_BoxScale(float* self, void* edx, float scale) {
         BoxScale_SSE2(our_box, scale);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_boxscale_dead, 1);
-        Log("[MatrixSSE2] BoxScale faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] BoxScale faulted during verification, retiring hook");
         return pOrigBoxScale(self, edx, scale);
     }
 
@@ -1529,7 +1529,7 @@ static float* __fastcall Hooked_BoxScale(float* self, void* edx, float scale) {
 
     if (!match) {
         InterlockedExchange(&g_boxscale_dead, 1);
-        Log("[MatrixSSE2] BoxScale DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] BoxScale DISAGREED with client - retiring hook");
         memcpy(self, client_box, sizeof(client_box));
         return self;
     }
@@ -1539,7 +1539,7 @@ static float* __fastcall Hooked_BoxScale(float* self, void* edx, float scale) {
     unsigned long ok = InterlockedIncrement((volatile long*)&g_boxscale_agreements);
     if (g_boxscale_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_boxscale_armed, 1);
-        Log("[MatrixSSE2] BoxScale armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] BoxScale armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return self;
 }
@@ -1691,7 +1691,7 @@ static float* __fastcall Hooked_MatRotateX(float* self, void* edx, float angle) 
         MatRotateX_SSE2(our_m, angle);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matrotate_x_dead, 1);
-        Log("[MatrixSSE2] MatRotateX faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] MatRotateX faulted during verification, retiring hook");
         return pOrigMatRotateX(self, edx, angle);
     }
 
@@ -1708,7 +1708,7 @@ static float* __fastcall Hooked_MatRotateX(float* self, void* edx, float angle) 
 
     if (!match) {
         InterlockedExchange(&g_matrotate_x_dead, 1);
-        Log("[MatrixSSE2] MatRotateX DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatRotateX DISAGREED with client - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return self;
     }
@@ -1718,7 +1718,7 @@ static float* __fastcall Hooked_MatRotateX(float* self, void* edx, float angle) 
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_x_agreements);
     if (g_matrotate_x_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matrotate_x_armed, 1);
-        Log("[MatrixSSE2] MatRotateX armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatRotateX armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return self;
 }
@@ -1749,7 +1749,7 @@ static float* __fastcall Hooked_MatRotateY(float* self, void* edx, float angle) 
         MatRotateY_SSE2(our_m, angle);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matrotate_y_dead, 1);
-        Log("[MatrixSSE2] MatRotateY faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] MatRotateY faulted during verification, retiring hook");
         return pOrigMatRotateY(self, edx, angle);
     }
 
@@ -1766,7 +1766,7 @@ static float* __fastcall Hooked_MatRotateY(float* self, void* edx, float angle) 
 
     if (!match) {
         InterlockedExchange(&g_matrotate_y_dead, 1);
-        Log("[MatrixSSE2] MatRotateY DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatRotateY DISAGREED with client - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return self;
     }
@@ -1776,7 +1776,7 @@ static float* __fastcall Hooked_MatRotateY(float* self, void* edx, float angle) 
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_y_agreements);
     if (g_matrotate_y_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matrotate_y_armed, 1);
-        Log("[MatrixSSE2] MatRotateY armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatRotateY armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return self;
 }
@@ -1807,7 +1807,7 @@ static float* __fastcall Hooked_MatRotateZ(float* self, void* edx, float angle) 
         MatRotateZ_SSE2(our_m, angle);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matrotate_z_dead, 1);
-        Log("[MatrixSSE2] MatRotateZ faulted during verification, retiring hook\n");
+        Log("[MatrixSSE2] MatRotateZ faulted during verification, retiring hook");
         return pOrigMatRotateZ(self, edx, angle);
     }
 
@@ -1824,7 +1824,7 @@ static float* __fastcall Hooked_MatRotateZ(float* self, void* edx, float angle) 
 
     if (!match) {
         InterlockedExchange(&g_matrotate_z_dead, 1);
-        Log("[MatrixSSE2] MatRotateZ DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatRotateZ DISAGREED with client - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return self;
     }
@@ -1834,7 +1834,7 @@ static float* __fastcall Hooked_MatRotateZ(float* self, void* edx, float angle) 
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_z_agreements);
     if (g_matrotate_z_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matrotate_z_armed, 1);
-        Log("[MatrixSSE2] MatRotateZ armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatRotateZ armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return self;
 }
@@ -2240,7 +2240,7 @@ static float* __fastcall Hooked_MatMulInPlace(float* self, void* edx, const floa
         MatMulInPlace_SSE2(our_m, other);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matmul_ip_dead, 1);
-        Log("[MatrixSSE2] MatMulInPlace threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatMulInPlace threw exception - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return self;
     }
@@ -2258,7 +2258,7 @@ static float* __fastcall Hooked_MatMulInPlace(float* self, void* edx, const floa
 
     if (!match) {
         InterlockedExchange(&g_matmul_ip_dead, 1);
-        Log("[MatrixSSE2] MatMulInPlace DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatMulInPlace DISAGREED with client - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return self;
     }
@@ -2268,7 +2268,7 @@ static float* __fastcall Hooked_MatMulInPlace(float* self, void* edx, const floa
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matmul_ip_agreements);
     if (g_matmul_ip_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matmul_ip_armed, 1);
-        Log("[MatrixSSE2] MatMulInPlace armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatMulInPlace armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return self;
 }
@@ -2304,7 +2304,7 @@ static float* __fastcall Hooked_MatScaleLocal(float* self, void* edx, const floa
         MatScaleLocal_SSE2(our_m, scale);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matscale_local_dead, 1);
-        Log("[MatrixSSE2] MatScaleLocal threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatScaleLocal threw exception - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return (float*)scale;
     }
@@ -2322,7 +2322,7 @@ static float* __fastcall Hooked_MatScaleLocal(float* self, void* edx, const floa
 
     if (!match) {
         InterlockedExchange(&g_matscale_local_dead, 1);
-        Log("[MatrixSSE2] MatScaleLocal DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatScaleLocal DISAGREED with client - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return (float*)scale;
     }
@@ -2332,7 +2332,7 @@ static float* __fastcall Hooked_MatScaleLocal(float* self, void* edx, const floa
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matscale_local_agreements);
     if (g_matscale_local_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matscale_local_armed, 1);
-        Log("[MatrixSSE2] MatScaleLocal armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatScaleLocal armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return (float*)scale;
 }
@@ -2365,7 +2365,7 @@ static float* __cdecl Hooked_MatCreateRotateZ(float* out, float angle) {
         MatCreateRotateZ_SSE2(our_m, angle);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matcreate_rotz_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateZ threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateZ threw exception - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2383,7 +2383,7 @@ static float* __cdecl Hooked_MatCreateRotateZ(float* out, float angle) {
 
     if (!match) {
         InterlockedExchange(&g_matcreate_rotz_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateZ DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateZ DISAGREED with client - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2393,7 +2393,7 @@ static float* __cdecl Hooked_MatCreateRotateZ(float* out, float angle) {
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matcreate_rotz_agreements);
     if (g_matcreate_rotz_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matcreate_rotz_armed, 1);
-        Log("[MatrixSSE2] MatCreateRotateZ armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatCreateRotateZ armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return out;
 }
@@ -2432,7 +2432,7 @@ static void __fastcall Hooked_MatScale3x3(float* self, void* edx, float scalar) 
         MatScale3x3_SSE2(our_m, scalar);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_scale3x3_dead, 1);
-        Log("[MatrixSSE2] MatScale3x3 threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatScale3x3 threw exception - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return;
     }
@@ -2450,7 +2450,7 @@ static void __fastcall Hooked_MatScale3x3(float* self, void* edx, float scalar) 
 
     if (!match) {
         InterlockedExchange(&g_scale3x3_dead, 1);
-        Log("[MatrixSSE2] MatScale3x3 DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatScale3x3 DISAGREED with client - retiring hook");
         memcpy(self, client_m, sizeof(client_m));
         return;
     }
@@ -2460,7 +2460,7 @@ static void __fastcall Hooked_MatScale3x3(float* self, void* edx, float scalar) 
     unsigned long ok = InterlockedIncrement((volatile long*)&g_scale3x3_agreements);
     if (g_scale3x3_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_scale3x3_armed, 1);
-        Log("[MatrixSSE2] MatScale3x3 armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatScale3x3 armed: %lu tests agreed bit-for-bit with client", ok);
     }
 }
 
@@ -2492,7 +2492,7 @@ static float* __cdecl Hooked_MatCreateRotateX(float* out, float angle) {
         MatCreateRotateX_SSE2(our_m, angle);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matcreate_rotx_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateX threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateX threw exception - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2510,7 +2510,7 @@ static float* __cdecl Hooked_MatCreateRotateX(float* out, float angle) {
 
     if (!match) {
         InterlockedExchange(&g_matcreate_rotx_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateX DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateX DISAGREED with client - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2520,7 +2520,7 @@ static float* __cdecl Hooked_MatCreateRotateX(float* out, float angle) {
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matcreate_rotx_agreements);
     if (g_matcreate_rotx_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matcreate_rotx_armed, 1);
-        Log("[MatrixSSE2] MatCreateRotateX armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatCreateRotateX armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return out;
 }
@@ -2553,7 +2553,7 @@ static float* __cdecl Hooked_MatCreateRotateY(float* out, float angle) {
         MatCreateRotateY_SSE2(our_m, angle);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matcreate_roty_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateY threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateY threw exception - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2571,7 +2571,7 @@ static float* __cdecl Hooked_MatCreateRotateY(float* out, float angle) {
 
     if (!match) {
         InterlockedExchange(&g_matcreate_roty_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateY DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateY DISAGREED with client - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2581,7 +2581,7 @@ static float* __cdecl Hooked_MatCreateRotateY(float* out, float angle) {
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matcreate_roty_agreements);
     if (g_matcreate_roty_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matcreate_roty_armed, 1);
-        Log("[MatrixSSE2] MatCreateRotateY armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatCreateRotateY armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return out;
 }
@@ -2615,7 +2615,7 @@ static float* __cdecl Hooked_MatCreateRotateAxisAngle(float* out, float angle, c
         MatCreateRotateAxisAngle_SSE2(our_m, angle, axis, is_normalized);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matcreate_rotaxis_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateAxisAngle threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateAxisAngle threw exception - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2633,7 +2633,7 @@ static float* __cdecl Hooked_MatCreateRotateAxisAngle(float* out, float angle, c
 
     if (!match) {
         InterlockedExchange(&g_matcreate_rotaxis_dead, 1);
-        Log("[MatrixSSE2] MatCreateRotateAxisAngle DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatCreateRotateAxisAngle DISAGREED with client - retiring hook");
         memcpy(out, client_m, sizeof(client_m));
         return out;
     }
@@ -2643,7 +2643,7 @@ static float* __cdecl Hooked_MatCreateRotateAxisAngle(float* out, float angle, c
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matcreate_rotaxis_agreements);
     if (g_matcreate_rotaxis_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matcreate_rotaxis_armed, 1);
-        Log("[MatrixSSE2] MatCreateRotateAxisAngle armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatCreateRotateAxisAngle armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return out;
 }
@@ -2679,7 +2679,7 @@ static float* __fastcall Hooked_MatRotateQuat(float* this_mat, void* edx, const 
         MatRotateQuat_SSE2(our_m, quat);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_matrotate_quat_dead, 1);
-        Log("[MatrixSSE2] MatRotateQuat threw exception - retiring hook\n");
+        Log("[MatrixSSE2] MatRotateQuat threw exception - retiring hook");
         memcpy(this_mat, client_m, sizeof(client_m));
         return this_mat;
     }
@@ -2697,7 +2697,7 @@ static float* __fastcall Hooked_MatRotateQuat(float* this_mat, void* edx, const 
 
     if (!match) {
         InterlockedExchange(&g_matrotate_quat_dead, 1);
-        Log("[MatrixSSE2] MatRotateQuat DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] MatRotateQuat DISAGREED with client - retiring hook");
         memcpy(this_mat, client_m, sizeof(client_m));
         return this_mat;
     }
@@ -2707,7 +2707,7 @@ static float* __fastcall Hooked_MatRotateQuat(float* this_mat, void* edx, const 
     unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_quat_agreements);
     if (g_matrotate_quat_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_matrotate_quat_armed, 1);
-        Log("[MatrixSSE2] MatRotateQuat armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] MatRotateQuat armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return this_mat;
 }
@@ -2742,7 +2742,7 @@ static float* __fastcall Hooked_Vec3Scale(float* this_vec, void* edx, float s) {
         Vec3Scale_SSE2(our_v, s);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_vec3_scale_dead, 1);
-        Log("[MatrixSSE2] Vec3_Scale threw exception - retiring hook\n");
+        Log("[MatrixSSE2] Vec3_Scale threw exception - retiring hook");
         memcpy(this_vec, client_v, sizeof(client_v));
         return this_vec;
     }
@@ -2760,7 +2760,7 @@ static float* __fastcall Hooked_Vec3Scale(float* this_vec, void* edx, float s) {
 
     if (!match) {
         InterlockedExchange(&g_vec3_scale_dead, 1);
-        Log("[MatrixSSE2] Vec3_Scale DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] Vec3_Scale DISAGREED with client - retiring hook");
         memcpy(this_vec, client_v, sizeof(client_v));
         return this_vec;
     }
@@ -2770,7 +2770,7 @@ static float* __fastcall Hooked_Vec3Scale(float* this_vec, void* edx, float s) {
     unsigned long ok = InterlockedIncrement((volatile long*)&g_vec3_scale_agreements);
     if (g_vec3_scale_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_vec3_scale_armed, 1);
-        Log("[MatrixSSE2] Vec3_Scale armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] Vec3_Scale armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return this_vec;
 }
@@ -2805,7 +2805,7 @@ static float* __fastcall Hooked_Vec3InvScale(float* this_vec, void* edx, float s
         Vec3InvScale_SSE2(our_v, s);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_vec3_invscale_dead, 1);
-        Log("[MatrixSSE2] Vec3_InvScale threw exception - retiring hook\n");
+        Log("[MatrixSSE2] Vec3_InvScale threw exception - retiring hook");
         memcpy(this_vec, client_v, sizeof(client_v));
         return this_vec;
     }
@@ -2823,7 +2823,7 @@ static float* __fastcall Hooked_Vec3InvScale(float* this_vec, void* edx, float s
 
     if (!match) {
         InterlockedExchange(&g_vec3_invscale_dead, 1);
-        Log("[MatrixSSE2] Vec3_InvScale DISAGREED with client - retiring hook\n");
+        Log("[MatrixSSE2] Vec3_InvScale DISAGREED with client - retiring hook");
         memcpy(this_vec, client_v, sizeof(client_v));
         return this_vec;
     }
@@ -2833,7 +2833,7 @@ static float* __fastcall Hooked_Vec3InvScale(float* this_vec, void* edx, float s
     unsigned long ok = InterlockedIncrement((volatile long*)&g_vec3_invscale_agreements);
     if (g_vec3_invscale_armed == 0 && ok >= 20000) {
         InterlockedExchange(&g_vec3_invscale_armed, 1);
-        Log("[MatrixSSE2] Vec3_InvScale armed: %lu tests agreed bit-for-bit with client\n", ok);
+        Log("[MatrixSSE2] Vec3_InvScale armed: %lu tests agreed bit-for-bit with client", ok);
     }
     return this_vec;
 }

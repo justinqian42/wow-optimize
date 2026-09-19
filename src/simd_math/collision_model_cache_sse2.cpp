@@ -53,16 +53,26 @@ __forceinline void* FindModel_Fast(void* cache, uint32_t key) {
     const __m128i k0 = _mm_loadu_si128((const __m128i*)set_keys);
     const __m128i k1 = _mm_loadu_si128((const __m128i*)(set_keys + 4));
 
-    const __m128i eq0 = _mm_cmpeq_epi32(k0, target);
-    const __m128i eq1 = _mm_cmpeq_epi32(k1, target);
+    // The client scans the eight slots in order and stops at the first that
+    // either holds the key or is empty (sub_79B1F0's loop sets i = 8 on both).
+    // A matching slot is a hit; an empty one is a miss and the key goes there.
+    // So a key sitting after an empty slot is a miss to the client, which loads
+    // it again into the gap - and finding it anyway would hand back a different
+    // entry from the one the engine goes on to use. Stop where the client stops.
+    const __m128i zero = _mm_setzero_si128();
+    const int hit_mask =
+        _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(k0, target))) |
+        (_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(k1, target))) << 4);
+    const int empty_mask =
+        _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(k0, zero))) |
+        (_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(k1, zero))) << 4);
+    const int stop_mask = hit_mask | empty_mask;
 
-    const int m0 = _mm_movemask_ps(_mm_castsi128_ps(eq0));
-    const int m1 = _mm_movemask_ps(_mm_castsi128_ps(eq1));
-    const int hit_mask = m0 | (m1 << 4);
-
-    if (hit_mask != 0) {
+    if (stop_mask != 0) {
         unsigned long slot_in_set;
-        _BitScanForward(&slot_in_set, (unsigned long)hit_mask);
+        _BitScanForward(&slot_in_set, (unsigned long)stop_mask);
+        if (((hit_mask >> slot_in_set) & 1) == 0)
+            return (void*)(uintptr_t)0xFFFFFFFF;   // the first stop is empty: a miss
         const uint32_t total_slot = (set_idx << 3) + slot_in_set;
         uint8_t* entry = (uint8_t*)cache + 0x1000 + (total_slot * 0x2460);
         if (entry[4] == 0) {
@@ -87,7 +97,7 @@ void* __fastcall Hooked_FindModel(void* cache, void* edx,
         fast_res = FindModel_Fast(cache, key);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_dead = true;
-        Log("[CollisionModelCache] Exception during fast lookup, retiring hook\n");
+        Log("[CollisionModelCache] Exception during fast lookup, retiring hook");
         return orig_FindModel(cache, edx, a0, key, a2, a3, a4);
     }
 
@@ -104,13 +114,13 @@ void* __fastcall Hooked_FindModel(void* cache, void* edx,
     if (should_verify) {
         void* orig_res = orig_FindModel(cache, edx, a0, key, a2, a3, a4);
         if (fast_res != orig_res) {
+            // One is enough. Every call between two samples returns the fast
+            // answer unchecked, so a lookup that disagrees once has to stop.
             ++g_mismatch;
-            Log("[CollisionModelCache] Verification mismatch! key=0x%08X fast=%p orig=%p\n",
-                key, fast_res, orig_res);
-            if (g_mismatch > 10) {
-                g_dead = true;
-                Log("[CollisionModelCache] Too many mismatches, retiring hook\n");
-            }
+            g_dead = true;
+            Log("[CollisionModelCache] RETIRED: for key 0x%08X the lookup found %p "
+                "and the client's own found %p. Every call goes to the client from "
+                "here.", key, fast_res, orig_res);
             return orig_res;
         }
         ++g_verified;
@@ -126,19 +136,23 @@ bool Init() {
         return true;
     }
 
-    if (IsBadReadPtr((void*)kFindModel, 8)) {
-        Log("[CollisionModelCache] 0x%08X unreadable - not installing\n", (unsigned)kFindModel);
+    // push ebp / mov ebp,esp / push ebx / push esi / push edi / mov edi,[ebp+..]
+    static const unsigned char kPrologue[] = { 0x55, 0x8B, 0xEC, 0x53, 0x56, 0x57, 0x8B, 0x7D };
+    if (IsBadReadPtr((void*)kFindModel, sizeof(kPrologue)) ||
+        memcmp((const void*)kFindModel, kPrologue, sizeof(kPrologue)) != 0) {
+        Log("[CollisionModelCache] NOT active: the bytes at 0x%08X are not the lookup "
+            "this was written against.", (unsigned)kFindModel);
         return false;
     }
 
     if (WineSafe_CreateHook((void*)kFindModel, (void*)Hooked_FindModel,
                             (void**)&orig_FindModel) != MH_OK) {
-        Log("[CollisionModelCache] hook NOT created\n");
+        Log("[CollisionModelCache] hook NOT created");
         return false;
     }
 
     if (WO_EnableHook((void*)kFindModel) != MH_OK) {
-        Log("[CollisionModelCache] hook created but could not be enabled\n");
+        Log("[CollisionModelCache] hook created but could not be enabled");
         return false;
     }
 
@@ -146,7 +160,7 @@ bool Init() {
     SamplingProfiler::RegisterSelfSymbol("CollisionModelCache_SSE2", (const void*)&Hooked_FindModel);
     Log("[CollisionModelCache] ACTIVE on sub_79B1F0 (0x%08X) - 8-way associative BSP collision model cache lookup. "
         "Replaced 8-iteration scalar loop with dual 128-bit SSE2 vector comparison and bitscan. "
-        "Verifying first %lu calls, then 1 in %d.\n",
+        "Verifying first %lu calls, then 1 in %d.",
         (unsigned)kFindModel, kVerifyFirst, (int)(kResampleMask + 1));
     return true;
 }
@@ -156,15 +170,15 @@ void LogStats() {
         return;
     }
     if (!g_installed) {
-        Log("[CollisionModelCache] not installed - nothing measured\n");
+        Log("[CollisionModelCache] not installed - nothing measured");
         return;
     }
     if (g_calls == 0) {
-        Log("[CollisionModelCache] installed but never called\n");
+        Log("[CollisionModelCache] installed but never called");
         return;
     }
     const double hit_pct = (g_calls > 0) ? (100.0 * (double)g_hits / (double)g_calls) : 0.0;
-    Log("[CollisionModelCache] %lu calls, %lu hits (%.1f%%), %lu misses, %lu verified, %lu mismatches%s\n",
+    Log("[CollisionModelCache] %lu calls, %lu hits (%.1f%%), %lu misses, %lu verified, %lu mismatches%s",
         g_calls, g_hits, hit_pct, g_misses, g_verified, g_mismatch,
         g_dead ? " - DISABLED" : (g_calls < kVerifyFirst ? " (still verifying)" : ""));
 }

@@ -334,7 +334,7 @@ float* __cdecl Hooked_QuatSlerpBody(float* out, float t, const float* a, const f
         SlerpDouble(mine, t, a, b);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         InterlockedExchange(&g_slerp_dead, 1);
-        Log("[QuatLerp] QuatSlerp vector path faulted during verification, retiring hook\n");
+        Log("[QuatLerp] QuatSlerp vector path faulted during verification, retiring hook");
         return out;
     }
 
@@ -348,7 +348,7 @@ float* __cdecl Hooked_QuatSlerpBody(float* out, float t, const float* a, const f
 
     if (!same) {
         Log("[QuatLerp] QuatSlerp differed from client at t=%.9g. "
-            "client=(%08X %08X %08X %08X) ours=(%08X %08X %08X %08X)\n",
+            "client=(%08X %08X %08X %08X) ours=(%08X %08X %08X %08X)",
             t,
             *(const uint32_t*)&theirs[0], *(const uint32_t*)&theirs[1],
             *(const uint32_t*)&theirs[2], *(const uint32_t*)&theirs[3],
@@ -362,7 +362,7 @@ float* __cdecl Hooked_QuatSlerpBody(float* out, float t, const float* a, const f
     if (g_slerp_armed == 0 && ok >= kLearnCalls) {
         InterlockedExchange(&g_slerp_armed, 1);
         Log("[QuatLerp] %lu QuatSlerp interpolations were bit-identical to the client. "
-            "Using the vector path from here; one call in %d stays checked.\n",
+            "Using the vector path from here; one call in %d stays checked.",
             ok, (int)(kResampleMask + 1));
     }
     return out;
@@ -416,15 +416,21 @@ bool Init() {
         "that. A single differing bit disables it for the session.",
         kLearnCalls, (int)(kResampleMask + 1));
 
-    unsigned char* pSlerp = (unsigned char*)kQuatSlerp;
-    if (!IsBadReadPtr(pSlerp, 8)) {
+    // push ebp / mov ebp,esp / mov ecx,[ebp+10h] / mov edx,[ebp+..]
+    static const unsigned char kSlerpPrologue[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x10, 0x8B, 0x55 };
+    const unsigned char* pSlerp = (const unsigned char*)kQuatSlerp;
+    if (IsBadReadPtr(pSlerp, sizeof(kSlerpPrologue)) ||
+        memcmp(pSlerp, kSlerpPrologue, sizeof(kSlerpPrologue)) != 0) {
+        Log("[QuatLerp] QuatSlerp NOT hooked: the bytes at 0x%08X are not the slerp "
+            "this was written against.", (unsigned)kQuatSlerp);
+    } else {
         if (WineSafe_CreateHook((void*)kQuatSlerp, (void*)Hooked_QuatSlerp,
                                 (void**)&orig_QuatSlerp) == MH_OK) {
             if (WO_EnableHook((void*)kQuatSlerp) == MH_OK) {
                 g_slerp_installed = true;
                 SamplingProfiler::RegisterSelfSymbol("QuatSlerp_SSE2", (const void*)&Hooked_QuatSlerp);
                 Log("[QuatLerp] ACTIVE on sub_982460 (CQuaternion::Slerp). "
-                    "Vectorized double-precision SSE2 quaternion slerp. First %ld results checked bit-for-bit.\n",
+                    "Vectorized double-precision SSE2 quaternion slerp. First %ld results checked bit-for-bit.",
                     kLearnCalls);
             }
         }

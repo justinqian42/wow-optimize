@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <cstdint>
 #include <cmath>
+#include <cstring>
 
 #include "m2_anim_find_key_fast.h"
 #include "MinHook.h"
@@ -201,7 +202,7 @@ void* __fastcall Hooked_AnimTrackFindKey(
             return FindKey_Fast(this_ptr, timing, track, hint, second, frac);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             g_dead = true;
-            Log("[M2AnimFindKey] Exception in fast path, retiring hook\n");
+            Log("[M2AnimFindKey] Exception in fast path, retiring hook");
             return orig_FindKey(this_ptr, dummy_edx, timing, track, hint, second, frac);
         }
     }
@@ -216,7 +217,7 @@ void* __fastcall Hooked_AnimTrackFindKey(
         FindKey_Fast(this_ptr, timing, track, &mine_hint, &mine_second, &mine_frac);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_dead = true;
-        Log("[M2AnimFindKey] Exception during verification fast path, retiring hook\n");
+        Log("[M2AnimFindKey] Exception during verification fast path, retiring hook");
         *hint = hint_orig_in;
         return orig_FindKey(this_ptr, dummy_edx, timing, track, hint, second, frac);
     }
@@ -229,16 +230,24 @@ void* __fastcall Hooked_AnimTrackFindKey(
     const uint32_t ref_second = *second;
     const float ref_frac = *frac;
 
-    // Compare results
-    const float frac_diff = fabsf(mine_frac - ref_frac);
-    if (mine_hint != ref_hint || mine_second != ref_second || frac_diff > 1e-4f) {
+    // Bit for bit, with no tolerance. The fraction weights every bone track -
+    // translation, rotation, scale - and this used to accept a difference of up
+    // to 1e-4, which is twenty-six times the error an animation replacement in
+    // this tree was rejected for. The client computes it as one double division
+    // rounded once to float, which this does too, so equal inputs give equal
+    // bits and there is nothing a tolerance would be excusing.
+    uint32_t mine_bits, ref_bits;
+    memcpy(&mine_bits, &mine_frac, sizeof(mine_bits));
+    memcpy(&ref_bits, &ref_frac, sizeof(ref_bits));
+    if (mine_hint != ref_hint || mine_second != ref_second || mine_bits != ref_bits) {
+        // One is enough: every call between two samples returns the fast
+        // answer unchecked.
         ++g_mismatch;
-        Log("[M2AnimFindKey] Mismatch! hint(%u vs %u), second(%u vs %u), frac(%.6f vs %.6f)\n",
-            mine_hint, ref_hint, mine_second, ref_second, mine_frac, ref_frac);
-        if (g_mismatch > 10) {
-            g_dead = true;
-            Log("[M2AnimFindKey] Too many mismatches, retiring hook\n");
-        }
+        g_dead = true;
+        Log("[M2AnimFindKey] RETIRED: hint %u against the client's %u, second %u "
+            "against %u, fraction 0x%08X against 0x%08X. Every call goes to the "
+            "client from here.", mine_hint, ref_hint, mine_second, ref_second,
+            mine_bits, ref_bits);
         return res;
     }
 
@@ -257,19 +266,23 @@ bool Init() {
         return true;
     }
 
-    if (IsBadReadPtr((void*)kFindKey, 16)) {
-        Log("[M2AnimFindKey] 0x%08X unreadable - not installing\n", (unsigned)kFindKey);
+    // push ebp / mov ebp,esp / mov eax,[ebp+8] / mov edx,[eax]
+    static const unsigned char kPrologue[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x8B, 0x10 };
+    if (IsBadReadPtr((void*)kFindKey, sizeof(kPrologue)) ||
+        memcmp((const void*)kFindKey, kPrologue, sizeof(kPrologue)) != 0) {
+        Log("[M2AnimFindKey] NOT active: the bytes at 0x%08X are not the key search "
+            "this was written against.", (unsigned)kFindKey);
         return false;
     }
 
     if (WineSafe_CreateHook((void*)kFindKey, (void*)Hooked_AnimTrackFindKey,
                             (void**)&orig_FindKey) != MH_OK) {
-        Log("[M2AnimFindKey] hook NOT created\n");
+        Log("[M2AnimFindKey] hook NOT created");
         return false;
     }
 
     if (WO_EnableHook((void*)kFindKey) != MH_OK) {
-        Log("[M2AnimFindKey] hook created but could not be enabled\n");
+        Log("[M2AnimFindKey] hook created but could not be enabled");
         return false;
     }
 
@@ -277,7 +290,7 @@ bool Init() {
     SamplingProfiler::RegisterSelfSymbol("M2AnimFindKey_Fast", (const void*)&Hooked_AnimTrackFindKey);
     Log("[M2AnimFindKey] ACTIVE on sub_8284D0 (0x%08X) - M2 animation track keyframe search. "
         "Replaced scalar x87 float divisions and store stalls with fast integer search and SSE math. "
-        "Verifying first %lu calls, then 1 in %d.\n",
+        "Verifying first %lu calls, then 1 in %d.",
         (unsigned)kFindKey, kVerifyFirst, (int)(kResampleMask + 1));
     return true;
 }
@@ -287,14 +300,14 @@ void LogStats() {
         return;
     }
     if (!g_installed) {
-        Log("[M2AnimFindKey] not installed - nothing measured\n");
+        Log("[M2AnimFindKey] not installed - nothing measured");
         return;
     }
     if (g_calls == 0) {
-        Log("[M2AnimFindKey] installed but never called\n");
+        Log("[M2AnimFindKey] installed but never called");
         return;
     }
-    Log("[M2AnimFindKey] %lu calls, %lu verified, %lu mismatches%s\n",
+    Log("[M2AnimFindKey] %lu calls, %lu verified, %lu mismatches%s",
         g_calls, g_verified, g_mismatch,
         g_dead ? " - DISABLED" : (g_calls < kVerifyFirst ? " (still verifying)" : ""));
 }

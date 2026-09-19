@@ -151,7 +151,7 @@ int __cdecl Hooked_TestSphere(const float* sphere) {
         mine = TestSphere_Fast(sphere);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_sphere_dead = true;
-        Log("[OccluderSphere] Exception during fast sphere test, retiring hook\n");
+        Log("[OccluderSphere] Exception during fast sphere test, retiring hook");
         return orig_TestSphere(sphere);
     }
 
@@ -165,13 +165,16 @@ int __cdecl Hooked_TestSphere(const float* sphere) {
     if (should_verify) {
         const int orig = orig_TestSphere(sphere);
         if (mine != orig) {
+            // One is enough: every call between two samples returns this answer
+            // unchecked, and a wrong answer here is an object culled that should
+            // be drawn. The plane sums below are in single precision and the
+            // client's are in 53-bit x87, so a sphere on a plane's boundary is
+            // exactly where the two can disagree.
             ++g_sphere_mismatch;
-            Log("[OccluderSphere] Sphere mismatch! sphere=(%.2f, %.2f, %.2f, %.2f) mine=%d orig=%d\n",
-                sphere[0], sphere[1], sphere[2], sphere[3], mine, orig);
-            if (g_sphere_mismatch > 10) {
-                g_sphere_dead = true;
-                Log("[OccluderSphere] Too many sphere mismatches, retiring hook\n");
-            }
+            g_sphere_dead = true;
+            Log("[OccluderSphere] sphere test RETIRED: sphere (%.4f, %.4f, %.4f, r %.4f) "
+                "answered %d here and %d by the client. Every sphere test goes to the "
+                "client from here.", sphere[0], sphere[1], sphere[2], sphere[3], mine, orig);
             return orig;
         }
         ++g_sphere_verified;
@@ -304,7 +307,7 @@ int __cdecl Hooked_TestPolygon(const float* vertices, unsigned int count) {
         mine = TestPolygon_Fast(vertices, count);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_poly_dead = true;
-        Log("[OccluderSphere] Exception during fast polygon test, retiring hook\n");
+        Log("[OccluderSphere] Exception during fast polygon test, retiring hook");
         return orig_TestPolygon(vertices, count);
     }
 
@@ -318,13 +321,12 @@ int __cdecl Hooked_TestPolygon(const float* vertices, unsigned int count) {
     if (should_verify) {
         const int orig = orig_TestPolygon(vertices, count);
         if (mine != orig) {
+            // One is enough, for the same reason as the sphere test above.
             ++g_poly_mismatch;
-            Log("[OccluderSphere] Polygon mismatch! count=%u mine=%d orig=%d\n",
+            g_poly_dead = true;
+            Log("[OccluderSphere] polygon test RETIRED: %u vertices answered %d here and "
+                "%d by the client. Every polygon test goes to the client from here.",
                 count, mine, orig);
-            if (g_poly_mismatch > 10) {
-                g_poly_dead = true;
-                Log("[OccluderSphere] Too many polygon mismatches, retiring hook\n");
-            }
             return orig;
         }
         ++g_poly_verified;
@@ -340,31 +342,38 @@ bool Init() {
         return true;
     }
 
-    if (IsBadReadPtr((void*)kTestSphere, 8) || IsBadReadPtr((void*)kTestPolygon, 8)) {
-        Log("[OccluderSphere] 0x%08X or 0x%08X unreadable - not installing\n",
+    // Both open with push ebp / mov ebp,esp / mov eax,[dword_D2DCEC] - the
+    // occluder count they loop over.
+    static const unsigned char kPrologue[] = { 0x55, 0x8B, 0xEC, 0xA1, 0xEC, 0xDC, 0xD2, 0x00 };
+    if (IsBadReadPtr((void*)kTestSphere, sizeof(kPrologue)) ||
+        IsBadReadPtr((void*)kTestPolygon, sizeof(kPrologue)) ||
+        memcmp((const void*)kTestSphere, kPrologue, sizeof(kPrologue)) != 0 ||
+        memcmp((const void*)kTestPolygon, kPrologue, sizeof(kPrologue)) != 0) {
+        Log("[OccluderSphere] NOT active: the bytes at 0x%08X or 0x%08X are not the "
+            "occluder tests this was written against.",
             (unsigned)kTestSphere, (unsigned)kTestPolygon);
         return false;
     }
 
     if (WineSafe_CreateHook((void*)kTestSphere, (void*)Hooked_TestSphere,
                             (void**)&orig_TestSphere) != MH_OK) {
-        Log("[OccluderSphere] Sphere hook NOT created\n");
+        Log("[OccluderSphere] Sphere hook NOT created");
         return false;
     }
 
     if (WO_EnableHook((void*)kTestSphere) != MH_OK) {
-        Log("[OccluderSphere] Sphere hook created but could not be enabled\n");
+        Log("[OccluderSphere] Sphere hook created but could not be enabled");
         return false;
     }
 
     if (WineSafe_CreateHook((void*)kTestPolygon, (void*)Hooked_TestPolygon,
                             (void**)&orig_TestPolygon) != MH_OK) {
-        Log("[OccluderSphere] Polygon hook NOT created\n");
+        Log("[OccluderSphere] Polygon hook NOT created");
         return false;
     }
 
     if (WO_EnableHook((void*)kTestPolygon) != MH_OK) {
-        Log("[OccluderSphere] Polygon hook created but could not be enabled\n");
+        Log("[OccluderSphere] Polygon hook created but could not be enabled");
         return false;
     }
 
@@ -373,7 +382,7 @@ bool Init() {
     SamplingProfiler::RegisterSelfSymbol("OccluderPolygon_SSE2", (const void*)&Hooked_TestPolygon);
     Log("[OccluderSphere] ACTIVE on sub_7CCE00 (0x%08X) and sub_7CCFA0 (0x%08X) - convex occluder volume culling. "
         "Replaced scalar x87 plane distances with 4-wide SSE2 vector evaluations. "
-        "Verifying first %lu calls, then 1 in %d.\n",
+        "Verifying first %lu calls, then 1 in %d.",
         (unsigned)kTestSphere, (unsigned)kTestPolygon, kVerifyFirst, (int)(kResampleMask + 1));
     return true;
 }
@@ -383,22 +392,22 @@ void LogStats() {
         return;
     }
     if (!g_installed) {
-        Log("[OccluderSphere] not installed - nothing measured\n");
+        Log("[OccluderSphere] not installed - nothing measured");
         return;
     }
     if (g_sphere_calls == 0 && g_poly_calls == 0) {
-        Log("[OccluderSphere] installed but never called\n");
+        Log("[OccluderSphere] installed but never called");
         return;
     }
     if (g_sphere_calls > 0) {
         const double occ_pct = 100.0 * (double)g_sphere_occluded / (double)g_sphere_calls;
-        Log("[OccluderSphere] Sphere: %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s\n",
+        Log("[OccluderSphere] Sphere: %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s",
             g_sphere_calls, g_sphere_occluded, occ_pct, g_sphere_visible, g_sphere_verified, g_sphere_mismatch,
             g_sphere_dead ? " - DISABLED" : (g_sphere_calls < kVerifyFirst ? " (still verifying)" : ""));
     }
     if (g_poly_calls > 0) {
         const double occ_pct = 100.0 * (double)g_poly_occluded / (double)g_poly_calls;
-        Log("[OccluderSphere] Polygon: %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s\n",
+        Log("[OccluderSphere] Polygon: %lu calls, %lu occluded (%.1f%%), %lu visible, %lu verified, %lu mismatches%s",
             g_poly_calls, g_poly_occluded, occ_pct, g_poly_visible, g_poly_verified, g_poly_mismatch,
             g_poly_dead ? " - DISABLED" : (g_poly_calls < kVerifyFirst ? " (still verifying)" : ""));
     }

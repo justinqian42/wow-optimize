@@ -698,7 +698,7 @@ static const float* VerifyAgainstClientTranslate(float* frustum, void* edx, cons
         g_transDead = true;
         Verdict::Add(Verdict::Bad,
                      "FrustumAabb Translate disagreed with client and retired itself");
-        Log("[FrustumAabb] Translate DISAGREED with client after %lu calls - retired for session\n",
+        Log("[FrustumAabb] Translate DISAGREED with client after %lu calls - retired for session",
             g_transVerified);
         memcpy(frustum, theirs, sizeof(theirs));
         return delta;
