@@ -1087,45 +1087,8 @@ static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
     return orig_Vec3Cross(result, a, b);
 }
 
-// ================================================================
-// CFrustum::IsSphereVisible Hook (0x00983D20)
-// ================================================================
-typedef int (__fastcall* IsSphereVisible_t)(float* self, void* edx, float* sphere);
-static IsSphereVisible_t orig_IsSphereVisible = nullptr;
-
-
-static int __fastcall Hooked_IsSphereVisible(float* self, void* edx, float* sphere) {
-    __try {
-        if (self && sphere &&
-            (uintptr_t)self > 0x10000 && (uintptr_t)self < 0xFFE00000 &&
-            (uintptr_t)sphere > 0x10000 && (uintptr_t)sphere < 0xFFE00000) {
-            
-            float x = sphere[0];
-            float y = sphere[1];
-            float z = sphere[2];
-            float r = sphere[3];
-            
-            __m128 s_xyz = _mm_setr_ps(x, y, z, 0.0f);
-            __m128 minus_r = _mm_set1_ps(-r);
-            
-            for (int i = 0; i < 6; ++i) {
-                __m128 plane = _mm_loadu_ps(self + i * 4); // (nx, ny, nz, d)
-                __m128 dp = _mm_mul_ps(plane, s_xyz); // (nx*x, ny*y, nz*z, 0)
-                __m128 shuf1 = _mm_shuffle_ps(dp, dp, _MM_SHUFFLE(1, 1, 1, 1)); // ny*y
-                __m128 shuf2 = _mm_shuffle_ps(dp, dp, _MM_SHUFFLE(2, 2, 2, 2)); // nz*z
-                __m128 dot = _mm_add_ss(_mm_add_ss(dp, shuf1), shuf2); // nx*x + ny*y + nz*z
-                __m128 d = _mm_shuffle_ps(plane, plane, _MM_SHUFFLE(3, 3, 3, 3)); // d
-                __m128 val = _mm_add_ss(dot, d);
-                
-                if (_mm_comilt_ss(val, minus_r)) {
-                    return 0; // Culled
-                }
-            }
-            return 3; // Visible
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-    return orig_IsSphereVisible(self, edx, sphere);
-}
+// CFrustum::IsSphereVisible (0x00983D20) is owned and implemented by FrustumAabb
+// (frustum_aabb_sse2.cpp) with bit-exact double precision and dual-run verification.
 
 // ================================================================
 // CQuaternion::FromAngleAxis Hook (0x00982400)
@@ -1138,16 +1101,8 @@ static float* __fastcall Hooked_FromAngleAxis(float* self, void* edx, float angl
     return orig_FromAngleAxis ? orig_FromAngleAxis(self, edx, angle, axis) : axis;
 }
 
-// ================================================================
-// CQuaternion::Slerp Hook (0x00982460)
-// ================================================================
-typedef float* (__cdecl* QuatSlerp_t)(float* result, float t, float* q1, float* q2);
-static QuatSlerp_t orig_QuatSlerp = nullptr;
-
-
-static float* __cdecl Hooked_QuatSlerp(float* result, float t, float* q1, float* q2) {
-    return orig_QuatSlerp ? orig_QuatSlerp(result, t, q1, q2) : result;
-}
+// CQuaternion::Slerp (0x00982460) is owned and implemented by QuatLerp
+// (quat_lerp_sse2.cpp) with bit-exact double precision and dual-run verification.
 
 // Self-test against the function being replaced, on the machine it will run on.
 //
@@ -1472,16 +1427,9 @@ bool InstallSimdHooks(void) {
     Log("[SimdHooks] C3Vector::Cross DISABLED by TEST_DISABLE_VEC3_CROSS_SSE2");
 #endif
 
-    // Hooking CFrustum::IsSphereVisible (0x00983D20)
-#if !TEST_DISABLE_SPHERE_VISIBLE_SSE2
-    if (WineSafe_CreateHook((void*)0x00983D20, (void*)Hooked_IsSphereVisible, (void**)&orig_IsSphereVisible) == MH_OK) {
-        WO_EnableHook((void*)0x00983D20);
-        SamplingProfiler::RegisterSelfSymbol("FrustumSphere_SSE2", (const void*)&Hooked_IsSphereVisible);
-        Log("[SimdHooks] CFrustum::IsSphereVisible hook ACTIVE");
-    }
-#else
-    Log("[SimdHooks] CFrustum::IsSphereVisible DISABLED by TEST_DISABLE_SPHERE_VISIBLE_SSE2");
-#endif
+    // 0x00983D20 (CFrustum::IsSphereVisible) belongs to frustum_aabb_sse2.cpp, which
+    // implements it with double-precision SSE2 and shadow verification.
+    Log("[SimdHooks] CFrustum::IsSphereVisible is owned by FrustumAabb - not hooked from here");
 
     // Hooking CQuaternion::FromAngleAxis (0x00982400)
 #if !TEST_DISABLE_FROM_ANGLE_AXIS_SSE2
@@ -1494,16 +1442,9 @@ bool InstallSimdHooks(void) {
     Log("[SimdHooks] CQuaternion::FromAngleAxis DISABLED by TEST_DISABLE_FROM_ANGLE_AXIS_SSE2");
 #endif
 
-    // Hooking CQuaternion::Slerp (0x00982460)
-#if !TEST_DISABLE_QUAT_SLERP_SSE2
-    if (WineSafe_CreateHook((void*)0x00982460, (void*)Hooked_QuatSlerp, (void**)&orig_QuatSlerp) == MH_OK) {
-        WO_EnableHook((void*)0x00982460);
-        SamplingProfiler::RegisterSelfSymbol("QuatSlerp_SSE2", (const void*)&Hooked_QuatSlerp);
-        Log("[SimdHooks] CQuaternion::Slerp hook ACTIVE");
-    }
-#else
-    Log("[SimdHooks] CQuaternion::Slerp DISABLED by TEST_DISABLE_QUAT_SLERP_SSE2");
-#endif
+    // 0x00982460 (CQuaternion::Slerp) belongs to quat_lerp_sse2.cpp, which
+    // implements it with double-precision SSE2 and shadow verification.
+    Log("[SimdHooks] CQuaternion::Slerp is owned by QuatLerp - not hooked from here");
 
 #if !TEST_DISABLE_MATRIX_TRANSFORM_SSE2
     if (Config::g_settings.OptSimdMatrixTransform) {
@@ -1571,9 +1512,7 @@ void SimdHooks_LogStats(void) {
 
 void ShutdownSimdHooks(void) {
     MH_DisableHook((void*)0x005FEC70);
-    MH_DisableHook((void*)0x00983D20);
     MH_DisableHook((void*)0x00982400);
-    MH_DisableHook((void*)0x00982460);
 #if !TEST_DISABLE_MATRIX_TRANSFORM_SSE2
     MH_DisableHook((void*)0x005FED20);
 #endif

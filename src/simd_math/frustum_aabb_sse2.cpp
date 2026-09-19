@@ -92,6 +92,7 @@ constexpr uintptr_t kThreshold = 0x00AA2E74;
 constexpr uintptr_t kIsInside  = 0x00983A60;
 constexpr uintptr_t kThresholdInside = 0x00A3FDB8;
 constexpr uintptr_t kIsPointVisible = 0x00983D70;
+constexpr uintptr_t kIsSphereVisible = 0x00983D20;
 
 constexpr int kPlanes = 6;
 
@@ -104,6 +105,9 @@ isInside_fn orig_IsInside = nullptr;
 
 typedef void (__fastcall* isPointVisible_fn)(void* frustum, void* edx, const float* pt, uint8_t* outMask);
 isPointVisible_fn orig_IsPointVisible = nullptr;
+
+typedef int (__fastcall* isSphereVisible_fn)(void* frustum, void* edx, const float* sphere);
+isSphereVisible_fn orig_IsSphereVisible = nullptr;
 
 bool g_installed = false;
 bool g_armed     = false;
@@ -119,6 +123,14 @@ bool g_pointArmed     = false;
 bool g_pointDead      = false;
 unsigned long g_pointCalls = 0;
 unsigned long g_pointVerified = 0;
+
+bool g_sphereInstalled = false;
+bool g_sphereArmed     = false;
+bool g_sphereDead      = false;
+unsigned long g_sphereCalls    = 0;
+unsigned long g_sphereVerified = 0;
+unsigned long g_sphereCulled   = 0;
+unsigned long g_sphereVisible  = 0;
 // Set at init when the A/B harness names this module, so the hot path
 // tests a plain bool instead of calling out on every invocation.
 bool g_abSubject = false;
@@ -367,6 +379,33 @@ inline void EvaluatePoint(void* frustum, const float* pt, uint8_t* outMask) {
     *outMask = mask;
 }
 
+inline int EvaluateSphere(void* frustum, const float* sphere) {
+    const float* base = (const float*)frustum;
+    const double sx = (double)sphere[0];
+    const double sy = (double)sphere[1];
+    const double sz = (double)sphere[2];
+    const double neg_r = -(double)sphere[3];
+
+    for (int i = 0; i < kPlanes; ++i) {
+        const float* pl = base + 4 * i;
+
+        // Matches stock client x87 double-precision accumulation order:
+        // ((nx * sx + nz * sz) + ny * sy) + d
+        const double term_x = (double)pl[0] * sx;
+        const double term_z = (double)pl[2] * sz;
+        const double sum_xz = term_x + term_z;
+        const double term_y = (double)pl[1] * sy;
+        const double sum_xzy = sum_xz + term_y;
+        const double dist = sum_xzy + (double)pl[3];
+
+        if (dist < neg_r) {
+            return 0; // Culled by this plane
+        }
+    }
+
+    return 3; // Visible across all 6 planes
+}
+
 }  // namespace
 
 // The checked path, kept out of line so the hook itself carries no exception
@@ -535,6 +574,54 @@ void __fastcall Hooked_IsPointVisible(void* frustum, void* edx, const float* pt,
     EvaluatePoint(frustum, pt, outMask);
 }
 
+__declspec(noinline)
+static int VerifyAgainstClientSphere(void* frustum, void* edx, const float* sphere) {
+    int mine = 0;
+    __try {
+        mine = EvaluateSphere(frustum, sphere);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return orig_IsSphereVisible(frustum, edx, sphere);
+    }
+
+    const int theirs = orig_IsSphereVisible(frustum, edx, sphere);
+    g_sphereVerified++;
+
+    if (mine != theirs) {
+        g_sphereDead = true;
+        Verdict::Add(Verdict::Bad,
+                     "FrustumAabb IsSphereVisible disagreed with the client and retired itself");
+        Log("[FrustumAabb] IsSphereVisible DISAGREED with client after %lu tests - retired for session "
+            "(client=%d, sse2=%d)", g_sphereVerified, theirs, mine);
+        return theirs;
+    }
+
+    if (!g_sphereArmed && g_sphereVerified >= kVerifyFirst) {
+        g_sphereArmed = true;
+        Log("[FrustumAabb] IsSphereVisible armed: %lu tests agreed with client.", g_sphereVerified);
+    }
+
+    return theirs;
+}
+
+int __fastcall Hooked_IsSphereVisible(void* frustum, void* edx, const float* sphere) {
+    ++g_sphereCalls;
+    if (g_sphereDead || !frustum || !sphere) {
+        return orig_IsSphereVisible(frustum, edx, sphere);
+    }
+
+    if (!g_sphereArmed || (g_sphereCalls & kResampleMask) == 0) {
+        const int r = VerifyAgainstClientSphere(frustum, edx, sphere);
+        if (r == 3) ++g_sphereVisible;
+        else ++g_sphereCulled;
+        return r;
+    }
+
+    const int r = EvaluateSphere(frustum, sphere);
+    if (r == 3) ++g_sphereVisible;
+    else ++g_sphereCulled;
+    return r;
+}
+
 bool Init() {
     if (!Config::g_settings.OptFrustumAabb) return true;
 
@@ -586,6 +673,20 @@ bool Init() {
                     g_pointInstalled = true;
                     SamplingProfiler::RegisterSelfSymbol("FrustumPoint_SSE2", (const void*)&Hooked_IsPointVisible);
                     Log("[FrustumAabb] ACTIVE on CFrustum::IsPointVisible (0x%08X)", (unsigned)kIsPointVisible);
+                }
+            }
+        }
+    }
+
+    if (!IsBadReadPtr((void*)kIsSphereVisible, 16)) {
+        const unsigned char* p4 = (const unsigned char*)kIsSphereVisible;
+        if (p4[0] == 0x55 && p4[1] == 0x8B && p4[2] == 0xEC) {
+            if (WineSafe_CreateHook((void*)kIsSphereVisible, (void*)Hooked_IsSphereVisible,
+                                    (void**)&orig_IsSphereVisible) == MH_OK) {
+                if (WO_EnableHook((void*)kIsSphereVisible) == MH_OK) {
+                    g_sphereInstalled = true;
+                    SamplingProfiler::RegisterSelfSymbol("FrustumSphere_SSE2", (const void*)&Hooked_IsSphereVisible);
+                    Log("[FrustumAabb] ACTIVE on CFrustum::IsSphereVisible (0x%08X)", (unsigned)kIsSphereVisible);
                 }
             }
         }
@@ -656,12 +757,20 @@ void LogStats() {
             g_pointCalls, g_pointVerified,
             g_pointDead ? " - RETIRED on a disagreement" : (g_pointArmed ? "" : " - still verifying"));
     }
+
+    if (g_sphereInstalled && g_sphereCalls > 0) {
+        const double culled_pct = 100.0 * (double)g_sphereCulled / (double)g_sphereCalls;
+        Log("[FrustumAabb] %lu sphere visibility tests, %lu culled (%.1f%%), %lu verified against client%s",
+            g_sphereCalls, g_sphereCulled, culled_pct, g_sphereVerified,
+            g_sphereDead ? " - RETIRED on a disagreement" : (g_sphereArmed ? "" : " - still verifying"));
+    }
 }
 
 void Shutdown() {
     if (g_installed) MH_DisableHook((void*)kIsVisible);
     if (g_insideInstalled) MH_DisableHook((void*)kIsInside);
     if (g_pointInstalled) MH_DisableHook((void*)kIsPointVisible);
+    if (g_sphereInstalled) MH_DisableHook((void*)kIsSphereVisible);
 }
 
 }  // namespace FrustumAabb
