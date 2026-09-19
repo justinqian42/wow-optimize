@@ -52,6 +52,7 @@
 #include "bone_matrix_upload_sse2.h"
 #include "ui_batch_fill_sse2.h"
 #include "particle_fill_sse2.h"
+#include "lua_vm_fast.h"
 #include "m2_matrix_slot_sse2.h"
 #include "m2_anim_stride.h"
 #include "m2_anim_reuse.h"
@@ -5648,6 +5649,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
     STAT_TIME("UiBatchFill::LogStats", UiBatchFill::LogStats());
     STAT_TIME("ParticleFill::LogStats", ParticleFill::LogStats());
+    STAT_TIME("LuaVmFast::LogStats", LuaVmFast::LogStats());
     STAT_TIME("M2MatrixSlot::LogStats", M2MatrixSlot::LogStats());
     STAT_TIME("M2AnimStride::LogStats", M2AnimStride::LogStats());
     STAT_TIME("M2AnimReuse::LogStats", M2AnimReuse::LogStats());
@@ -8443,6 +8445,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     BoneMatrixUpload::Init();
     UiBatchFill::Init();
     ParticleFill::Init();
+    LuaVmFast::Init();
 
     Log("--- M2 Matrix Slot Copy (SSE2) ---");
     M2MatrixSlot::Install();
@@ -11535,6 +11538,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             BoneMatrixUpload::Shutdown();
             UiBatchFill::Shutdown();
             ParticleFill::Shutdown();
+            LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();
             M2MatrixSlot::Shutdown();

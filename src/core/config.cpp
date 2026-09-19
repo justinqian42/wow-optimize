@@ -136,6 +136,7 @@ static const BoolSetting kBoolSettings[] = {
     { "General", "ObjMgrFindFast", &Settings::OptObjMgrFindFast },
     { "Graphics_Sound", "QuatLerpSse2", &Settings::OptQuatLerpSse2 },
     { "UI_Lua", "LuaProtoCache", &Settings::OptLuaProtoCache },
+    { "UI_Lua", "LuaVmFast", &Settings::OptLuaVmFast },
     { "UI_Lua", "LuaBytecodeStore", &Settings::OptLuaBytecodeStore },
     { "UI_Lua", "LuaThisFast", &Settings::OptLuaThisFast },
     { "Graphics_Sound", "AnimLod", &Settings::OptAnimLod },
@@ -671,6 +672,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptObjMgrFindFast      = GetPrivateProfileIntA("General", "ObjMgrFindFast", 0, iniPath.c_str()) != 0;
         g_settings.OptQuatLerpSse2        = GetPrivateProfileIntA("Graphics_Sound", "QuatLerpSse2", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaProtoCache       = GetPrivateProfileIntA("UI_Lua", "LuaProtoCache", 1, iniPath.c_str()) != 0;
+        g_settings.OptLuaVmFast           = GetPrivateProfileIntA("UI_Lua", "LuaVmFast", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaBytecodeStore    = GetPrivateProfileIntA("UI_Lua", "LuaBytecodeStore", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaThisFast         = GetPrivateProfileIntA("UI_Lua", "LuaThisFast", 0, iniPath.c_str()) != 0;
         g_settings.OptAnimLod             = GetPrivateProfileIntA("Graphics_Sound", "AnimLod", 0, iniPath.c_str()) != 0;

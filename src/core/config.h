@@ -360,6 +360,9 @@ namespace Config {
         // any of it. A stale Proto is refused by its own fingerprint rather
         // than handed back, and a state swap drops everything.
         bool OptLuaProtoCache = true;
+        // The client's Lua interpreter, transcribed, with the string-key table
+        // lookup inlined. Off: it is the function every line of Lua runs through.
+        bool OptLuaVmFast = false;
         // The other 1868 ms of that same loading screen: source the session had
         // never seen, which no cache inside the process can help with. This one
         // keeps the compiled form on disk between sessions. Off by default -
