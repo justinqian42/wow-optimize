@@ -161,6 +161,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "LuaPoolFast", &Settings::OptLuaPoolFast },
     { "Graphics_Sound", "AnimVec3Track", &Settings::OptAnimVec3Track },
     { "Graphics_Sound", "M2SortKey", &Settings::OptM2SortKey },
+    { "Graphics_Sound", "M2BatchSort", &Settings::OptM2BatchSort },
     { "Graphics_Sound", "FrustumAabb", &Settings::OptFrustumAabb },
     { "Graphics_Sound", "SegmentAabb", &Settings::OptSegmentAabb },
     { "UI_Lua", "LuaHGetDispatch", &Settings::OptLuaHGetDispatch },
@@ -721,6 +722,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptLuaPoolFast     = GetPrivateProfileIntA("UI_Lua", "LuaPoolFast", 0, iniPath.c_str()) != 0;
         g_settings.OptAnimVec3Track   = GetPrivateProfileIntA("Graphics_Sound", "AnimVec3Track", 0, iniPath.c_str()) != 0;
         g_settings.OptM2SortKey       = GetPrivateProfileIntA("Graphics_Sound", "M2SortKey", 0, iniPath.c_str()) != 0;
+        g_settings.OptM2BatchSort     = GetPrivateProfileIntA("Graphics_Sound", "M2BatchSort", 0, iniPath.c_str()) != 0;
         g_settings.OptFrustumAabb     = GetPrivateProfileIntA("Graphics_Sound", "FrustumAabb", 0, iniPath.c_str()) != 0;
         g_settings.OptSegmentAabb     = GetPrivateProfileIntA("Graphics_Sound", "SegmentAabb", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaHGetDispatch = GetPrivateProfileIntA("UI_Lua", "LuaHGetDispatch", 0, iniPath.c_str()) != 0;
