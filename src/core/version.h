@@ -376,6 +376,13 @@
 // order. Pointer-validated + SEH + shadow verification.
 #define TEST_DISABLE_MATRIX_OPS_SSE2            0
 
+// SSE2 bounding box computation from vertex streams (sub_984930 / AABB_FromVertices,
+// 829 bytes, 10 callers across scene traversal, world culling, model bounding
+// volume calculation, and collision queries). Evaluates component min/max across
+// 3D vertices using parallel 128-bit vector min/max operations, eliminating
+// serialized status-word round trips (fnstsw ax) and branch mispredictions.
+#define TEST_DISABLE_AABB_FROM_VERTS_SSE2       0
+
 // Quaternion -> 3x3 rotation matrix (sub_4C1C40), the arithmetic core behind
 // all three of the client's quaternion wrappers. Runs once per animated bone
 // per frame inside sub_82F0F0, the largest single entry in the main-thread
