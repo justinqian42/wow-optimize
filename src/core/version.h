@@ -372,10 +372,13 @@
 // SSE2 CMatrix::MultiplyInPlace (sub_4C2370, 27 callers), CMatrix::ScaleLocal
 // (sub_4C1B90, 18 callers), CMatrix::Scale3x3 (sub_4C1BF0, 36 callers),
 // CMatrix::CreateRotateX (sub_4C31B0, 8 callers), CMatrix::CreateRotateY
-// (sub_4C3220, 8 callers), and CMatrix::CreateRotateZ (sub_4C3290, 13 callers).
+// (sub_4C3220, 8 callers), CMatrix::CreateRotateZ (sub_4C3290, 13 callers),
+// CMatrix::CreateRotateAxisAngle (sub_4C3460, 13 callers), CMatrix::RotateQuat
+// (sub_4C33C0, 4 callers), Vec3_Scale (sub_4C35A0, 2 callers), and Vec3_InvScale
+// (sub_4C35D0, 4 callers).
 // Vectorizes in-place 4x4 matrix multiplication, 3-axis and uniform scaling,
-// and rotation matrix generation in IEEE double precision matching stock accumulation
-// order. Pointer-validated + SEH + shadow verification.
+// arbitrary axis-angle/quaternion rotation, and 3D vector scaling in IEEE double
+// precision matching stock accumulation order. Pointer-validated + SEH + shadow verification.
 #define TEST_DISABLE_MATRIX_OPS_SSE2            0
 
 // SSE2 bounding box transformation, vertex bounding, and vector extremum math:

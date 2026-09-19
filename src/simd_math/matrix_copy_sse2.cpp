@@ -1906,7 +1906,11 @@ static bool SelfTestMatrixRotate() {
 // sub_4C31B0: CMatrix::CreateRotateX (X-rotation matrix, __cdecl, 8 callers)
 // sub_4C3220: CMatrix::CreateRotateY (Y-rotation matrix, __cdecl, 8 callers)
 // sub_4C3290: CMatrix::CreateRotateZ (Z-rotation matrix, __cdecl, 13 callers)
-// 110 callers total across animation, camera, spells, scene objects, particle generation, model rendering
+// sub_4C3460: CMatrix::CreateRotateAxisAngle (axis-angle matrix, __cdecl, 13 callers)
+// sub_4C33C0: CMatrix::RotateQuat (in-place quat rotation, __thiscall, 4 callers)
+// sub_4C35A0: Vec3_Scale (in-place 3D vector scale, __thiscall, 2 callers)
+// sub_4C35D0: Vec3_InvScale (in-place 3D vector inverse scale, __thiscall, 4 callers)
+// 133 callers total across animation, camera, spells, scene objects, particle generation, model rendering
 // ================================================================
 #if !TEST_DISABLE_MATRIX_OPS_SSE2
 typedef float* (__fastcall* MatMulInPlace_t)(float* self, void* edx, const float* other);
@@ -1950,6 +1954,34 @@ static volatile unsigned long g_matcreate_rotz_calls = 0;
 static volatile unsigned long g_matcreate_rotz_agreements = 0;
 static volatile long g_matcreate_rotz_armed = 0;
 static volatile long g_matcreate_rotz_dead = 0;
+
+typedef float* (__cdecl* MatCreateRotateAxisAngle_t)(float* out, float angle, const float* axis, int is_normalized);
+static MatCreateRotateAxisAngle_t pOrigMatCreateRotateAxisAngle = nullptr;
+static volatile unsigned long g_matcreate_rotaxis_calls = 0;
+static volatile unsigned long g_matcreate_rotaxis_agreements = 0;
+static volatile long g_matcreate_rotaxis_armed = 0;
+static volatile long g_matcreate_rotaxis_dead = 0;
+
+typedef float* (__fastcall* MatRotateQuat_t)(float* this_mat, void* edx, const float* quat);
+static MatRotateQuat_t pOrigMatRotateQuat = nullptr;
+static volatile unsigned long g_matrotate_quat_calls = 0;
+static volatile unsigned long g_matrotate_quat_agreements = 0;
+static volatile long g_matrotate_quat_armed = 0;
+static volatile long g_matrotate_quat_dead = 0;
+
+typedef float* (__fastcall* Vec3Scale_t)(float* this_vec, void* edx, float s);
+static Vec3Scale_t pOrigVec3Scale = nullptr;
+static volatile unsigned long g_vec3_scale_calls = 0;
+static volatile unsigned long g_vec3_scale_agreements = 0;
+static volatile long g_vec3_scale_armed = 0;
+static volatile long g_vec3_scale_dead = 0;
+
+typedef float* (__fastcall* Vec3InvScale_t)(float* this_vec, void* edx, float s);
+static Vec3InvScale_t pOrigVec3InvScale = nullptr;
+static volatile unsigned long g_vec3_invscale_calls = 0;
+static volatile unsigned long g_vec3_invscale_agreements = 0;
+static volatile long g_vec3_invscale_armed = 0;
+static volatile long g_vec3_invscale_dead = 0;
 
 static inline void MatMulInPlace_SSE2(float* self, const float* other) {
     float tmp[16];
@@ -2065,6 +2097,115 @@ static inline float* MatCreateRotateZ_SSE2(float* out, float angle) {
     _mm_storeu_ps(out + 8,  r2);
     _mm_storeu_ps(out + 12, r3);
     return out;
+}
+
+static inline float* MatCreateRotateAxisAngle_SSE2(float* out, float angle, const float* axis, int is_normalized) {
+    float ax = axis[0];
+    float ay = axis[1];
+    float az = axis[2];
+
+    if (!is_normalized) {
+        double dax = (double)ax;
+        double day = (double)ay;
+        double daz = (double)az;
+        double sum = (daz * daz + day * day) + dax * dax;
+        double len = _mm_cvtsd_f64(_mm_sqrt_sd(_mm_setzero_pd(), _mm_set_sd(sum)));
+        double inv_len = 1.0 / len;
+        ax = (float)(dax * inv_len);
+        ay = (float)(day * inv_len);
+        az = (float)(daz * inv_len);
+    }
+
+    float s, c;
+    FastSinCos(angle, s, c);
+
+    double dax = (double)ax;
+    double day = (double)ay;
+    double daz = (double)az;
+    double dc  = (double)c;
+    double ds  = (double)s;
+
+    float xy = (float)(day * dax);
+    float yz = (float)(daz * day);
+    float xz = (float)(daz * dax);
+    float ys = (float)(day * ds);
+
+    double az_s = daz * ds;
+    double ax_s = dax * ds;
+    double one_minus_c = 1.0 - dc;
+
+    double xy_term = (double)xy * one_minus_c;
+    float  xy_term_f = (float)xy_term;
+
+    double xz_term = (double)xz * one_minus_c;
+    float  xz_term_f = (float)xz_term;
+
+    double yz_term = (double)yz * one_minus_c;
+
+    out[0]  = (float)(dax * dax * one_minus_c + dc);
+    out[1]  = (float)(xy_term + az_s);
+    out[2]  = (float)(xz_term - (double)ys);
+    out[3]  = 0.0f;
+
+    out[4]  = (float)((double)xy_term_f - az_s);
+    out[5]  = (float)(day * day * one_minus_c + dc);
+    out[6]  = (float)(yz_term + ax_s);
+    out[7]  = 0.0f;
+
+    out[8]  = (float)((double)xz_term_f + (double)ys);
+    out[9]  = (float)(yz_term - ax_s);
+    out[10] = (float)(daz * daz * one_minus_c + dc);
+    out[11] = 0.0f;
+
+    out[12] = 0.0f;
+    out[13] = 0.0f;
+    out[14] = 0.0f;
+    out[15] = 1.0f;
+
+    return out;
+}
+
+static inline float* MatRotateQuat_SSE2(float* this_mat, const float* quat) {
+    float qmat[16];
+    qmat[3]  = 0.0f;
+    qmat[7]  = 0.0f;
+    qmat[11] = 0.0f;
+    qmat[12] = 0.0f;
+    qmat[13] = 0.0f;
+    qmat[14] = 0.0f;
+    qmat[15] = 1.0f;
+    QuatToMatrix3x3_PackedDouble(quat, qmat);
+
+    float tmp[16];
+    MatMul4x4_PackedDouble(tmp, qmat, this_mat);
+
+    _mm_storeu_ps(this_mat + 0,  _mm_loadu_ps(tmp + 0));
+    _mm_storeu_ps(this_mat + 4,  _mm_loadu_ps(tmp + 4));
+    _mm_storeu_ps(this_mat + 8,  _mm_loadu_ps(tmp + 8));
+    _mm_storeu_ps(this_mat + 12, _mm_loadu_ps(tmp + 12));
+    return this_mat;
+}
+
+static inline float* Vec3Scale_SSE2(float* this_vec, float s) {
+    double sd = (double)s;
+    __m128d s_d = _mm_set1_pd(sd);
+    __m128d xy = _mm_mul_pd(_mm_set_pd((double)this_vec[1], (double)this_vec[0]), s_d);
+    __m128d z = _mm_mul_sd(_mm_set_sd((double)this_vec[2]), s_d);
+    this_vec[0] = (float)_mm_cvtsd_f64(xy);
+    this_vec[1] = (float)_mm_cvtsd_f64(_mm_unpackhi_pd(xy, xy));
+    this_vec[2] = (float)_mm_cvtsd_f64(z);
+    return this_vec;
+}
+
+static inline float* Vec3InvScale_SSE2(float* this_vec, float s) {
+    double inv = 1.0 / (double)s;
+    __m128d inv_d = _mm_set1_pd(inv);
+    __m128d xy = _mm_mul_pd(_mm_set_pd((double)this_vec[1], (double)this_vec[0]), inv_d);
+    __m128d z = _mm_mul_sd(_mm_set_sd((double)this_vec[2]), inv_d);
+    this_vec[0] = (float)_mm_cvtsd_f64(xy);
+    this_vec[1] = (float)_mm_cvtsd_f64(_mm_unpackhi_pd(xy, xy));
+    this_vec[2] = (float)_mm_cvtsd_f64(z);
+    return this_vec;
 }
 
 static float* __fastcall Hooked_MatMulInPlace(float* self, void* edx, const float* other) {
@@ -2445,6 +2586,258 @@ static float* __cdecl Hooked_MatCreateRotateY(float* out, float angle) {
     return out;
 }
 
+static float* __cdecl Hooked_MatCreateRotateAxisAngle(float* out, float angle, const float* axis, int is_normalized) {
+    ++g_matcreate_rotaxis_calls;
+    uintptr_t o = (uintptr_t)out;
+    uintptr_t a = (uintptr_t)axis;
+    if (o <= 0x10000 || o >= 0xFFE00000 || a <= 0x10000 || a >= 0xFFE00000 || g_matcreate_rotaxis_dead) {
+        return pOrigMatCreateRotateAxisAngle(out, angle, axis, is_normalized);
+    }
+
+    if (g_matcreate_rotaxis_armed && ((g_matcreate_rotaxis_calls & 4095) != 0)) {
+        __try {
+            return MatCreateRotateAxisAngle_SSE2(out, angle, axis, is_normalized);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return pOrigMatCreateRotateAxisAngle(out, angle, axis, is_normalized);
+        }
+    }
+
+    // Shadow verification
+    float client_m[16], our_m[16];
+
+    __try {
+        pOrigMatCreateRotateAxisAngle(client_m, angle, axis, is_normalized);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return pOrigMatCreateRotateAxisAngle(out, angle, axis, is_normalized);
+    }
+
+    __try {
+        MatCreateRotateAxisAngle_SSE2(our_m, angle, axis, is_normalized);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_matcreate_rotaxis_dead, 1);
+        Log("[MatrixSSE2] MatCreateRotateAxisAngle threw exception - retiring hook\n");
+        memcpy(out, client_m, sizeof(client_m));
+        return out;
+    }
+
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        uint32_t cm, om;
+        memcpy(&cm, &client_m[i], 4);
+        memcpy(&om, &our_m[i], 4);
+        if (cm != om) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_matcreate_rotaxis_dead, 1);
+        Log("[MatrixSSE2] MatCreateRotateAxisAngle DISAGREED with client - retiring hook\n");
+        memcpy(out, client_m, sizeof(client_m));
+        return out;
+    }
+
+    memcpy(out, our_m, sizeof(our_m));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_matcreate_rotaxis_agreements);
+    if (g_matcreate_rotaxis_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_matcreate_rotaxis_armed, 1);
+        Log("[MatrixSSE2] MatCreateRotateAxisAngle armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return out;
+}
+
+static float* __fastcall Hooked_MatRotateQuat(float* this_mat, void* edx, const float* quat) {
+    ++g_matrotate_quat_calls;
+    uintptr_t m = (uintptr_t)this_mat;
+    uintptr_t q = (uintptr_t)quat;
+    if (m <= 0x10000 || m >= 0xFFE00000 || q <= 0x10000 || q >= 0xFFE00000 || g_matrotate_quat_dead) {
+        return pOrigMatRotateQuat(this_mat, edx, quat);
+    }
+
+    if (g_matrotate_quat_armed && ((g_matrotate_quat_calls & 4095) != 0)) {
+        __try {
+            return MatRotateQuat_SSE2(this_mat, quat);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return pOrigMatRotateQuat(this_mat, edx, quat);
+        }
+    }
+
+    // Shadow verification
+    float client_m[16], our_m[16];
+    memcpy(client_m, this_mat, sizeof(client_m));
+    memcpy(our_m, this_mat, sizeof(our_m));
+
+    __try {
+        pOrigMatRotateQuat(client_m, nullptr, quat);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return pOrigMatRotateQuat(this_mat, edx, quat);
+    }
+
+    __try {
+        MatRotateQuat_SSE2(our_m, quat);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_matrotate_quat_dead, 1);
+        Log("[MatrixSSE2] MatRotateQuat threw exception - retiring hook\n");
+        memcpy(this_mat, client_m, sizeof(client_m));
+        return this_mat;
+    }
+
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        uint32_t cm, om;
+        memcpy(&cm, &client_m[i], 4);
+        memcpy(&om, &our_m[i], 4);
+        if (cm != om) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_matrotate_quat_dead, 1);
+        Log("[MatrixSSE2] MatRotateQuat DISAGREED with client - retiring hook\n");
+        memcpy(this_mat, client_m, sizeof(client_m));
+        return this_mat;
+    }
+
+    memcpy(this_mat, our_m, sizeof(our_m));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_quat_agreements);
+    if (g_matrotate_quat_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_matrotate_quat_armed, 1);
+        Log("[MatrixSSE2] MatRotateQuat armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return this_mat;
+}
+
+static float* __fastcall Hooked_Vec3Scale(float* this_vec, void* edx, float s) {
+    ++g_vec3_scale_calls;
+    uintptr_t v = (uintptr_t)this_vec;
+    if (v <= 0x10000 || v >= 0xFFE00000 || g_vec3_scale_dead) {
+        return pOrigVec3Scale(this_vec, edx, s);
+    }
+
+    if (g_vec3_scale_armed && ((g_vec3_scale_calls & 4095) != 0)) {
+        __try {
+            return Vec3Scale_SSE2(this_vec, s);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return pOrigVec3Scale(this_vec, edx, s);
+        }
+    }
+
+    // Shadow verification
+    float client_v[3], our_v[3];
+    memcpy(client_v, this_vec, sizeof(client_v));
+    memcpy(our_v, this_vec, sizeof(our_v));
+
+    __try {
+        pOrigVec3Scale(client_v, nullptr, s);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return pOrigVec3Scale(this_vec, edx, s);
+    }
+
+    __try {
+        Vec3Scale_SSE2(our_v, s);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_vec3_scale_dead, 1);
+        Log("[MatrixSSE2] Vec3_Scale threw exception - retiring hook\n");
+        memcpy(this_vec, client_v, sizeof(client_v));
+        return this_vec;
+    }
+
+    bool match = true;
+    for (int i = 0; i < 3; ++i) {
+        uint32_t cv, ov;
+        memcpy(&cv, &client_v[i], 4);
+        memcpy(&ov, &our_v[i], 4);
+        if (cv != ov) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_vec3_scale_dead, 1);
+        Log("[MatrixSSE2] Vec3_Scale DISAGREED with client - retiring hook\n");
+        memcpy(this_vec, client_v, sizeof(client_v));
+        return this_vec;
+    }
+
+    memcpy(this_vec, our_v, sizeof(our_v));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_vec3_scale_agreements);
+    if (g_vec3_scale_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_vec3_scale_armed, 1);
+        Log("[MatrixSSE2] Vec3_Scale armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return this_vec;
+}
+
+static float* __fastcall Hooked_Vec3InvScale(float* this_vec, void* edx, float s) {
+    ++g_vec3_invscale_calls;
+    uintptr_t v = (uintptr_t)this_vec;
+    if (v <= 0x10000 || v >= 0xFFE00000 || g_vec3_invscale_dead) {
+        return pOrigVec3InvScale(this_vec, edx, s);
+    }
+
+    if (g_vec3_invscale_armed && ((g_vec3_invscale_calls & 4095) != 0)) {
+        __try {
+            return Vec3InvScale_SSE2(this_vec, s);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return pOrigVec3InvScale(this_vec, edx, s);
+        }
+    }
+
+    // Shadow verification
+    float client_v[3], our_v[3];
+    memcpy(client_v, this_vec, sizeof(client_v));
+    memcpy(our_v, this_vec, sizeof(our_v));
+
+    __try {
+        pOrigVec3InvScale(client_v, nullptr, s);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return pOrigVec3InvScale(this_vec, edx, s);
+    }
+
+    __try {
+        Vec3InvScale_SSE2(our_v, s);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_vec3_invscale_dead, 1);
+        Log("[MatrixSSE2] Vec3_InvScale threw exception - retiring hook\n");
+        memcpy(this_vec, client_v, sizeof(client_v));
+        return this_vec;
+    }
+
+    bool match = true;
+    for (int i = 0; i < 3; ++i) {
+        uint32_t cv, ov;
+        memcpy(&cv, &client_v[i], 4);
+        memcpy(&ov, &our_v[i], 4);
+        if (cv != ov) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_vec3_invscale_dead, 1);
+        Log("[MatrixSSE2] Vec3_InvScale DISAGREED with client - retiring hook\n");
+        memcpy(this_vec, client_v, sizeof(client_v));
+        return this_vec;
+    }
+
+    memcpy(this_vec, our_v, sizeof(our_v));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_vec3_invscale_agreements);
+    if (g_vec3_invscale_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_vec3_invscale_armed, 1);
+        Log("[MatrixSSE2] Vec3_InvScale armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return this_vec;
+}
+
 static bool SelfTestMatrixOps() {
     MatMulInPlace_t origMul = (MatMulInPlace_t)0x004C2370;
     MatScaleLocal_t origScale = (MatScaleLocal_t)0x004C1B90;
@@ -2452,13 +2845,21 @@ static bool SelfTestMatrixOps() {
     MatCreateRotateX_t origCreateX = (MatCreateRotateX_t)0x004C31B0;
     MatCreateRotateY_t origCreateY = (MatCreateRotateY_t)0x004C3220;
     MatCreateRotateZ_t origCreateZ = (MatCreateRotateZ_t)0x004C3290;
+    MatCreateRotateAxisAngle_t origCreateAxisAngle = (MatCreateRotateAxisAngle_t)0x004C3460;
+    MatRotateQuat_t origRotateQuat = (MatRotateQuat_t)0x004C33C0;
+    Vec3Scale_t origVec3Scale = (Vec3Scale_t)0x004C35A0;
+    Vec3InvScale_t origVec3InvScale = (Vec3InvScale_t)0x004C35D0;
 
     if (IsBadReadPtr((void*)origMul, 16) ||
         IsBadReadPtr((void*)origScale, 16) ||
         IsBadReadPtr((void*)origScale3x3, 16) ||
         IsBadReadPtr((void*)origCreateX, 16) ||
         IsBadReadPtr((void*)origCreateY, 16) ||
-        IsBadReadPtr((void*)origCreateZ, 16)) {
+        IsBadReadPtr((void*)origCreateZ, 16) ||
+        IsBadReadPtr((void*)origCreateAxisAngle, 16) ||
+        IsBadReadPtr((void*)origRotateQuat, 16) ||
+        IsBadReadPtr((void*)origVec3Scale, 16) ||
+        IsBadReadPtr((void*)origVec3InvScale, 16)) {
         return true;
     }
 
@@ -2536,6 +2937,49 @@ static bool SelfTestMatrixOps() {
         MatCreateRotateZ_SSE2(cz_ours, angle);
         if (memcmp(cz_client, cz_ours, sizeof(cz_client)) != 0) {
             Log("[SelfTest] MatCreateRotateZ mismatch at test %d", i);
+            return false;
+        }
+
+        // 7. Test MatCreateRotateAxisAngle
+        float axis[3] = { rnd(), rnd(), rnd() };
+        int is_norm = (i & 1);
+        float ca_client[16], ca_ours[16];
+        origCreateAxisAngle(ca_client, angle, axis, is_norm);
+        MatCreateRotateAxisAngle_SSE2(ca_ours, angle, axis, is_norm);
+        if (memcmp(ca_client, ca_ours, sizeof(ca_client)) != 0) {
+            Log("[SelfTest] MatCreateRotateAxisAngle mismatch at test %d", i);
+            return false;
+        }
+
+        // 8. Test MatRotateQuat
+        float quat[4] = { rnd() * 0.01f, rnd() * 0.01f, rnd() * 0.01f, 1.0f };
+        memcpy(m_client, m1, sizeof(m1));
+        memcpy(m_ours, m1, sizeof(m1));
+        origRotateQuat(m_client, nullptr, quat);
+        MatRotateQuat_SSE2(m_ours, quat);
+        if (memcmp(m_client, m_ours, sizeof(m1)) != 0) {
+            Log("[SelfTest] MatRotateQuat mismatch at test %d", i);
+            return false;
+        }
+
+        // 9. Test Vec3Scale
+        float v_client[3] = { rnd(), rnd(), rnd() };
+        float v_ours[3] = { v_client[0], v_client[1], v_client[2] };
+        origVec3Scale(v_client, nullptr, scalar);
+        Vec3Scale_SSE2(v_ours, scalar);
+        if (memcmp(v_client, v_ours, sizeof(v_client)) != 0) {
+            Log("[SelfTest] Vec3Scale mismatch at test %d", i);
+            return false;
+        }
+
+        // 10. Test Vec3InvScale
+        float inv_s = (scalar != 0.0f) ? scalar : 1.5f;
+        v_client[0] = rnd(); v_client[1] = rnd(); v_client[2] = rnd();
+        v_ours[0] = v_client[0]; v_ours[1] = v_client[1]; v_ours[2] = v_client[2];
+        origVec3InvScale(v_client, nullptr, inv_s);
+        Vec3InvScale_SSE2(v_ours, inv_s);
+        if (memcmp(v_client, v_ours, sizeof(v_client)) != 0) {
+            Log("[SelfTest] Vec3InvScale mismatch at test %d", i);
             return false;
         }
     }
@@ -2853,6 +3297,42 @@ bool InstallMatrixCopySSE2() {
         } else {
             Log("[MatrixSSE2] CMatrix::CreateRotateZ hook FAILED");
         }
+
+        if (WineSafe_CreateHook((void*)0x004C3460, (void*)Hooked_MatCreateRotateAxisAngle,
+                                (void**)&pOrigMatCreateRotateAxisAngle) == MH_OK &&
+            WO_EnableHook((void*)0x004C3460) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("MatCreateRotateAxisAngle_SSE2", (const void*)&Hooked_MatCreateRotateAxisAngle);
+            Log("[MatrixSSE2] Hooked CMatrix::CreateRotateAxisAngle at 0x004C3460 (SSE2 double-precision, verified, 13 callers)");
+        } else {
+            Log("[MatrixSSE2] CMatrix::CreateRotateAxisAngle hook FAILED");
+        }
+
+        if (WineSafe_CreateHook((void*)0x004C33C0, (void*)Hooked_MatRotateQuat,
+                                (void**)&pOrigMatRotateQuat) == MH_OK &&
+            WO_EnableHook((void*)0x004C33C0) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("MatRotateQuat_SSE2", (const void*)&Hooked_MatRotateQuat);
+            Log("[MatrixSSE2] Hooked CMatrix::RotateQuat at 0x004C33C0 (SSE2 double-precision, verified, 4 callers)");
+        } else {
+            Log("[MatrixSSE2] CMatrix::RotateQuat hook FAILED");
+        }
+
+        if (WineSafe_CreateHook((void*)0x004C35A0, (void*)Hooked_Vec3Scale,
+                                (void**)&pOrigVec3Scale) == MH_OK &&
+            WO_EnableHook((void*)0x004C35A0) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("Vec3Scale_SSE2", (const void*)&Hooked_Vec3Scale);
+            Log("[MatrixSSE2] Hooked Vec3_Scale at 0x004C35A0 (SSE2 double-precision, verified, 2 callers)");
+        } else {
+            Log("[MatrixSSE2] Vec3_Scale hook FAILED");
+        }
+
+        if (WineSafe_CreateHook((void*)0x004C35D0, (void*)Hooked_Vec3InvScale,
+                                (void**)&pOrigVec3InvScale) == MH_OK &&
+            WO_EnableHook((void*)0x004C35D0) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("Vec3InvScale_SSE2", (const void*)&Hooked_Vec3InvScale);
+            Log("[MatrixSSE2] Hooked Vec3_InvScale at 0x004C35D0 (SSE2 double-precision, verified, 4 callers)");
+        } else {
+            Log("[MatrixSSE2] Vec3_InvScale hook FAILED");
+        }
     }
 #endif
 
@@ -2905,6 +3385,7 @@ void MatrixCopySSE2_LogStats(void) {
 #if !TEST_DISABLE_MATRIX_OPS_SSE2
         + (double)g_matmul_ip_calls + (double)g_matscale_local_calls + (double)g_scale3x3_calls
         + (double)g_matcreate_rotx_calls + (double)g_matcreate_roty_calls + (double)g_matcreate_rotz_calls
+        + (double)g_matcreate_rotaxis_calls + (double)g_matrotate_quat_calls + (double)g_vec3_scale_calls + (double)g_vec3_invscale_calls
 #endif
         ;
     if (total == 0.0) {
@@ -2958,6 +3439,11 @@ void MatrixCopySSE2_LogStats(void) {
         g_matcreate_rotx_calls, g_matcreate_rotx_agreements,
         g_matcreate_roty_calls, g_matcreate_roty_agreements,
         g_matcreate_rotz_calls, g_matcreate_rotz_agreements);
+    Log("[MatrixSSE2]   rotaxis %lu (%lu verified), rotate-quat %lu (%lu verified), vec3-scale %lu (%lu verified), vec3-invscale %lu (%lu verified)",
+        g_matcreate_rotaxis_calls, g_matcreate_rotaxis_agreements,
+        g_matrotate_quat_calls, g_matrotate_quat_agreements,
+        g_vec3_scale_calls, g_vec3_scale_agreements,
+        g_vec3_invscale_calls, g_vec3_invscale_agreements);
 #endif
 }
 
@@ -3023,6 +3509,10 @@ void ShutdownMatrixCopySSE2() {
     MH_DisableHook((void*)0x004C31B0);
     MH_DisableHook((void*)0x004C3220);
     MH_DisableHook((void*)0x004C3290);
+    MH_DisableHook((void*)0x004C3460);
+    MH_DisableHook((void*)0x004C33C0);
+    MH_DisableHook((void*)0x004C35A0);
+    MH_DisableHook((void*)0x004C35D0);
     Log("[MatrixSSE2] Stats: MulInPlace=%lu (%lu verified)  ScaleLocal=%lu (%lu verified)  Scale3x3=%lu (%lu verified)  CreateRotateX=%lu (%lu verified)  CreateRotateY=%lu (%lu verified)  CreateRotateZ=%lu (%lu verified)",
         g_matmul_ip_calls, g_matmul_ip_agreements,
         g_matscale_local_calls, g_matscale_local_agreements,
@@ -3030,6 +3520,11 @@ void ShutdownMatrixCopySSE2() {
         g_matcreate_rotx_calls, g_matcreate_rotx_agreements,
         g_matcreate_roty_calls, g_matcreate_roty_agreements,
         g_matcreate_rotz_calls, g_matcreate_rotz_agreements);
+    Log("[MatrixSSE2] Stats: CreateRotateAxisAngle=%lu (%lu verified)  RotateQuat=%lu (%lu verified)  Vec3Scale=%lu (%lu verified)  Vec3InvScale=%lu (%lu verified)",
+        g_matcreate_rotaxis_calls, g_matcreate_rotaxis_agreements,
+        g_matrotate_quat_calls, g_matrotate_quat_agreements,
+        g_vec3_scale_calls, g_vec3_scale_agreements,
+        g_vec3_invscale_calls, g_vec3_invscale_agreements);
 #endif
 
     Log("[MatrixSSE2] Stats: MatrixCopy=%lu  MatrixIdentity=%lu  MatrixMul=%lu  MatVec3=%lu  MatVec4=%lu",
