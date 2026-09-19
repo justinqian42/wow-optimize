@@ -1508,7 +1508,28 @@ static void ProcessLuaErrors(lua_State* L) {
             size_t len = 0;
             const char* report = Api.lua_tolstring(L, -1, &len);
             if (report && len > 0) {
-                LogEx(LOG_LEVEL_ERROR, "LUA_ERR", "Lua Runtime Error Intercepted:\n%s", report);
+                // One log line per line of the report, not one call carrying all
+                // of it. A ring slot holds about 970 characters after the
+                // timestamp and an addon's traceback runs past that, so the tail
+                // was being cut - and the tail is the traceback. A tester session
+                // counted two truncated lines and named this as the first.
+                LogEx(LOG_LEVEL_ERROR, "LUA_ERR", "Lua Runtime Error Intercepted:");
+                const char* p   = report;
+                const char* end = report + len;
+                int printed = 0;
+                while (p < end && printed < 40) {
+                    const char* nl = (const char*)memchr(p, '\n', (size_t)(end - p));
+                    size_t n = nl ? (size_t)(nl - p) : (size_t)(end - p);
+                    if (n > 880) n = 880;   // a single line longer than a slot
+                    LogEx(LOG_LEVEL_ERROR, "LUA_ERR", "  %.*s", (int)n, p);
+                    ++printed;
+                    p = nl ? nl + 1 : end;
+                }
+                if (p < end) {
+                    LogEx(LOG_LEVEL_ERROR, "LUA_ERR",
+                          "  ... %u more character(s) of this report, not printed",
+                          (unsigned)(end - p));
+                }
 
                 // Walk C++ stack trace of the calling thread
                 void* stack[32];

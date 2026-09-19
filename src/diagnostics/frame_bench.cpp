@@ -122,6 +122,11 @@ static double g_p95Ms         = 0.0;   // same walk, so the two are always compa
 static uint64_t g_medianAtFrame = 0;
 static DWORD  g_lastSlowReport = 0;
 static uint64_t g_slowFrames  = 0;
+// The worst frame the quiet period swallowed since the last report, and how many
+// it swallowed. Without these the log names whichever frame happened to fall
+// after the window rather than the one worth looking at.
+static double   g_quietWorstMs   = 0.0;
+static unsigned g_quietSuppressed = 0;
 // Reason for an auto-mark that the frame boundary has not dumped yet. Empty
 // when there is none; see FlushAutoMark.
 static char   g_pendingMark[96] = {0};
@@ -190,6 +195,8 @@ void Init() {
     g_medianAtFrame = 0;
     g_lastSlowReport = 0;
     g_slowFrames = 0;
+    g_quietWorstMs = 0.0;
+    g_quietSuppressed = 0;
     g_ready = QueryPerformanceFrequency(&g_freq) && g_freq.QuadPart > 0;
 }
 
@@ -280,8 +287,19 @@ static void Accumulate(double ms) {
 
     // Report at most one in a while. A burst of hitches shares one cause, and the
     // logging itself must not become part of the problem it is describing.
+    //
+    // The quiet period must not decide WHICH frame gets described. A tester
+    // session reported a 953 ms frame while the same burst held one of 6011 ms
+    // and one of 1802 ms with 7152 file reads in it, because those fell inside
+    // the window and the first frame after it was the one that got written up.
+    // So the worst frame suppressed here is remembered and named beside the one
+    // that is reported.
     DWORD now = GetTickCount();
-    if (g_lastSlowReport != 0 && (now - g_lastSlowReport) < SLOW_FRAME_QUIET_MS) return;
+    if (g_lastSlowReport != 0 && (now - g_lastSlowReport) < SLOW_FRAME_QUIET_MS) {
+        if (ms > g_quietWorstMs) g_quietWorstMs = ms;
+        ++g_quietSuppressed;
+        return;
+    }
     g_lastSlowReport = now;
 
     // Only events from inside the stalled frame can explain it. Anything older is
@@ -290,6 +308,14 @@ static void Accumulate(double ms) {
     DWORD window = (DWORD)(ms + 0.5) + 50;
     Log("[FrameBench] slow frame: %.1f ms (%.1fx the %.2f ms median) - events within it:",
         ms, ms / (g_medianMs > 0.0 ? g_medianMs : 1.0), g_medianMs);
+    if (g_quietSuppressed) {
+        Log("[FrameBench]   %u further slow frame(s) since the last report are not "
+            "written up, and the worst of them ran %.1f ms. Read that figure, not "
+            "the one above, as how bad this burst got.",
+            g_quietSuppressed, g_quietWorstMs);
+        g_quietSuppressed = 0;
+        g_quietWorstMs = 0.0;
+    }
     CrashDumper::DumpTrace(8, window);
 
     // A 43x spike with "(nothing traced in this window)" under it is the shape
