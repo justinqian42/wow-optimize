@@ -101,10 +101,8 @@ namespace Config {
         bool OptD3d9StateManager  = true;
 
         // The UI layout dependency relink, sub_489710: 9.06% of main-thread
-        // executing time, the largest single entry in the profile. New, and it
-        // rewrites pointer surgery in the client's layout list, so it is
-        // opt-in until testers have run it.
-        bool OptLayoutRelinkFast  = false;
+        // executing time, the largest single entry in the profile.
+        bool OptLayoutRelinkFast  = true;
         // Pins timingMethod to 2 and timingTestError to 0 whatever the client
         // asks. On by default because it has shipped that way for a long time;
         // it used to have no switch at all and lived inside CvarNullGuard.
@@ -411,10 +409,10 @@ namespace Config {
         // Opt-in, and it does the first bones both ways and compares.
         bool OptBoneMatrixUpload = true;
         // The per-vertex and per-index fill in the client's UI batch draw,
-        // sub_484B00. Off by default and experimental; it predicts batches and
-        // compares them with what the client writes before it takes over.
-        bool OptUiBatchFill = false;
-        bool OptParticleFill = false;
+        // sub_484B00. Predicts batches and compares them with what the client
+        // writes before taking over.
+        bool OptUiBatchFill = true;
+        bool OptParticleFill = true;
         // Hands mimalloc a block of address space above 2GB so it grows there
         // instead of into the half a 32-bit client allocates from. Two tester
         // sessions ended with the low half down to a megabyte while the working
@@ -583,7 +581,7 @@ namespace Config {
         // Replaces the two sixteen-float matrix slot copies in sub_82F0F0
         // with four SSE2 moves each. No arithmetic, so the bytes written are
         // the bytes read.
-        bool OptM2MatrixSlotSse2 = false;
+        bool OptM2MatrixSlotSse2 = true;
         // Holds a distant model's skeleton for a frame by taking the
         // client's own no-bones branch out of the bone loop. The tail still
         // runs, so materials and attachments keep animating.
