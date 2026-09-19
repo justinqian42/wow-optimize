@@ -183,6 +183,9 @@ static void BuildKnownFuncTable() {
         { 0x004C23D0,   104, "CMatrix::Transpose" },
         { 0x004C2440,  2892, "CMatrix_AdjugateDet" },
         { 0x004C2FC0,   212, "CMatrix::InvertRigid" },
+        { 0x004C3300,    60, "CMatrix::RotateX" },
+        { 0x004C3340,    60, "CMatrix::RotateY" },
+        { 0x004C3380,    60, "CMatrix::RotateZ" },
         { 0x004C3420,    53, "C3Vector::Normalize" },
         { 0x004C3600,    67, "C3Vector::NormalizeGuarded" },
 

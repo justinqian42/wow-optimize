@@ -362,6 +362,13 @@
 // sub-ULP). In-place accumulate -> own isolation flag. Pointer-validated + SEH.
 #define TEST_DISABLE_MATRIX_TRANSLATE_SSE2         0
 
+// SSE2 in-place CMatrix::RotateX, RotateY, RotateZ (sub_4C3300, sub_4C3340, sub_4C3380,
+// 56 callers total across rendering, camera, particles, and models). Evaluates
+// axis-aligned rotation via fsincos in double precision directly updating only
+// the 2 rotating rows, bypassing stack-allocated temporary matrices, zero-multiplications,
+// and redundant memcpy operations. Pointer-validated + SEH + shadow verification.
+#define TEST_DISABLE_MATRIX_ROTATE_SSE2         0
+
 // Quaternion -> 3x3 rotation matrix (sub_4C1C40), the arithmetic core behind
 // all three of the client's quaternion wrappers. Runs once per animated bone
 // per frame inside sub_82F0F0, the largest single entry in the main-thread

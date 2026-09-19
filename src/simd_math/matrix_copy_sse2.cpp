@@ -1581,6 +1581,361 @@ static float* __fastcall Hooked_BoxScale(float* self, void* edx, float scale) {
     return self;
 }
 
+// ================================================================
+// CMatrix::RotateX/Y/Z (sub_4C3300, sub_4C3340, sub_4C3380, 56 callers)
+// ================================================================
+#if !TEST_DISABLE_MATRIX_ROTATE_SSE2
+typedef float* (__fastcall* MatRotate_t)(float* self, void* edx, float angle);
+
+static MatRotate_t pOrigMatRotateX = nullptr;
+static MatRotate_t pOrigMatRotateY = nullptr;
+static MatRotate_t pOrigMatRotateZ = nullptr;
+
+static volatile unsigned long g_matrotate_x_calls = 0;
+static volatile unsigned long g_matrotate_x_agreements = 0;
+static volatile LONG g_matrotate_x_armed = 0;
+static volatile LONG g_matrotate_x_dead = 0;
+
+static volatile unsigned long g_matrotate_y_calls = 0;
+static volatile unsigned long g_matrotate_y_agreements = 0;
+static volatile LONG g_matrotate_y_armed = 0;
+static volatile LONG g_matrotate_y_dead = 0;
+
+static volatile unsigned long g_matrotate_z_calls = 0;
+static volatile unsigned long g_matrotate_z_agreements = 0;
+static volatile LONG g_matrotate_z_armed = 0;
+static volatile LONG g_matrotate_z_dead = 0;
+
+static inline void FastSinCos(float angle, float& outSin, float& outCos) {
+    float s, c;
+    __asm {
+        fld angle
+        fsincos
+        fstp c
+        fstp s
+    }
+    outSin = s;
+    outCos = c;
+}
+
+inline void MatRotateX_SSE2(float* m, float angle) {
+    float s, c;
+    FastSinCos(angle, s, c);
+
+    const __m128d c_d = _mm_set1_pd((double)c);
+    const __m128d s_d = _mm_set1_pd((double)s);
+    const __m128d neg_s_d = _mm_set1_pd(-(double)s);
+
+    __m128 r1 = _mm_loadu_ps(m + 4);
+    __m128 r2 = _mm_loadu_ps(m + 8);
+
+    __m128d r1_lo = _mm_cvtps_pd(r1);
+    __m128d r1_hi = _mm_cvtps_pd(_mm_movehl_ps(r1, r1));
+    __m128d r2_lo = _mm_cvtps_pd(r2);
+    __m128d r2_hi = _mm_cvtps_pd(_mm_movehl_ps(r2, r2));
+
+    // row 1 = c * r1 + s * r2
+    __m128d new_r1_lo = _mm_add_pd(_mm_mul_pd(c_d, r1_lo), _mm_mul_pd(s_d, r2_lo));
+    __m128d new_r1_hi = _mm_add_pd(_mm_mul_pd(c_d, r1_hi), _mm_mul_pd(s_d, r2_hi));
+
+    // row 2 = -s * r1 + c * r2
+    __m128d new_r2_lo = _mm_add_pd(_mm_mul_pd(neg_s_d, r1_lo), _mm_mul_pd(c_d, r2_lo));
+    __m128d new_r2_hi = _mm_add_pd(_mm_mul_pd(neg_s_d, r1_hi), _mm_mul_pd(c_d, r2_hi));
+
+    _mm_storeu_ps(m + 4, _mm_movelh_ps(_mm_cvtpd_ps(new_r1_lo), _mm_cvtpd_ps(new_r1_hi)));
+    _mm_storeu_ps(m + 8, _mm_movelh_ps(_mm_cvtpd_ps(new_r2_lo), _mm_cvtpd_ps(new_r2_hi)));
+}
+
+inline void MatRotateY_SSE2(float* m, float angle) {
+    float s, c;
+    FastSinCos(angle, s, c);
+
+    const __m128d c_d = _mm_set1_pd((double)c);
+    const __m128d s_d = _mm_set1_pd((double)s);
+    const __m128d neg_s_d = _mm_set1_pd(-(double)s);
+
+    __m128 r0 = _mm_loadu_ps(m);
+    __m128 r2 = _mm_loadu_ps(m + 8);
+
+    __m128d r0_lo = _mm_cvtps_pd(r0);
+    __m128d r0_hi = _mm_cvtps_pd(_mm_movehl_ps(r0, r0));
+    __m128d r2_lo = _mm_cvtps_pd(r2);
+    __m128d r2_hi = _mm_cvtps_pd(_mm_movehl_ps(r2, r2));
+
+    // row 0 = c * r0 - s * r2
+    __m128d new_r0_lo = _mm_add_pd(_mm_mul_pd(c_d, r0_lo), _mm_mul_pd(neg_s_d, r2_lo));
+    __m128d new_r0_hi = _mm_add_pd(_mm_mul_pd(c_d, r0_hi), _mm_mul_pd(neg_s_d, r2_hi));
+
+    // row 2 = s * r0 + c * r2
+    __m128d new_r2_lo = _mm_add_pd(_mm_mul_pd(s_d, r0_lo), _mm_mul_pd(c_d, r2_lo));
+    __m128d new_r2_hi = _mm_add_pd(_mm_mul_pd(s_d, r0_hi), _mm_mul_pd(c_d, r2_hi));
+
+    _mm_storeu_ps(m,     _mm_movelh_ps(_mm_cvtpd_ps(new_r0_lo), _mm_cvtpd_ps(new_r0_hi)));
+    _mm_storeu_ps(m + 8, _mm_movelh_ps(_mm_cvtpd_ps(new_r2_lo), _mm_cvtpd_ps(new_r2_hi)));
+}
+
+inline void MatRotateZ_SSE2(float* m, float angle) {
+    float s, c;
+    FastSinCos(angle, s, c);
+
+    const __m128d c_d = _mm_set1_pd((double)c);
+    const __m128d s_d = _mm_set1_pd((double)s);
+    const __m128d neg_s_d = _mm_set1_pd(-(double)s);
+
+    __m128 r0 = _mm_loadu_ps(m);
+    __m128 r1 = _mm_loadu_ps(m + 4);
+
+    __m128d r0_lo = _mm_cvtps_pd(r0);
+    __m128d r0_hi = _mm_cvtps_pd(_mm_movehl_ps(r0, r0));
+    __m128d r1_lo = _mm_cvtps_pd(r1);
+    __m128d r1_hi = _mm_cvtps_pd(_mm_movehl_ps(r1, r1));
+
+    // row 0 = c * r0 + s * r1
+    __m128d new_r0_lo = _mm_add_pd(_mm_mul_pd(c_d, r0_lo), _mm_mul_pd(s_d, r1_lo));
+    __m128d new_r0_hi = _mm_add_pd(_mm_mul_pd(c_d, r0_hi), _mm_mul_pd(s_d, r1_hi));
+
+    // row 1 = -s * r0 + c * r1
+    __m128d new_r1_lo = _mm_add_pd(_mm_mul_pd(neg_s_d, r0_lo), _mm_mul_pd(c_d, r1_lo));
+    __m128d new_r1_hi = _mm_add_pd(_mm_mul_pd(neg_s_d, r0_hi), _mm_mul_pd(c_d, r1_hi));
+
+    _mm_storeu_ps(m,     _mm_movelh_ps(_mm_cvtpd_ps(new_r0_lo), _mm_cvtpd_ps(new_r0_hi)));
+    _mm_storeu_ps(m + 4, _mm_movelh_ps(_mm_cvtpd_ps(new_r1_lo), _mm_cvtpd_ps(new_r1_hi)));
+}
+
+static float* __fastcall Hooked_MatRotateX(float* self, void* edx, float angle) {
+    ++g_matrotate_x_calls;
+    if (g_matrotate_x_dead != 0 || !self) {
+        return pOrigMatRotateX(self, edx, angle);
+    }
+
+    uintptr_t b = (uintptr_t)self;
+    if (b < 0x10000 || b > 0xFFE00000) {
+        return pOrigMatRotateX(self, edx, angle);
+    }
+
+    if (g_matrotate_x_armed != 0 && (g_matrotate_x_calls & 4095) != 0) {
+        MatRotateX_SSE2(self, angle);
+        return self;
+    }
+
+    float client_m[16];
+    float our_m[16];
+    memcpy(client_m, self, sizeof(client_m));
+    memcpy(our_m, self, sizeof(our_m));
+
+    __try {
+        pOrigMatRotateX(client_m, edx, angle);
+        MatRotateX_SSE2(our_m, angle);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_matrotate_x_dead, 1);
+        Log("[MatrixSSE2] MatRotateX faulted during verification, retiring hook\n");
+        return pOrigMatRotateX(self, edx, angle);
+    }
+
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        uint32_t cm, om;
+        memcpy(&cm, &client_m[i], 4);
+        memcpy(&om, &our_m[i], 4);
+        if (cm != om) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_matrotate_x_dead, 1);
+        Log("[MatrixSSE2] MatRotateX DISAGREED with client - retiring hook\n");
+        memcpy(self, client_m, sizeof(client_m));
+        return self;
+    }
+
+    memcpy(self, our_m, sizeof(our_m));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_x_agreements);
+    if (g_matrotate_x_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_matrotate_x_armed, 1);
+        Log("[MatrixSSE2] MatRotateX armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return self;
+}
+
+static float* __fastcall Hooked_MatRotateY(float* self, void* edx, float angle) {
+    ++g_matrotate_y_calls;
+    if (g_matrotate_y_dead != 0 || !self) {
+        return pOrigMatRotateY(self, edx, angle);
+    }
+
+    uintptr_t b = (uintptr_t)self;
+    if (b < 0x10000 || b > 0xFFE00000) {
+        return pOrigMatRotateY(self, edx, angle);
+    }
+
+    if (g_matrotate_y_armed != 0 && (g_matrotate_y_calls & 4095) != 0) {
+        MatRotateY_SSE2(self, angle);
+        return self;
+    }
+
+    float client_m[16];
+    float our_m[16];
+    memcpy(client_m, self, sizeof(client_m));
+    memcpy(our_m, self, sizeof(our_m));
+
+    __try {
+        pOrigMatRotateY(client_m, edx, angle);
+        MatRotateY_SSE2(our_m, angle);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_matrotate_y_dead, 1);
+        Log("[MatrixSSE2] MatRotateY faulted during verification, retiring hook\n");
+        return pOrigMatRotateY(self, edx, angle);
+    }
+
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        uint32_t cm, om;
+        memcpy(&cm, &client_m[i], 4);
+        memcpy(&om, &our_m[i], 4);
+        if (cm != om) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_matrotate_y_dead, 1);
+        Log("[MatrixSSE2] MatRotateY DISAGREED with client - retiring hook\n");
+        memcpy(self, client_m, sizeof(client_m));
+        return self;
+    }
+
+    memcpy(self, our_m, sizeof(our_m));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_y_agreements);
+    if (g_matrotate_y_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_matrotate_y_armed, 1);
+        Log("[MatrixSSE2] MatRotateY armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return self;
+}
+
+static float* __fastcall Hooked_MatRotateZ(float* self, void* edx, float angle) {
+    ++g_matrotate_z_calls;
+    if (g_matrotate_z_dead != 0 || !self) {
+        return pOrigMatRotateZ(self, edx, angle);
+    }
+
+    uintptr_t b = (uintptr_t)self;
+    if (b < 0x10000 || b > 0xFFE00000) {
+        return pOrigMatRotateZ(self, edx, angle);
+    }
+
+    if (g_matrotate_z_armed != 0 && (g_matrotate_z_calls & 4095) != 0) {
+        MatRotateZ_SSE2(self, angle);
+        return self;
+    }
+
+    float client_m[16];
+    float our_m[16];
+    memcpy(client_m, self, sizeof(client_m));
+    memcpy(our_m, self, sizeof(our_m));
+
+    __try {
+        pOrigMatRotateZ(client_m, edx, angle);
+        MatRotateZ_SSE2(our_m, angle);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_matrotate_z_dead, 1);
+        Log("[MatrixSSE2] MatRotateZ faulted during verification, retiring hook\n");
+        return pOrigMatRotateZ(self, edx, angle);
+    }
+
+    bool match = true;
+    for (int i = 0; i < 16; ++i) {
+        uint32_t cm, om;
+        memcpy(&cm, &client_m[i], 4);
+        memcpy(&om, &our_m[i], 4);
+        if (cm != om) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_matrotate_z_dead, 1);
+        Log("[MatrixSSE2] MatRotateZ DISAGREED with client - retiring hook\n");
+        memcpy(self, client_m, sizeof(client_m));
+        return self;
+    }
+
+    memcpy(self, our_m, sizeof(our_m));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_matrotate_z_agreements);
+    if (g_matrotate_z_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_matrotate_z_armed, 1);
+        Log("[MatrixSSE2] MatRotateZ armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return self;
+}
+
+static bool SelfTestMatrixRotate() {
+    MatRotate_t origX = (MatRotate_t)0x004C3300;
+    MatRotate_t origY = (MatRotate_t)0x004C3340;
+    MatRotate_t origZ = (MatRotate_t)0x004C3380;
+
+    if (IsBadReadPtr((void*)origX, 16) ||
+        IsBadReadPtr((void*)origY, 16) ||
+        IsBadReadPtr((void*)origZ, 16)) {
+        return true;
+    }
+
+    const unsigned char* px = (const unsigned char*)origX;
+    if (!(px[0] == 0x55 && px[1] == 0x8B && px[2] == 0xEC)) return true;
+
+    uint32_t state = 0xA5A5A5A5;
+    auto rnd = [&state]() -> float {
+        state = state * 1664525u + 1013904223u;
+        return ((float)(int)(state >> 8) / 8388608.0f) * 100.0f;
+    };
+
+    for (int i = 0; i < 30000; ++i) {
+        float m_in[16];
+        for (int k = 0; k < 16; ++k) m_in[k] = rnd();
+        float angle = rnd() * 0.1f;
+
+        // Test RotX
+        float m_client[16], m_ours[16];
+        memcpy(m_client, m_in, sizeof(m_in));
+        memcpy(m_ours, m_in, sizeof(m_in));
+        origX(m_client, nullptr, angle);
+        MatRotateX_SSE2(m_ours, angle);
+        if (memcmp(m_client, m_ours, sizeof(m_in)) != 0) {
+            Log("[SelfTest] MatRotateX mismatch at test %d", i);
+            return false;
+        }
+
+        // Test RotY
+        memcpy(m_client, m_in, sizeof(m_in));
+        memcpy(m_ours, m_in, sizeof(m_in));
+        origY(m_client, nullptr, angle);
+        MatRotateY_SSE2(m_ours, angle);
+        if (memcmp(m_client, m_ours, sizeof(m_in)) != 0) {
+            Log("[SelfTest] MatRotateY mismatch at test %d", i);
+            return false;
+        }
+
+        // Test RotZ
+        memcpy(m_client, m_in, sizeof(m_in));
+        memcpy(m_ours, m_in, sizeof(m_in));
+        origZ(m_client, nullptr, angle);
+        MatRotateZ_SSE2(m_ours, angle);
+        if (memcmp(m_client, m_ours, sizeof(m_in)) != 0) {
+            Log("[SelfTest] MatRotateZ mismatch at test %d", i);
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
 // Install hooks
 bool InstallMatrixCopySSE2() {
     g_abSubject = AbTest::IsSubject("M2MatrixSimd", &g_abSubject);
@@ -1809,6 +2164,39 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] CBox::Scale hook FAILED");
     }
 
+#if !TEST_DISABLE_MATRIX_ROTATE_SSE2
+    if (!SelfTestMatrixRotate()) {
+        Log("[MatrixSSE2] SelfTestMatrixRotate FAILED, rotation hooks disabled");
+    } else {
+        if (WineSafe_CreateHook((void*)0x004C3300, (void*)Hooked_MatRotateX,
+                                (void**)&pOrigMatRotateX) == MH_OK &&
+            WO_EnableHook((void*)0x004C3300) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("MatRotateX_SSE2", (const void*)&Hooked_MatRotateX);
+            Log("[MatrixSSE2] Hooked CMatrix::RotateX at 0x004C3300 (SSE2 double-precision, verified, 8 callers)");
+        } else {
+            Log("[MatrixSSE2] CMatrix::RotateX hook FAILED");
+        }
+
+        if (WineSafe_CreateHook((void*)0x004C3340, (void*)Hooked_MatRotateY,
+                                (void**)&pOrigMatRotateY) == MH_OK &&
+            WO_EnableHook((void*)0x004C3340) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("MatRotateY_SSE2", (const void*)&Hooked_MatRotateY);
+            Log("[MatrixSSE2] Hooked CMatrix::RotateY at 0x004C3340 (SSE2 double-precision, verified, 9 callers)");
+        } else {
+            Log("[MatrixSSE2] CMatrix::RotateY hook FAILED");
+        }
+
+        if (WineSafe_CreateHook((void*)0x004C3380, (void*)Hooked_MatRotateZ,
+                                (void**)&pOrigMatRotateZ) == MH_OK &&
+            WO_EnableHook((void*)0x004C3380) == MH_OK) {
+            SamplingProfiler::RegisterSelfSymbol("MatRotateZ_SSE2", (const void*)&Hooked_MatRotateZ);
+            Log("[MatrixSSE2] Hooked CMatrix::RotateZ at 0x004C3380 (SSE2 double-precision, verified, 39 callers)");
+        } else {
+            Log("[MatrixSSE2] CMatrix::RotateZ hook FAILED");
+        }
+    }
+#endif
+
     g_matrixInstalled = true;
 #if !TEST_DISABLE_MATRIX_COPY
     return installed == (int)(sizeof(hooks) / sizeof(hooks[0]));
@@ -1852,6 +2240,9 @@ void MatrixCopySSE2_LogStats(void) {
         + (double)g_mattranslate_calls
 #endif
         + (double)g_boxscale_calls
+#if !TEST_DISABLE_MATRIX_ROTATE_SSE2
+        + (double)g_matrotate_x_calls + (double)g_matrotate_y_calls + (double)g_matrotate_z_calls
+#endif
         ;
     if (total == 0.0) {
         Log("[MatrixSSE2] measured and zero: the hooks are in and the client "
@@ -1888,6 +2279,12 @@ void MatrixCopySSE2_LogStats(void) {
 #endif
 #if !TEST_DISABLE_MATRIX_TRANSLATE_SSE2
     Log("[MatrixSSE2]   translate-local %lu", g_mattranslate_calls);
+#endif
+#if !TEST_DISABLE_MATRIX_ROTATE_SSE2
+    Log("[MatrixSSE2]   rotate-x %lu (%lu verified), rotate-y %lu (%lu verified), rotate-z %lu (%lu verified)",
+        g_matrotate_x_calls, g_matrotate_x_agreements,
+        g_matrotate_y_calls, g_matrotate_y_agreements,
+        g_matrotate_z_calls, g_matrotate_z_agreements);
 #endif
 }
 
@@ -1938,6 +2335,15 @@ void ShutdownMatrixCopySSE2() {
 #endif
     MH_DisableHook((void*)0x005FECB0);
     Log("[MatrixSSE2] Stats: BoxScale=%lu (%lu verified)", g_boxscale_calls, g_boxscale_agreements);
+#if !TEST_DISABLE_MATRIX_ROTATE_SSE2
+    MH_DisableHook((void*)0x004C3300);
+    MH_DisableHook((void*)0x004C3340);
+    MH_DisableHook((void*)0x004C3380);
+    Log("[MatrixSSE2] Stats: RotateX=%lu (%lu verified)  RotateY=%lu (%lu verified)  RotateZ=%lu (%lu verified)",
+        g_matrotate_x_calls, g_matrotate_x_agreements,
+        g_matrotate_y_calls, g_matrotate_y_agreements,
+        g_matrotate_z_calls, g_matrotate_z_agreements);
+#endif
 
     Log("[MatrixSSE2] Stats: MatrixCopy=%lu  MatrixIdentity=%lu  MatrixMul=%lu  MatVec3=%lu  MatVec4=%lu",
         g_matcopy_calls, g_matident_calls, g_matmul_calls, g_matvec3_calls, g_matvec4_calls);
