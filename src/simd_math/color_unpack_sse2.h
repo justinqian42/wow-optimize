@@ -3,16 +3,20 @@
 // ============================================================================
 // Module: color_unpack_sse2
 //
-// Hardware SSE2 color unpacking and vector math optimizations:
+// Hardware SSE2 color packing/unpacking and vector math optimizations:
 //   sub_984C90: Color_UnpackBGRA (32-bit BGRA bytes -> 4x float RGBA in [0, 1])
 //   sub_982970: Color_UnpackBGR  (24-bit BGR bytes  -> 3x float RGB  in [0, 1])
+//   sub_48BD20: Color_PackBGRA   (4x float ARGB     -> 32-bit BGRA uint32)
+//   sub_9851A0: Color_PackBGR    (3x float RGB      -> 32-bit BGRA uint32, A=0xFF)
 //   sub_9829B0: Vec3_DominantAxis (C3Vector dominant axis index 0, 1, 2)
+//   sub_9829F0: Vec3_RecessiveAxis (C3Vector recessive axis index 0, 1, 2)
 //
-// Replaces integer stack spills and serialized x87 fild/fmul/fstp sequences
-// with parallel SSE2 integer unpack/shuffle, conversion, and vector multiply.
-// Vec3_DominantAxis evaluates coordinate magnitudes using bitwise IEEE fabs.
+// Replaces integer stack spills, serialized x87 fild/fmul/fstp sequences, and
+// 8 pipeline-flushing fldcw control word manipulations with parallel SSE2
+// integer unpack/pack, conversion, and vector multiply. Coordinate magnitudes
+// are evaluated branchlessly using bitwise IEEE fabs.
 //
-// 100% bit-exact with client x87 output across all 256 possible byte values.
+// 100% bit-exact with client x87 output across all test cases and color ranges.
 // ============================================================================
 
 namespace ColorUnpack {

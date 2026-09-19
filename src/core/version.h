@@ -385,11 +385,13 @@
 // serialized status-word round trips (fnstsw ax) and branch mispredictions.
 #define TEST_DISABLE_AABB_FROM_VERTS_SSE2       0
 
-// SSE2 color unpacking and vector math (sub_984C90 / Color_UnpackBGRA, 12 callers;
-// sub_982970 / Color_UnpackBGR, 6 callers; sub_9829B0 / Vec3_DominantAxis, 8 callers).
-// Unpacks 32-bit BGRA and 24-bit BGR colors into normalized RGBA/RGB floats in parallel
-// using integer unpack/shuffle and SSE conversion/multiply, eliminating stack spills
-// and serialized fild/fmul/fstp operations. Vec3_DominantAxis uses bitwise IEEE fabs.
+// SSE2 color conversion, packing, and vector coordinate extremum math:
+//   sub_984C90 / Color_UnpackBGRA (12 callers), sub_982970 / Color_UnpackBGR (6 callers),
+//   sub_48BD20 / Color_PackBGRA (21 callers), sub_9851A0 / Color_PackBGR (7 callers),
+//   sub_9829B0 / Vec3_DominantAxis (8 callers), sub_9829F0 / Vec3_RecessiveAxis (1 caller).
+// Unpacks/packs 32-bit BGRA and 24-bit BGR colors in parallel using integer unpack/pack
+// and SSE conversion/multiply, eliminating stack spills and 8 pipeline-flushing fldcw
+// instructions. Evaluates coordinate magnitudes branchlessly using bitwise IEEE fabs.
 #define TEST_DISABLE_COLOR_UNPACK_SSE2          0
 
 // Quaternion -> 3x3 rotation matrix (sub_4C1C40), the arithmetic core behind
