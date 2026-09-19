@@ -350,6 +350,9 @@ static void BuildKnownFuncTable() {
         { 0x007F9430,    66, "AABB_Transform" },             // 4x4 matrix * AABB (vectorized by aabb_transform_sse2.cpp)
         { 0x007F93D0,    91, "AABB_Transform3x3" },          // 3x3 matrix * AABB (vectorized by aabb_transform_sse2.cpp)
         { 0x007F9320,   171, "AABB_TransformCore_Arvo" },     // Arvo bounding box transformation core
+        { 0x00714D10,    78, "Vec3_Min" },
+        { 0x00714D70,    78, "Vec3_Max" },
+        { 0x00715130,   100, "CAxisAlignedBox::Union" },
         { 0x007CCE00,   403, "Occluder_TestSphere" },        // sphere occluder culling (vectorized by occluder_sphere_sse2.cpp)
         { 0x007CCFA0,   404, "Occluder_TestPolygon" },       // polygon/mesh occluder culling (vectorized by occluder_sphere_sse2.cpp)
         { 0x007BCC00,   796, "World_VisibilityTraverse" },  // 64x64 tiles, 16x16 cells
@@ -386,6 +389,7 @@ static void BuildKnownFuncTable() {
         { 0x00983AE0,   560, "CFrustum::Translate" },
         { 0x00983D20,    79, "CFrustum::IsSphereVisible" },
         { 0x00983D70,   241, "CFrustum::IsPointVisible" },  // vectorized by frustum_aabb_sse2.cpp
+        { 0x00984860,   198, "AABB_TransformAffine" },
         { 0x00984930,   829, "AABB_FromVertices" },
         { 0x00984C90,    76, "Color_UnpackBGRA" },
         { 0x009851A0,    91, "Color_PackBGR" },

@@ -378,11 +378,14 @@
 // order. Pointer-validated + SEH + shadow verification.
 #define TEST_DISABLE_MATRIX_OPS_SSE2            0
 
-// SSE2 bounding box computation from vertex streams (sub_984930 / AABB_FromVertices,
-// 829 bytes, 10 callers across scene traversal, world culling, model bounding
-// volume calculation, and collision queries). Evaluates component min/max across
-// 3D vertices using parallel 128-bit vector min/max operations, eliminating
-// serialized status-word round trips (fnstsw ax) and branch mispredictions.
+// SSE2 bounding box transformation, vertex bounding, and vector extremum math:
+//   sub_7F9430 / AABB_Transform (4x4 matrix, 22 callers), sub_7F93D0 / AABB_Transform3x3 (3x3 matrix),
+//   sub_984860 / AABB_TransformAffine (math 4x4 matrix, 6 callers: M2 model bounds, terrain WMO, culling),
+//   sub_984930 / AABB_FromVertices (10 callers), sub_715130 / CAxisAlignedBox::Union (17 callers),
+//   sub_714D10 / Vec3_Min (4 callers), sub_714D70 / Vec3_Max (4 callers).
+// Vectorizes 3D bounding box transformation (Jim Arvo's algorithm), union, and coordinate
+// extrema using hardware SSE2 minps/maxps and packed double precision, eliminating serialized
+// status-word round trips (fnstsw ax), nested stack frames, and branch mispredictions.
 #define TEST_DISABLE_AABB_FROM_VERTS_SSE2       0
 
 // SSE2 color conversion, packing, and vector coordinate extremum math:
