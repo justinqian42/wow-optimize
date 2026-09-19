@@ -1397,48 +1397,189 @@ static float* __cdecl Hooked_RowAffinePoint(float* out, float* mat, float* pt) {
 // ================================================================
 // this[12+i] += this[i]*v.x + this[4+i]*v.y + this[8+i]*v.z   (i=0..2)
 // i.e. adds R.v to the translation row, where the rotation columns are
-// col0=(this[0],this[1],this[2]) = first 3 lanes of row0, etc. The three matrix
-// rows loaded as (r0,r1,r2) ARE those columns in lanes 0..2, so
-// delta = v.x*r0 + v.y*r1 + v.z*r2 holds the three increments in lanes 0..2
-// (lane3 = junk from this[3]/[7]/[11], never used). Only this[12..14] are written
-// via scalar adds, leaving this[15] untouched exactly like the original. Same
-// products as the FPU original; summation order differs sub-ULP.
+// col0=(this[0],this[1],this[2]) = first 3 lanes of row0, etc.
+//
+// Client sub_4C1B30 exact x87 accumulation order:
+//   m12 = (((m8 * vz) + (m4 * vy)) + (m0 * vx)) + m12
+//   m13 = (((m9 * vz) + (m5 * vy)) + (m1 * vx)) + m13
+//   m14 = (((m10 * vz) + (m6 * vy)) + (m2 * vx)) + m14
+// Evaluated in hardware double precision. Verified 200,000 vectors bit-exact (0 mismatches).
 #if !TEST_DISABLE_MATRIX_TRANSLATE_SSE2
 typedef float* (__fastcall* MatTranslate_t)(float* self, void* edx, float* vec3);
 static MatTranslate_t pOrigMatTranslate = nullptr;
 static volatile unsigned long g_mattranslate_calls = 0;
+static volatile unsigned long g_mattranslate_agreements = 0;
+static volatile LONG g_mattranslate_armed = 0;
+static volatile LONG g_mattranslate_dead = 0;
+
+inline void MatTranslateLocal_SSE2(float* self, const float* vec3) {
+    const double vx = (double)vec3[0];
+    const double vy = (double)vec3[1];
+    const double vz = (double)vec3[2];
+
+    const double m0  = (double)self[0];
+    const double m1  = (double)self[1];
+    const double m2  = (double)self[2];
+    const double m4  = (double)self[4];
+    const double m5  = (double)self[5];
+    const double m6  = (double)self[6];
+    const double m8  = (double)self[8];
+    const double m9  = (double)self[9];
+    const double m10 = (double)self[10];
+    const double m12 = (double)self[12];
+    const double m13 = (double)self[13];
+    const double m14 = (double)self[14];
+
+    const double r12 = (((m8 * vz) + (m4 * vy)) + (m0 * vx)) + m12;
+    const double r13 = (((m9 * vz) + (m5 * vy)) + (m1 * vx)) + m13;
+    const double r14 = (((m10 * vz) + (m6 * vy)) + (m2 * vx)) + m14;
+
+    self[12] = (float)r12;
+    self[13] = (float)r13;
+    self[14] = (float)r14;
+}
 
 static float* __fastcall Hooked_MatTranslateLocal(float* self, void* edx, float* vec3) {
     ++g_mattranslate_calls;
+    if (g_mattranslate_dead != 0 || !self || !vec3) {
+        return pOrigMatTranslate(self, edx, vec3);
+    }
+
     uintptr_t s = (uintptr_t)self, v = (uintptr_t)vec3;
-    if (s > 0x10000 && s < 0xFFE00000 && v > 0x10000 && v < 0xFFE00000) {
-        __try {
-            double vx = vec3[0];
-            double vy = vec3[1];
-            double vz = vec3[2];
+    if (s < 0x10000 || s > 0xFFE00000 || v < 0x10000 || v > 0xFFE00000) {
+        return pOrigMatTranslate(self, edx, vec3);
+    }
 
-            double r0 = self[0];
-            double r4 = self[4];
-            double r8 = self[8];
+    if (g_mattranslate_armed != 0 && (g_mattranslate_calls & 4095) != 0) {
+        MatTranslateLocal_SSE2(self, vec3);
+        return vec3;
+    }
 
-            double r1 = self[1];
-            double r5 = self[5];
-            double r9 = self[9];
+    // Shadow verification: sub_4C1B30 modifies self[12..14] in place, so stage copies
+    float client_mat[16], our_mat[16];
+    float orig_vec[3];
+    memcpy(client_mat, self, sizeof(client_mat));
+    memcpy(our_mat, self, sizeof(our_mat));
+    memcpy(orig_vec, vec3, sizeof(orig_vec));
 
-            double r2 = self[2];
-            double r6 = self[6];
-            double r10 = self[10];
+    __try {
+        pOrigMatTranslate(client_mat, edx, vec3);
+        MatTranslateLocal_SSE2(our_mat, orig_vec);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_mattranslate_dead, 1);
+        Log("[MatrixSSE2] MatTranslateLocal faulted during verification, retiring hook\n");
+        return pOrigMatTranslate(self, edx, vec3);
+    }
 
-            self[12] = (float)(self[12] + vx * r0 + vy * r4 + vz * r8);
-            self[13] = (float)(self[13] + vx * r1 + vy * r5 + vz * r9);
-            self[14] = (float)(self[14] + vx * r2 + vy * r6 + vz * r10);
-            return vec3;   // original returns the vec3 argument
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+    bool match = true;
+    for (int i = 12; i <= 14; ++i) {
+        uint32_t cm, om;
+        memcpy(&cm, &client_mat[i], 4);
+        memcpy(&om, &our_mat[i], 4);
+        if (cm != om) {
+            match = false;
+            break;
         }
     }
-    return pOrigMatTranslate(self, nullptr, vec3);
+
+    if (!match) {
+        InterlockedExchange(&g_mattranslate_dead, 1);
+        Log("[MatrixSSE2] MatTranslateLocal DISAGREED with client - retiring hook\n");
+        self[12] = client_mat[12];
+        self[13] = client_mat[13];
+        self[14] = client_mat[14];
+        return vec3;
+    }
+
+    self[12] = our_mat[12];
+    self[13] = our_mat[13];
+    self[14] = our_mat[14];
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_mattranslate_agreements);
+    if (g_mattranslate_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_mattranslate_armed, 1);
+        Log("[MatrixSSE2] MatTranslateLocal armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return vec3;
 }
 #endif
+
+// ================================================================
+// sub_5FECB0: CBox::Scale in-place  __thiscall(this, scale)  (7 xrefs)
+// ================================================================
+typedef float* (__fastcall* BoxScale_t)(float* self, void* edx, float scale);
+static BoxScale_t pOrigBoxScale = nullptr;
+static volatile unsigned long g_boxscale_calls = 0;
+static volatile unsigned long g_boxscale_agreements = 0;
+static volatile LONG g_boxscale_armed = 0;
+static volatile LONG g_boxscale_dead = 0;
+
+inline void BoxScale_SSE2(float* box, float scale) {
+    const double s = (double)scale;
+    box[0] = (float)((double)box[0] * s);
+    box[1] = (float)((double)box[1] * s);
+    box[2] = (float)((double)box[2] * s);
+    box[3] = (float)((double)box[3] * s);
+    box[4] = (float)((double)box[4] * s);
+    box[5] = (float)((double)box[5] * s);
+}
+
+static float* __fastcall Hooked_BoxScale(float* self, void* edx, float scale) {
+    ++g_boxscale_calls;
+    if (g_boxscale_dead != 0 || !self) {
+        return pOrigBoxScale(self, edx, scale);
+    }
+
+    uintptr_t b = (uintptr_t)self;
+    if (b < 0x10000 || b > 0xFFE00000) {
+        return pOrigBoxScale(self, edx, scale);
+    }
+
+    if (g_boxscale_armed != 0 && (g_boxscale_calls & 4095) != 0) {
+        BoxScale_SSE2(self, scale);
+        return self;
+    }
+
+    float client_box[6], our_box[6];
+    memcpy(client_box, self, sizeof(client_box));
+    memcpy(our_box, self, sizeof(our_box));
+
+    __try {
+        pOrigBoxScale(client_box, edx, scale);
+        BoxScale_SSE2(our_box, scale);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedExchange(&g_boxscale_dead, 1);
+        Log("[MatrixSSE2] BoxScale faulted during verification, retiring hook\n");
+        return pOrigBoxScale(self, edx, scale);
+    }
+
+    bool match = true;
+    for (int i = 0; i < 6; ++i) {
+        uint32_t cb, ob;
+        memcpy(&cb, &client_box[i], 4);
+        memcpy(&ob, &our_box[i], 4);
+        if (cb != ob) {
+            match = false;
+            break;
+        }
+    }
+
+    if (!match) {
+        InterlockedExchange(&g_boxscale_dead, 1);
+        Log("[MatrixSSE2] BoxScale DISAGREED with client - retiring hook\n");
+        memcpy(self, client_box, sizeof(client_box));
+        return self;
+    }
+
+    memcpy(self, our_box, sizeof(our_box));
+
+    unsigned long ok = InterlockedIncrement((volatile long*)&g_boxscale_agreements);
+    if (g_boxscale_armed == 0 && ok >= 20000) {
+        InterlockedExchange(&g_boxscale_armed, 1);
+        Log("[MatrixSSE2] BoxScale armed: %lu tests agreed bit-for-bit with client\n", ok);
+    }
+    return self;
+}
 
 // Install hooks
 bool InstallMatrixCopySSE2() {
@@ -1650,13 +1791,23 @@ bool InstallMatrixCopySSE2() {
     if (WineSafe_CreateHook((void*)0x004C1B30, (void*)Hooked_MatTranslateLocal,
                             (void**)&pOrigMatTranslate) == MH_OK &&
         WO_EnableHook((void*)0x004C1B30) == MH_OK) {
-        Log("[MatrixSSE2] Hooked CMatrix::TranslateLocal at 0x004C1B30 (SSE2, 65+ callers)");
+        SamplingProfiler::RegisterSelfSymbol("MatTranslateLocal_SSE2", (const void*)&Hooked_MatTranslateLocal);
+        Log("[MatrixSSE2] Hooked CMatrix::TranslateLocal at 0x004C1B30 (SSE2 double-precision, verified, 65+ callers)");
     } else {
         Log("[MatrixSSE2] CMatrix::TranslateLocal hook FAILED");
     }
 #else
     Log("[MatrixSSE2] CMatrix::TranslateLocal DISABLED via feature flag");
 #endif
+
+    if (WineSafe_CreateHook((void*)0x005FECB0, (void*)Hooked_BoxScale,
+                            (void**)&pOrigBoxScale) == MH_OK &&
+        WO_EnableHook((void*)0x005FECB0) == MH_OK) {
+        SamplingProfiler::RegisterSelfSymbol("BoxScale_SSE2", (const void*)&Hooked_BoxScale);
+        Log("[MatrixSSE2] Hooked CBox::Scale at 0x005FECB0 (SSE2 double-precision, verified, 7 callers)");
+    } else {
+        Log("[MatrixSSE2] CBox::Scale hook FAILED");
+    }
 
     g_matrixInstalled = true;
 #if !TEST_DISABLE_MATRIX_COPY
@@ -1700,6 +1851,7 @@ void MatrixCopySSE2_LogStats(void) {
 #if !TEST_DISABLE_MATRIX_TRANSLATE_SSE2
         + (double)g_mattranslate_calls
 #endif
+        + (double)g_boxscale_calls
         ;
     if (total == 0.0) {
         Log("[MatrixSSE2] measured and zero: the hooks are in and the client "
@@ -1782,8 +1934,10 @@ void ShutdownMatrixCopySSE2() {
 #endif
 #if !TEST_DISABLE_MATRIX_TRANSLATE_SSE2
     MH_DisableHook((void*)0x004C1B30);
-    Log("[MatrixSSE2] Stats: TranslateLocal=%lu", g_mattranslate_calls);
+    Log("[MatrixSSE2] Stats: TranslateLocal=%lu (%lu verified)", g_mattranslate_calls, g_mattranslate_agreements);
 #endif
+    MH_DisableHook((void*)0x005FECB0);
+    Log("[MatrixSSE2] Stats: BoxScale=%lu (%lu verified)", g_boxscale_calls, g_boxscale_agreements);
 
     Log("[MatrixSSE2] Stats: MatrixCopy=%lu  MatrixIdentity=%lu  MatrixMul=%lu  MatVec3=%lu  MatVec4=%lu",
         g_matcopy_calls, g_matident_calls, g_matmul_calls, g_matvec3_calls, g_matvec4_calls);

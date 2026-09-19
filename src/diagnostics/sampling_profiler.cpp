@@ -354,6 +354,7 @@ static void BuildKnownFuncTable() {
         // pointer surgery with side effects and wants a careful sitting.
         { 0x00489710,   408, "Node_FindOwnerAndRelink" },
         { 0x005FEC70,    60, "C3Vector::Cross" },
+        { 0x005FECB0,    58, "CBox::Scale" },
         { 0x005FED20,    84, "VectorMatrixRotate" },
         { 0x00821A20,  5658, "M2_DrawBatchBuilder" },
         { 0x00960D20,   154, "Lua_Model_SetLight" },
@@ -366,6 +367,7 @@ static void BuildKnownFuncTable() {
         { 0x009836B0,   535, "RayTriIntersect32" },
         { 0x009839E0,   124, "CFrustum::IsAABBVisible" },
         { 0x00983A60,   124, "CFrustum::IsAABBInside" },
+        { 0x00983AE0,   560, "CFrustum::Translate" },
         { 0x00983D20,    79, "CFrustum::IsSphereVisible" },
         { 0x00983D70,   241, "CFrustum::IsPointVisible" },  // vectorized by frustum_aabb_sse2.cpp
 

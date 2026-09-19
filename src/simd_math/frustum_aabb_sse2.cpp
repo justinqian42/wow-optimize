@@ -93,6 +93,7 @@ constexpr uintptr_t kIsInside  = 0x00983A60;
 constexpr uintptr_t kThresholdInside = 0x00A3FDB8;
 constexpr uintptr_t kIsPointVisible = 0x00983D70;
 constexpr uintptr_t kIsSphereVisible = 0x00983D20;
+constexpr uintptr_t kTranslate       = 0x00983AE0;
 
 constexpr int kPlanes = 6;
 
@@ -108,6 +109,9 @@ isPointVisible_fn orig_IsPointVisible = nullptr;
 
 typedef int (__fastcall* isSphereVisible_fn)(void* frustum, void* edx, const float* sphere);
 isSphereVisible_fn orig_IsSphereVisible = nullptr;
+
+typedef const float* (__fastcall* translate_fn)(float* frustum, void* edx, const float* delta);
+translate_fn orig_Translate = nullptr;
 
 bool g_installed = false;
 bool g_armed     = false;
@@ -131,6 +135,12 @@ unsigned long g_sphereCalls    = 0;
 unsigned long g_sphereVerified = 0;
 unsigned long g_sphereCulled   = 0;
 unsigned long g_sphereVisible  = 0;
+
+bool g_transInstalled  = false;
+bool g_transArmed      = false;
+bool g_transDead       = false;
+unsigned long g_transCalls    = 0;
+unsigned long g_transVerified = 0;
 // Set at init when the A/B harness names this module, so the hot path
 // tests a plain bool instead of calling out on every invocation.
 bool g_abSubject = false;
@@ -622,6 +632,101 @@ int __fastcall Hooked_IsSphereVisible(void* frustum, void* edx, const float* sph
     return r;
 }
 
+inline void EvaluateTranslate(float* frustum, const float* delta) {
+    const double dx = (double)delta[0];
+    const double dy = (double)delta[1];
+    const double dz = (double)delta[2];
+
+    // 8 frustum corners (frustum + 24 to frustum + 47)
+    for (int i = 0; i < 8; ++i) {
+        float* pt = frustum + 24 + i * 3;
+        pt[0] = (float)((double)pt[0] + dx);
+        pt[1] = (float)((double)pt[1] + dy);
+        pt[2] = (float)((double)pt[2] + dz);
+    }
+
+    // 6 frustum planes (frustum + 0 to frustum + 23)
+    // Client sub_983AE0 exact stock x87 accumulation order:
+    // dot = ((Nz * dz) + (Ny * dy)) + (Nx * dx)
+    // new_D = D - dot
+    for (int p = 0; p < 6; ++p) {
+        float* plane = frustum + p * 4;
+        const double nz_dz = (double)plane[2] * dz;
+        const double ny_dy = (double)plane[1] * dy;
+        const double nx_dx = (double)plane[0] * dx;
+        const double dot = (nz_dz + ny_dy) + nx_dx;
+        plane[3] = (float)((double)plane[3] - dot);
+    }
+
+    // 2 center points (frustum + 48 to frustum + 53)
+    for (int i = 0; i < 2; ++i) {
+        float* pt = frustum + 48 + i * 3;
+        pt[0] = (float)((double)pt[0] + dx);
+        pt[1] = (float)((double)pt[1] + dy);
+        pt[2] = (float)((double)pt[2] + dz);
+    }
+}
+
+__declspec(noinline)
+static const float* VerifyAgainstClientTranslate(float* frustum, void* edx, const float* delta) {
+    float theirs[54];
+    float mine[54];
+    memcpy(theirs, frustum, sizeof(theirs));
+    memcpy(mine, frustum, sizeof(mine));
+
+    __try {
+        EvaluateTranslate(mine, delta);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return orig_Translate(frustum, edx, delta);
+    }
+
+    orig_Translate(theirs, edx, delta);
+    g_transVerified++;
+
+    bool same = true;
+    for (int i = 0; i < 54; ++i) {
+        uint32_t bt, bm;
+        memcpy(&bt, &theirs[i], 4);
+        memcpy(&bm, &mine[i], 4);
+        if (bt != bm) {
+            same = false;
+            break;
+        }
+    }
+
+    if (!same) {
+        g_transDead = true;
+        Verdict::Add(Verdict::Bad,
+                     "FrustumAabb Translate disagreed with client and retired itself");
+        Log("[FrustumAabb] Translate DISAGREED with client after %lu calls - retired for session\n",
+            g_transVerified);
+        memcpy(frustum, theirs, sizeof(theirs));
+        return delta;
+    }
+
+    if (!g_transArmed && g_transVerified >= kVerifyFirst) {
+        g_transArmed = true;
+        Log("[FrustumAabb] Translate armed: %lu calls agreed bit-for-bit with client.", g_transVerified);
+    }
+
+    memcpy(frustum, mine, sizeof(mine));
+    return delta;
+}
+
+const float* __fastcall Hooked_Translate(float* frustum, void* edx, const float* delta) {
+    ++g_transCalls;
+    if (g_transDead || !frustum || !delta) {
+        return orig_Translate(frustum, edx, delta);
+    }
+
+    if (!g_transArmed || (g_transCalls & kResampleMask) == 0) {
+        return VerifyAgainstClientTranslate(frustum, edx, delta);
+    }
+
+    EvaluateTranslate(frustum, delta);
+    return delta;
+}
+
 bool Init() {
     if (!Config::g_settings.OptFrustumAabb) return true;
 
@@ -658,6 +763,7 @@ bool Init() {
                                     (void**)&orig_IsInside) == MH_OK) {
                 if (WO_EnableHook((void*)kIsInside) == MH_OK) {
                     g_insideInstalled = true;
+                    SamplingProfiler::RegisterSelfSymbol("FrustumInside_SSE2", (const void*)&Hooked_IsInside);
                     Log("[FrustumAabb] ACTIVE on CFrustum::IsAABBInside (0x%08X)", (unsigned)kIsInside);
                 }
             }
@@ -687,6 +793,22 @@ bool Init() {
                     g_sphereInstalled = true;
                     SamplingProfiler::RegisterSelfSymbol("FrustumSphere_SSE2", (const void*)&Hooked_IsSphereVisible);
                     Log("[FrustumAabb] ACTIVE on CFrustum::IsSphereVisible (0x%08X)", (unsigned)kIsSphereVisible);
+                }
+            }
+        }
+    }
+
+    if (!IsBadReadPtr((void*)kTranslate, 16)) {
+        const unsigned char* p5 = (const unsigned char*)kTranslate;
+        if (p5[0] == 0x55 && p5[1] == 0x8B && p5[2] == 0xEC) {
+            if (WineSafe_CreateHook((void*)kTranslate, (void*)Hooked_Translate,
+                                    (void**)&orig_Translate) == MH_OK) {
+                if (WO_EnableHook((void*)kTranslate) == MH_OK) {
+                    g_transInstalled = true;
+                    SamplingProfiler::RegisterSelfSymbol("FrustumTranslate_SSE2", (const void*)&Hooked_Translate);
+                    Log("[FrustumAabb] ACTIVE on CFrustum::Translate (0x%08X), 560 bytes, "
+                        "translates 10 points and updates 6 plane equations with double-precision SSE2.",
+                        (unsigned)kTranslate);
                 }
             }
         }
@@ -764,6 +886,12 @@ void LogStats() {
             g_sphereCalls, g_sphereCulled, culled_pct, g_sphereVerified,
             g_sphereDead ? " - RETIRED on a disagreement" : (g_sphereArmed ? "" : " - still verifying"));
     }
+
+    if (g_transInstalled && g_transCalls > 0) {
+        Log("[FrustumAabb] %lu translate calls, %lu verified against client%s",
+            g_transCalls, g_transVerified,
+            g_transDead ? " - RETIRED on a disagreement" : (g_transArmed ? "" : " - still verifying"));
+    }
 }
 
 void Shutdown() {
@@ -771,6 +899,7 @@ void Shutdown() {
     if (g_insideInstalled) MH_DisableHook((void*)kIsInside);
     if (g_pointInstalled) MH_DisableHook((void*)kIsPointVisible);
     if (g_sphereInstalled) MH_DisableHook((void*)kIsSphereVisible);
+    if (g_transInstalled) MH_DisableHook((void*)kTranslate);
 }
 
 }  // namespace FrustumAabb

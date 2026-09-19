@@ -360,7 +360,7 @@
 // this[8+i]). 3 dot products vectorized; only this[12..14] are written (this[15]
 // preserved, never stored). Same products as the FPU original (summation order
 // sub-ULP). In-place accumulate -> own isolation flag. Pointer-validated + SEH.
-#define TEST_DISABLE_MATRIX_TRANSLATE_SSE2         1
+#define TEST_DISABLE_MATRIX_TRANSLATE_SSE2         0
 
 // Quaternion -> 3x3 rotation matrix (sub_4C1C40), the arithmetic core behind
 // all three of the client's quaternion wrappers. Runs once per animated bone
