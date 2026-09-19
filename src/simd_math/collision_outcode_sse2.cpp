@@ -73,6 +73,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -414,6 +415,7 @@ bool Init() {
     }
 
     g_installed = true;
+    SamplingProfiler::RegisterSelfSymbol("CollisionOutcode_SSE2", (const void*)&CollisionOutcode_Hooked);
     Log("[CollisionOutcode] ACTIVE on sub_7C7230 (0x%08X), the collision reject "
         "pass - 3.8%% of executing time in a corrected profile. Six x87 compares "
         "per vertex replaced by six packed compares per four vertices. The bounds "

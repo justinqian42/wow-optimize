@@ -348,14 +348,19 @@ static void BuildKnownFuncTable() {
         // execution. A candidate for an index rather than a search, but it is
         // pointer surgery with side effects and wants a careful sitting.
         { 0x00489710,   408, "Node_FindOwnerAndRelink" },
+        { 0x005FEC70,    60, "C3Vector::Cross" },
         { 0x00821A20,  5658, "M2_DrawBatchBuilder" },
         { 0x00960D20,   154, "Lua_Model_SetLight" },
         { 0x00979110,    84, "CQuaternion::Normalize" },
         { 0x00981D40,   936, "ParticleSpawn_Init" },
+        { 0x00982400,    85, "CQuaternion::FromAngleAxis" },
+        { 0x00982460,   268, "CQuaternion::Slerp" },
+        { 0x00982630,   111, "Quat_Lerp" },
         { 0x00983490,   537, "RayTriIntersect16" },
         { 0x009836B0,   535, "RayTriIntersect32" },
         { 0x009839E0,   124, "CFrustum::IsAABBVisible" },
         { 0x00983A60,   124, "CFrustum::IsAABBInside" },
+        { 0x00983D20,    79, "CFrustum::IsSphereVisible" },
         { 0x00983D70,   241, "CFrustum::IsPointVisible" },  // vectorized by frustum_aabb_sse2.cpp
 
         // --- CRT string/memory (static) ---

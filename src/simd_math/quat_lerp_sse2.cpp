@@ -79,6 +79,7 @@
 #include "config.h"
 #include "ab_test.h"
 #include "session_verdict.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -286,6 +287,7 @@ bool Init() {
     }
 
     g_installed = true;
+    SamplingProfiler::RegisterSelfSymbol("QuatLerp_SSE2", (const void*)&Hooked_QuatLerp);
     Log("[QuatLerp] ACTIVE on sub_982630, the per-bone quaternion interpolation. "
         "Two components at a time in double rather than one at a time on the "
         "x87 stack, which makes it bit-identical to the client rather than "

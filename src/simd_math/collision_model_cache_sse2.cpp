@@ -8,6 +8,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -142,6 +143,7 @@ bool Init() {
     }
 
     g_installed = true;
+    SamplingProfiler::RegisterSelfSymbol("CollisionModelCache_SSE2", (const void*)&Hooked_FindModel);
     Log("[CollisionModelCache] ACTIVE on sub_79B1F0 (0x%08X) - 8-way associative BSP collision model cache lookup. "
         "Replaced 8-iteration scalar loop with dual 128-bit SSE2 vector comparison and bitscan. "
         "Verifying first %lu calls, then 1 in %d.\n",

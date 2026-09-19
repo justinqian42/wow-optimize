@@ -118,6 +118,7 @@
 #include "ab_test.h"
 #include "session_verdict.h"
 #include "flight_recorder.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -431,6 +432,9 @@ bool Init() {
 
     g_abSubject = AbTest::IsSubject("BoneMatrixUpload", &g_abSubject);
     g_frSlot    = FlightRecorder::RegisterSlot("bones");
+
+    SamplingProfiler::RegisterSelfSymbol("BoneMatrixUpload_RunA", (const void*)&BoneMatrixUpload_RunA);
+    SamplingProfiler::RegisterSelfSymbol("BoneMatrixUpload_RunB", (const void*)&BoneMatrixUpload_RunB);
 
     Log("[BoneUpload] ACTIVE on %d of %d bone matrix upload loops. The one in "
         "sub_829BA0 is 3.35%% of executing time in the corrected profile and the "

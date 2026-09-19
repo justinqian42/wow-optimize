@@ -7,6 +7,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -186,6 +187,7 @@ bool Init() {
     }
 
     g_installed = true;
+    SamplingProfiler::RegisterSelfSymbol("OccluderSphere_SSE2", (const void*)&Hooked_TestSphere);
     Log("[OccluderSphere] ACTIVE on sub_7CCE00 (0x%08X) - convex occluder volume sphere culling. "
         "Replaced scalar x87 plane distances with 4-wide transposed SSE2 vector evaluations. "
         "Verifying first %lu calls, then 1 in %d.\n",

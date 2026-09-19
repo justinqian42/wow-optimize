@@ -148,6 +148,7 @@
 #include "version.h"
 #include "config.h"
 #include "ab_test.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -544,6 +545,7 @@ bool Init() {
         return false;
     }
     g_entryPatched = true;
+    SamplingProfiler::RegisterSelfSymbol("CollisionRayOutcode_SSE2", (const void*)&EntryThunk);
 
     g_abSubject = AbTest::IsSubject("CollisionRayOutcode", &g_abSubject);
 

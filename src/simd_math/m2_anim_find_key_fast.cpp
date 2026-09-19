@@ -6,6 +6,7 @@
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
+#include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -273,6 +274,7 @@ bool Init() {
     }
 
     g_installed = true;
+    SamplingProfiler::RegisterSelfSymbol("M2AnimFindKey_Fast", (const void*)&Hooked_AnimTrackFindKey);
     Log("[M2AnimFindKey] ACTIVE on sub_8284D0 (0x%08X) - M2 animation track keyframe search. "
         "Replaced scalar x87 float divisions and store stalls with fast integer search and SSE math. "
         "Verifying first %lu calls, then 1 in %d.\n",

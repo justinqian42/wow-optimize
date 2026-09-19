@@ -17,6 +17,7 @@
 #include "core/version.h"
 #include "core/config.h"
 #include "simd_math/hooks_simd.h"
+#include "diagnostics/sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -1339,6 +1340,7 @@ bool InstallSimdHooks(void) {
             // The message came from the self-test; nothing to add.
         } else if (WineSafe_CreateHook((void*)ADDR_WOW_QUAT_NORMALIZE, (void*)Hooked_QuatNormalize, (void**)&orig_QuatNormalize) == MH_OK) {
             WO_EnableHook((void*)ADDR_WOW_QUAT_NORMALIZE);
+            SamplingProfiler::RegisterSelfSymbol("QuatNormalize_SSE2", (const void*)&Hooked_QuatNormalize);
             Log("[SimdHooks] Quaternion normalize hook ACTIVE");
         } else {
             Log("[SimdHooks] Quaternion normalize hook FAILED");
@@ -1463,6 +1465,7 @@ bool InstallSimdHooks(void) {
 #if !TEST_DISABLE_VEC3_CROSS_SSE2
     if (WineSafe_CreateHook((void*)0x005FEC70, (void*)Hooked_Vec3Cross, (void**)&orig_Vec3Cross) == MH_OK) {
         WO_EnableHook((void*)0x005FEC70);
+        SamplingProfiler::RegisterSelfSymbol("Vec3Cross_SSE2", (const void*)&Hooked_Vec3Cross);
         Log("[SimdHooks] C3Vector::Cross hook ACTIVE");
     }
 #else
@@ -1473,6 +1476,7 @@ bool InstallSimdHooks(void) {
 #if !TEST_DISABLE_SPHERE_VISIBLE_SSE2
     if (WineSafe_CreateHook((void*)0x00983D20, (void*)Hooked_IsSphereVisible, (void**)&orig_IsSphereVisible) == MH_OK) {
         WO_EnableHook((void*)0x00983D20);
+        SamplingProfiler::RegisterSelfSymbol("FrustumSphere_SSE2", (const void*)&Hooked_IsSphereVisible);
         Log("[SimdHooks] CFrustum::IsSphereVisible hook ACTIVE");
     }
 #else
@@ -1483,6 +1487,7 @@ bool InstallSimdHooks(void) {
 #if !TEST_DISABLE_FROM_ANGLE_AXIS_SSE2
     if (WineSafe_CreateHook((void*)0x00982400, (void*)Hooked_FromAngleAxis, (void**)&orig_FromAngleAxis) == MH_OK) {
         WO_EnableHook((void*)0x00982400);
+        SamplingProfiler::RegisterSelfSymbol("QuatFromAngleAxis_SSE2", (const void*)&Hooked_FromAngleAxis);
         Log("[SimdHooks] CQuaternion::FromAngleAxis hook ACTIVE");
     }
 #else
@@ -1493,6 +1498,7 @@ bool InstallSimdHooks(void) {
 #if !TEST_DISABLE_QUAT_SLERP_SSE2
     if (WineSafe_CreateHook((void*)0x00982460, (void*)Hooked_QuatSlerp, (void**)&orig_QuatSlerp) == MH_OK) {
         WO_EnableHook((void*)0x00982460);
+        SamplingProfiler::RegisterSelfSymbol("QuatSlerp_SSE2", (const void*)&Hooked_QuatSlerp);
         Log("[SimdHooks] CQuaternion::Slerp hook ACTIVE");
     }
 #else
