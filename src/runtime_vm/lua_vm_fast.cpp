@@ -2,15 +2,32 @@
 // The client's Lua interpreter, sub_857CA0, transcribed instruction by
 // instruction from its disassembly, with the string-key table lookup inlined.
 //
-// Why an interpreter at all. Every Lua line an addon runs passes through this
-// function, and the shape of the client's own dispatch makes two things cost
-// more than they have to. A global read (OP_GETGLOBAL) and a method fetch
-// (OP_SELF) call luaV_gettable, which calls luaH_get, which dispatches on the
-// key type and calls luaH_getstr - and in this DLL both of those are hooked, so
-// the chain is longer still. The lookup itself is six instructions: the node
-// array at table+0x14, the index (2^table[0x0B] - 1) & string[0x0C], and a walk
-// of the chain at node+0x20 comparing the key at node+0x10. This runs it in
-// place and only calls the client when the answer is not a plain hit.
+// What this is for, stated as what it removes. A global read (OP_GETGLOBAL), a
+// table read (OP_GETTABLE) and a method fetch (OP_SELF) each reach their value
+// through three nested calls, read off the client:
+//
+//     luaV_gettable  0x00857250   frame, four arguments, a loop for the
+//                                 non-table case, then
+//     luaH_get       0x0085C470   frame, two arguments, a dispatch on the key
+//                                 type, then
+//     luaH_getstr    0x0085C430   frame, two arguments, and the ten
+//                                 instructions that are the actual work:
+//                                 nodes at table+0x14, index
+//                                 (2^table[0x0B] - 1) & string[0x0C], a walk of
+//                                 the chain at node+0x20 comparing the key at
+//                                 node+0x10.
+//
+// Three prologues and eight argument pushes to reach ten instructions. This runs
+// those ten in place and calls the client only when the answer is not a plain
+// hit - a miss, a nil value, a non-table, a key that is not a string.
+//
+// What it costs, so the trade is on the page: one trampoline and one prologue
+// per entry to the interpreter, which is per Lua call frame rather than per
+// opcode, and whatever difference there is between this switch and the client's
+// own jump table on the other thirty-five opcodes, which run unchanged. The
+// saving lands on three opcodes and the cost lands on all of them, so whether
+// it is a gain at all is an open question. Nothing here answers it: that is
+// what the A/B subject is for.
 //
 // What is NOT attempted: compiling anything. There is no JIT here, and the
 // client's Lua is not stock Lua - the layout is shifted by four and every
