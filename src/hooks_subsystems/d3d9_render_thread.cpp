@@ -589,6 +589,11 @@ static HRESULT WINAPI Hooked_Clear(IDirect3DDevice9* device, DWORD Count, const 
 }
 
 bool Init() {
+    if (!Config::g_settings.OptD3d9RenderThread) {
+        Log("[D3D9RenderThread] DISABLED via configuration");
+        return true;
+    }
+
     if (!g_commandQueue) {
         g_commandQueue = (RenderCommand*)VirtualAlloc(
             nullptr, sizeof(RenderCommand) * RING_BUFFER_SIZE,
@@ -603,10 +608,6 @@ bool Init() {
         Log("[D3D9RenderThread] Could not commit the command queue and constant "
             "pool - disabled");
         return false;
-    }
-    if (!Config::g_settings.OptD3d9RenderThread) {
-        Log("[D3D9RenderThread] DISABLED via configuration");
-        return true;
     }
 
     g_renderThreadShutdown = false;
