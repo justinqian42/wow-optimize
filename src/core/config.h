@@ -503,6 +503,10 @@ namespace Config {
         // after its distance pass and leaves a real clip to the client. Checked
         // against the client per call before it takes over; opt-in until run.
         bool OptCollisionPolyClip = false;
+        // The cloud texture build: skips a pass whose inputs repeat a pass that
+        // built the same rows, after proving on live data that the rebuild came
+        // out byte for byte identical. Measures whether that ever happens.
+        bool OptSkyTextureReuse = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
