@@ -89,6 +89,8 @@ namespace {
 
 constexpr uintptr_t kIsVisible = 0x009839E0;
 constexpr uintptr_t kThreshold = 0x00AA2E74;
+constexpr uintptr_t kIsInside  = 0x00983A60;
+constexpr uintptr_t kThresholdInside = 0x00A3FDB8;
 
 constexpr int kPlanes = 6;
 
@@ -96,8 +98,17 @@ constexpr int kPlanes = 6;
 typedef int (__fastcall* isVisible_fn)(void* frustum, void* edx, void* aabb);
 isVisible_fn orig_IsVisible = nullptr;
 
+typedef int (__fastcall* isInside_fn)(void* frustum, void* edx, void* aabb);
+isInside_fn orig_IsInside = nullptr;
+
 bool g_installed = false;
 bool g_armed     = false;
+bool g_insideInstalled = false;
+bool g_insideArmed     = false;
+bool g_insideDead      = false;
+unsigned long g_insideCalls = 0;
+unsigned long g_insideVerified = 0;
+double g_thresholdInside = 0.0;
 // Set at init when the A/B harness names this module, so the hot path
 // tests a plain bool instead of calling out on every invocation.
 bool g_abSubject = false;
@@ -293,6 +304,34 @@ inline int Evaluate(void* frustum, void* aabb) {
     return 3;
 }
 
+inline int EvaluateInside(void* frustum, void* aabb) {
+    const float* base = (const float*)frustum;
+    const float* mn   = (const float*)aabb;
+    const float* mx   = mn + 3;
+
+    for (int i = 0; i < kPlanes; i++) {
+        const float* pl = base + 4 * i;
+
+        __m128d cxy;
+        double  cz;
+        Corner(mn, mx, pl, &cxy, &cz);
+
+        __m128d pxy  = _mm_cvtps_pd(_mm_castpd_ps(_mm_load_sd((const double*)pl)));
+        __m128d prod = _mm_mul_pd(pxy, cxy);
+
+        double xterm, yterm;
+        _mm_storel_pd(&xterm, prod);
+        _mm_storeh_pd(&yterm, prod);
+
+        double d = (((double)pl[2] * cz + yterm) + xterm) + (double)pl[3];
+
+        if (d > g_thresholdInside) {
+            return 0;
+        }
+    }
+    return 3;
+}
+
 }  // namespace
 
 // The checked path, kept out of line so the hook itself carries no exception
@@ -382,6 +421,42 @@ int __fastcall Hooked_IsVisible(void* frustum, void* edx, void* aabb) {
     return r;
 }
 
+__declspec(noinline)
+static int VerifyAgainstClientInside(void* frustum, void* edx, void* aabb) {
+    int mine;
+    __try {
+        mine = EvaluateInside(frustum, aabb);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return orig_IsInside(frustum, edx, aabb);
+    }
+    int theirs = orig_IsInside(frustum, edx, aabb);
+    g_insideVerified++;
+
+    if (mine != theirs) {
+        g_insideDead = true;
+        Verdict::Add(Verdict::Bad,
+                     "FrustumAabb IsInside disagreed with the client and retired itself");
+        Log("[FrustumAabb] IsInside DISAGREED with client after %lu tests - retired for session "
+            "(client=%d, sse2=%d)", g_insideVerified, theirs, mine);
+        return theirs;
+    }
+    if (!g_insideArmed && g_insideVerified >= kVerifyFirst) {
+        g_insideArmed = true;
+        Log("[FrustumAabb] IsInside armed: %lu tests agreed with client.", g_insideVerified);
+    }
+    return theirs;
+}
+
+int __fastcall Hooked_IsInside(void* frustum, void* edx, void* aabb) {
+    ++g_insideCalls;
+    if (g_insideDead || !frustum || !aabb) return orig_IsInside(frustum, edx, aabb);
+
+    if (!g_insideArmed || (g_insideCalls & kResampleMask) == 0)
+        return VerifyAgainstClientInside(frustum, edx, aabb);
+
+    return EvaluateInside(frustum, aabb);
+}
+
 bool Init() {
     if (!Config::g_settings.OptFrustumAabb) return true;
 
@@ -408,6 +483,20 @@ bool Init() {
     if (WO_EnableHook((void*)kIsVisible) != MH_OK) {
         Log("[FrustumAabb] hook created but could not be enabled");
         return false;
+    }
+
+    if (!IsBadReadPtr((void*)kIsInside, 16) && !IsBadReadPtr((void*)kThresholdInside, 4)) {
+        const unsigned char* p2 = (const unsigned char*)kIsInside;
+        if (p2[0] == 0x55 && p2[1] == 0x8B && p2[2] == 0xEC && p2[3] == 0x83) {
+            g_thresholdInside = (double)*(const float*)kThresholdInside;
+            if (WineSafe_CreateHook((void*)kIsInside, (void*)Hooked_IsInside,
+                                    (void**)&orig_IsInside) == MH_OK) {
+                if (WO_EnableHook((void*)kIsInside) == MH_OK) {
+                    g_insideInstalled = true;
+                    Log("[FrustumAabb] ACTIVE on CFrustum::IsAABBInside (0x%08X)", (unsigned)kIsInside);
+                }
+            }
+        }
     }
 
     g_abSubject = AbTest::IsSubject("FrustumAabb", &g_abSubject);
@@ -463,10 +552,17 @@ void LogStats() {
         Log("[Wrong] [FrustumAabb] more tests came back visible than were run. "
             "That cannot happen, and it means these two counters are no longer "
             "being counted at the same boundary.");
+
+    if (g_insideInstalled && g_insideCalls > 0) {
+        Log("[FrustumAabb] %lu inside tests, %lu verified against client%s",
+            g_insideCalls, g_insideVerified,
+            g_insideDead ? " - RETIRED on a disagreement" : (g_insideArmed ? "" : " - still verifying"));
+    }
 }
 
 void Shutdown() {
     if (g_installed) MH_DisableHook((void*)kIsVisible);
+    if (g_insideInstalled) MH_DisableHook((void*)kIsInside);
 }
 
 }  // namespace FrustumAabb

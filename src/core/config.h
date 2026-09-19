@@ -349,7 +349,7 @@ namespace Config {
         // worst divergence measured over 12 million components is 2.98e-07,
         // under three float epsilon, and the result is renormalised right after.
         // Opt-in, and it verifies against the client before trusting itself.
-        bool OptQuatLerpSse2 = false;
+        bool OptQuatLerpSse2 = true;
         // 88% of the chunks this client compiles are source it already compiled
         // this session - 332 MB of repeated parsing, measured. A repeat reuses
         // the compiled Proto; the client still builds the closure, environment
@@ -387,16 +387,16 @@ namespace Config {
         // compares per four. The bounds are plain floats with no arithmetic
         // applied, so this is bit-exact rather than close. Opt-in, and it
         // predicts the client's whole output and compares before trusting itself.
-        bool OptCollisionOutcode = false;
-        bool OptCollisionRayOutcode = false;
-        bool OptRayTriangleSse2 = false;
+        bool OptCollisionOutcode = true;
+        bool OptCollisionRayOutcode = true;
+        bool OptRayTriangleSse2 = true;
         // The bone matrix upload loop inside sub_829BA0, 3.35% of executing
         // time and the largest entry in the corrected profile with nothing
         // shipped against it. Twelve x87 load/store pairs a bone transpose a
         // 4x4 into three vec4s; four loads, seven shuffles and three stores do
         // the same. No arithmetic anywhere in it, so bit-exact by construction.
         // Opt-in, and it does the first bones both ways and compares.
-        bool OptBoneMatrixUpload = false;
+        bool OptBoneMatrixUpload = true;
         // The per-vertex and per-index fill in the client's UI batch draw,
         // sub_484B00. Off by default and experimental; it predicts batches and
         // compares them with what the client writes before it takes over.
@@ -448,7 +448,7 @@ namespace Config {
         // become two packed compares and one movemask. No arithmetic in it at
         // all, so bit-exact rather than close. Opt-in, and it checks itself
         // against the client before it stops calling it.
-        bool OptAabbOverlap = false;
+        bool OptAabbOverlap = true;
         // The bone rotation track (sub_828680), run once per animated bone per
         // frame from the largest entry in the main-thread profile. Keyframes are
         // four uint16 expanded as v * K - 1.0, and x86 has no register path from
@@ -456,7 +456,7 @@ namespace Config {
         // component - up to sixteen times a call. Packed double rounds where the
         // client rounds, so this is bit-exact. Opt-in, and it compares all
         // twenty-four output bytes against the client before trusting itself.
-        bool OptAnimQuatUnpack = false;
+        bool OptAnimQuatUnpack = true;
         // The Lua pool free (sub_855670). Every block returned to the client's
         // own Lua pool makes it walk that pool's chunks, two dependent loads
         // each, until one contains the pointer. Two tester freeze samples landed
@@ -467,21 +467,21 @@ namespace Config {
         // them inside the largest entry in the main-thread profile, against one
         // for the quaternion track. Opt-in, and it compares all twenty output
         // bytes against the client before trusting itself.
-        bool OptAnimVec3Track = false;
+        bool OptAnimVec3Track = true;
         // The render batch comparator (sub_824B70), 2.44% of executing time in
         // an uncapped tester profile. It derives one 16-bit key through five
         // dependent loads on every comparison inside a sort. Opt-in; the
         // comparator is pure, so both answers are simply compared.
-        bool OptM2SortKey = false;
+        bool OptM2SortKey = true;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
         // both answers are simply compared.
-        bool OptFrustumAabb = false;
+        bool OptFrustumAabb = true;
         // The segment/box test (sub_7F9480), 0.88% of executing time. The
         // profile's weight is on a `test ah` waiting for an `fnstsw ax` - the
         // x87 way of branching on a float compare, ten times over. Opt-in.
-        bool OptSegmentAabb = false;
+        bool OptSegmentAabb = true;
         // luaH_get (sub_85C470), 0.67% of executing time, almost all of it
         // deciding where to hand off. Answering "is this key an integer" costs
         // three memory round-trips and an fnstsw there. Opt-in; read-only, so
