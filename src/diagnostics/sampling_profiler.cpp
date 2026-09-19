@@ -363,6 +363,8 @@ static void BuildKnownFuncTable() {
         { 0x00982400,    85, "CQuaternion::FromAngleAxis" },
         { 0x00982460,   268, "CQuaternion::Slerp" },
         { 0x00982630,   111, "Quat_Lerp" },
+        { 0x00982FB0,   283, "RayPlaneIntersect" },
+        { 0x009830D0,   957, "PointInPolygon2D" },
         { 0x00983490,   537, "RayTriIntersect16" },
         { 0x009836B0,   535, "RayTriIntersect32" },
         { 0x009839E0,   124, "CFrustum::IsAABBVisible" },
