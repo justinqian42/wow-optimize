@@ -370,9 +370,11 @@
 #define TEST_DISABLE_MATRIX_ROTATE_SSE2         0
 
 // SSE2 CMatrix::MultiplyInPlace (sub_4C2370, 27 callers), CMatrix::ScaleLocal
-// (sub_4C1B90, 18 callers), and CMatrix::CreateRotateZ (sub_4C3290, 13 callers).
-// Vectorizes in-place 4x4 matrix multiplication, 3-axis local scaling, and
-// Z-rotation matrix generation in IEEE double precision matching stock accumulation
+// (sub_4C1B90, 18 callers), CMatrix::Scale3x3 (sub_4C1BF0, 36 callers),
+// CMatrix::CreateRotateX (sub_4C31B0, 8 callers), CMatrix::CreateRotateY
+// (sub_4C3220, 8 callers), and CMatrix::CreateRotateZ (sub_4C3290, 13 callers).
+// Vectorizes in-place 4x4 matrix multiplication, 3-axis and uniform scaling,
+// and rotation matrix generation in IEEE double precision matching stock accumulation
 // order. Pointer-validated + SEH + shadow verification.
 #define TEST_DISABLE_MATRIX_OPS_SSE2            0
 
