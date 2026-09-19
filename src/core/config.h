@@ -343,7 +343,7 @@ namespace Config {
         // from the table header on every node of the chain. 2.22% of executing
         // time in a CPU-bound profile. Verifies against the client and retires
         // on one disagreement, so it is opt-in until a log shows it agreeing.
-        bool OptObjMgrFindFast = false;
+        bool OptObjMgrFindFast = true;
         // The per-bone quaternion interpolation (sub_982630), four components at
         // once instead of one at a time on the x87 stack. Not bit-exact: the
         // worst divergence measured over 12 million components is 2.98e-07,
@@ -375,7 +375,7 @@ namespace Config {
         // (sub_4A81B0, 674 call sites). Four Lua API calls replaced by direct
         // reads, including the taint move lua_rawgeti performs. Opt-in, and it
         // checks itself against the client before trusting itself.
-        bool OptLuaThisFast = false;
+        bool OptLuaThisFast = true;
         // Animating models is 3.68 ms of a 24.5 ms frame in raid content, and no
         // single function in it exceeds 0.4% of self time, so only doing less of
         // it can help. Above a model budget each model updates every Nth frame
