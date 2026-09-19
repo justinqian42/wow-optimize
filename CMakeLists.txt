@@ -175,6 +175,8 @@ add_library(wow_optimize SHARED
     src/runtime_vm/lua_vm_fast.cpp
     src/runtime_vm/lua_vm_fast.h
     src/simd_math/m2_matrix_slot_sse2.cpp
+    src/simd_math/m2_batch_matrix_sse2.cpp
+    src/simd_math/m2_batch_matrix_sse2.h
     src/hooks_subsystems/m2_anim_stride.cpp
     src/hooks_subsystems/m2_anim_reuse.cpp
     src/allocators/mimalloc_high_arena.cpp

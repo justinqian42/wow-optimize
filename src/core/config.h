@@ -582,6 +582,9 @@ namespace Config {
         // with four SSE2 moves each. No arithmetic, so the bytes written are
         // the bytes read.
         bool OptM2MatrixSlotSse2 = true;
+        // Replaces serialized sixteen-float matrix setup copies in sub_823130
+        // (M2 batch render pass setup) with four SSE2 vector moves each.
+        bool OptM2BatchMatrixSse2 = true;
         // Holds a distant model's skeleton for a frame by taking the
         // client's own no-bones branch out of the bone loop. The tail still
         // runs, so materials and attachments keep animating.

@@ -57,6 +57,7 @@
 #include "particle_fill_sse2.h"
 #include "lua_vm_fast.h"
 #include "m2_matrix_slot_sse2.h"
+#include "m2_batch_matrix_sse2.h"
 #include "m2_anim_stride.h"
 #include "m2_anim_reuse.h"
 #include "mimalloc_high_arena.h"
@@ -8458,6 +8459,8 @@ static DWORD WINAPI MainThread(LPVOID param) {
 
     Log("--- M2 Matrix Slot Copy (SSE2) ---");
     M2MatrixSlot::Install();
+    Log("--- M2 Batch Matrix Setup (SSE2) ---");
+    M2BatchMatrix::Install();
 
     Log("--- M2 Animation Stride ---");
     M2AnimStride::Install();
@@ -11551,6 +11554,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();
             M2MatrixSlot::Shutdown();
+            M2BatchMatrix::Shutdown();
             M2AnimStride::Shutdown();
             M2AnimReuse::Shutdown();
             SamplingProfiler::Shutdown();

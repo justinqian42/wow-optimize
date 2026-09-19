@@ -316,7 +316,7 @@ static void BuildKnownFuncTable() {
         // Each holds a run of pure fld/fstp with no arithmetic between - the one
         // shape that vectorises with no precision argument at all. See
         // m2_matrix_slot_sse2.cpp for what claiming one looks like.
-        { 0x00823130,  2909, "PureFloatMove_sub823130" },   // 32/32 block at 0x008236B3
+        { 0x00823130,  2909, "PureFloatMove_sub823130" },   // 32/32 block at 0x008236B3 (vectorized by m2_batch_matrix_sse2.cpp)
         { 0x008EDFC0,  2410, "PureFloatMove_sub8EDFC0" },   // 24/24 at 0x008EE463, 0x008EE746
         { 0x007762A0,  1303, "PureFloatMove_sub7762A0" },   // 20/20 at 0x00776448
         { 0x0094A440,   785, "PureFloatMove_sub94A440" },   // 21/21 at 0x0094A649
