@@ -335,8 +335,8 @@ static void BuildKnownFuncTable() {
         // the caller's last index, with a binary search for a jump over 500ms
         // and a double division for the interpolation factor at the end.
         { 0x0082B0A0,   450, "M2_AnimTrackInterp" },
-        { 0x0082AF40,   345, "M2_AnimTrackScalar" },
-        { 0x0082B340,   273, "M2_AnimTrackColor" },
+        { 0x0082AF40,   345, "M2_AnimTrackScalar" },        // packed int16 scalar (vectorized by anim_scalar_track_sse2.cpp)
+        { 0x0082B340,   273, "M2_AnimTrackColor" },         // float scalar (vectorized by anim_scalar_track_sse2.cpp)
         { 0x007BCC00,   796, "World_VisibilityTraverse" },  // 64x64 tiles, 16x16 cells
         { 0x0078F6A0,   601, "Terrain_HorizonOcclusionBuild" },
         { 0x00861D90,   235, "luaK_patchlistaux" },      // Lua code generator jump patching

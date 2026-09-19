@@ -185,6 +185,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "DrawMerge", &Settings::OptDrawMerge },
     { "Graphics_Sound", "M2MatrixSlotSse2", &Settings::OptM2MatrixSlotSse2 },
     { "Graphics_Sound", "M2BatchMatrixSse2", &Settings::OptM2BatchMatrixSse2 },
+    { "Graphics_Sound", "AnimScalarTrack", &Settings::OptAnimScalarTrack },
     { "Graphics_Sound", "M2AnimStride", &Settings::OptM2AnimStride },
     { "Graphics_Sound", "M2AnimReuse", &Settings::OptM2AnimReuse },
     { "UI_Lua", "LuaAllocCensus", &Settings::OptLuaAllocCensus },
@@ -760,6 +761,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptDrawMerge = GetPrivateProfileIntA("Graphics_Sound", "DrawMerge", 0, iniPath.c_str()) != 0;
         g_settings.OptM2MatrixSlotSse2 = GetPrivateProfileIntA("Graphics_Sound", "M2MatrixSlotSse2", 1, iniPath.c_str()) != 0;
         g_settings.OptM2BatchMatrixSse2 = GetPrivateProfileIntA("Graphics_Sound", "M2BatchMatrixSse2", 1, iniPath.c_str()) != 0;
+        g_settings.OptAnimScalarTrack = GetPrivateProfileIntA("Graphics_Sound", "AnimScalarTrack", 1, iniPath.c_str()) != 0;
         g_settings.OptM2AnimStride = GetPrivateProfileIntA("Graphics_Sound", "M2AnimStride", 0, iniPath.c_str()) != 0;
         g_settings.OptM2AnimReuse  = GetPrivateProfileIntA("Graphics_Sound", "M2AnimReuse", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaAllocCensus = GetPrivateProfileIntA("UI_Lua", "LuaAllocCensus", 0, iniPath.c_str()) != 0;

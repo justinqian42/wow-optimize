@@ -67,6 +67,7 @@
 #include "aabb_overlap_sse2.h"
 #include "anim_quat_unpack_sse2.h"
 #include "anim_vec3_track_sse2.h"
+#include "anim_scalar_track_sse2.h"
 #include "m2_sort_key_cache.h"
 #include "frustum_aabb_sse2.h"
 #include "segment_aabb_sse2.h"
@@ -5666,6 +5667,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("AabbOverlap::LogStats", AabbOverlap::LogStats());
     STAT_TIME("AnimQuatUnpack::LogStats", AnimQuatUnpack::LogStats());
     STAT_TIME("AnimVec3Track::LogStats", AnimVec3Track::LogStats());
+    STAT_TIME("AnimScalarTrack::LogStats", AnimScalarTrack::LogStats());
     STAT_TIME("M2SortKey::LogStats", M2SortKey::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
@@ -8469,6 +8471,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     AabbOverlap::Init();
     AnimQuatUnpack::Init();
     AnimVec3Track::Init();
+    AnimScalarTrack::Init();
     M2SortKey::Init();
     FrustumAabb::Init();
     SegmentAabb::Init();
@@ -11555,6 +11558,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             RayTriangle::Shutdown();
             M2MatrixSlot::Shutdown();
             M2BatchMatrix::Shutdown();
+            AnimScalarTrack::Shutdown();
             M2AnimStride::Shutdown();
             M2AnimReuse::Shutdown();
             SamplingProfiler::Shutdown();

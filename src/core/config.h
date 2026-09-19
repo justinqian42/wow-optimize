@@ -585,6 +585,9 @@ namespace Config {
         // Replaces serialized sixteen-float matrix setup copies in sub_823130
         // (M2 batch render pass setup) with four SSE2 vector moves each.
         bool OptM2BatchMatrixSse2 = true;
+        // Hardware double-precision SSE2 rewrite of the M2 scalar and color
+        // animation track evaluators (sub_82AF40 and sub_82B340).
+        bool OptAnimScalarTrack = true;
         // Holds a distant model's skeleton for a frame by taking the
         // client's own no-bones branch out of the bone loop. The tail still
         // runs, so materials and attachments keep animating.
