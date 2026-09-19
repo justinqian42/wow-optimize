@@ -398,6 +398,11 @@ namespace Config {
         // Uses 4-wide transposed SSE2 vector dot products to evaluate occluder
         // planes in parallel instead of serial scalar x87 loops.
         bool OptOccluderSphere = true;
+        // The M2 animation track timeline keyframe binary search (sub_8284D0).
+        // Evaluated across all bone translation, rotation, and scaling tracks.
+        // Replaces serialized x87 float divisions and store forwarding stalls
+        // with branch-optimized keyframe resolution and SSE math.
+        bool OptM2AnimFindKey = true;
         // The bone matrix upload loop inside sub_829BA0, 3.35% of executing
         // time and the largest entry in the corrected profile with nothing
         // shipped against it. Twelve x87 load/store pairs a bone transpose a

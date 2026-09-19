@@ -1,0 +1,300 @@
+#include <windows.h>
+#include <cstdint>
+#include <cmath>
+
+#include "m2_anim_find_key_fast.h"
+#include "MinHook.h"
+#include "version.h"
+#include "config.h"
+
+extern "C" void Log(const char* fmt, ...);
+
+MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
+MH_STATUS WO_EnableHook(void* target);
+
+namespace M2AnimFindKey {
+
+namespace {
+
+constexpr uintptr_t kFindKey = 0x008284D0; // __thiscall unsigned int* sub_8284D0(...)
+
+// Verification parameters
+constexpr unsigned long kVerifyFirst  = 20000;
+constexpr unsigned long kResampleMask = 1023;
+
+struct SubTrack {
+    uint32_t nKeys;
+    const uint32_t* timestamps;
+};
+
+typedef void* (__fastcall* FindKey_fn)(
+    const void* this_ptr,
+    void* dummy_edx,
+    const void* timing,
+    const void* track,
+    uint32_t* hint,
+    uint32_t* second,
+    float* frac);
+
+FindKey_fn orig_FindKey = nullptr;
+
+bool g_installed = false;
+bool g_dead      = false;
+
+unsigned long g_calls    = 0;
+unsigned long g_verified = 0;
+unsigned long g_mismatch = 0;
+
+__forceinline void* FindKey_Fast(
+    const void* this_ptr,
+    const void* timing,
+    const void* track,
+    uint32_t* hint,
+    uint32_t* second,
+    float* frac)
+{
+    const uint32_t time = *(const uint32_t*)timing;
+    uint16_t anim_id = *(const uint16_t*)((const char*)timing + 4);
+
+    const uint32_t nAnimations = *(const uint32_t*)((const char*)track + 4);
+    if (nAnimations == 0) {
+        *second = 0;
+        *hint = 0;
+        *frac = 0.0f;
+        return frac;
+    }
+
+    const uint16_t global_seq = *(const uint16_t*)((const char*)track + 2);
+    uint32_t anim_time = time;
+    if (global_seq != 0xFFFF) {
+        const uint32_t* const pGlobalSeqs = *(const uint32_t* const*)((const char*)this_ptr + 0x70);
+        if (pGlobalSeqs) {
+            anim_time = pGlobalSeqs[global_seq];
+        }
+        anim_id = 0;
+    } else {
+        if (anim_id >= nAnimations) {
+            anim_id = 0;
+        }
+    }
+
+    const SubTrack* sub_tracks = *(const SubTrack* const*)((const char*)track + 8);
+    if (!sub_tracks) {
+        *second = 0;
+        *hint = 0;
+        *frac = 0.0f;
+        return frac;
+    }
+
+    const uint32_t nKeys = sub_tracks[anim_id].nKeys;
+    if (nKeys <= 1) {
+        *second = 0;
+        *hint = 0;
+        *frac = 0.0f;
+        return frac;
+    }
+
+    const uint32_t* const timestamps = sub_tracks[anim_id].timestamps;
+    if (!timestamps) {
+        *second = 0;
+        *hint = 0;
+        *frac = 0.0f;
+        return frac;
+    }
+
+    uint32_t guess = *hint;
+    if (guess >= nKeys) {
+        guess = 0;
+    }
+
+    const uint32_t t_guess = timestamps[guess];
+    const uint32_t delta = anim_time - t_guess;
+
+    if (delta < 500) {
+        // Path 1: small positive delta (normal forward animation step)
+        const uint32_t max_key = nKeys - 1;
+        while (guess < max_key) {
+            if (timestamps[guess + 1] > anim_time) {
+                break;
+            }
+            ++guess;
+        }
+    } else if (delta >= 0xFFFFFE0Cu) {
+        // Path 2: small negative delta (animation loop or small backward step)
+        while (guess > 0) {
+            if (timestamps[guess] <= anim_time) {
+                break;
+            }
+            --guess;
+        }
+    } else {
+        // Path 3: large jump
+        if (anim_time < 500) {
+            guess = 0;
+            const uint32_t max_key = nKeys - 1;
+            while (guess < max_key) {
+                if (timestamps[guess + 1] > anim_time) {
+                    break;
+                }
+                ++guess;
+            }
+        } else {
+            // Binary search matching assembly logic
+            uint32_t low = 0;
+            uint32_t high = nKeys;
+            guess = 0;
+            while (low < high) {
+                const uint32_t mid = (low + high) >> 1;
+                if (anim_time >= timestamps[mid]) {
+                    low = mid + 1;
+                    if (low >= nKeys || anim_time < timestamps[mid + 1]) {
+                        guess = mid;
+                        break;
+                    }
+                } else {
+                    high = (mid > 0) ? (mid - 1) : 0;
+                }
+                guess = low;
+            }
+        }
+    }
+
+    if (guess + 1 >= nKeys) {
+        *hint = guess;
+        *second = guess;
+        *frac = 0.0f;
+    } else {
+        *hint = guess;
+        *second = guess + 1;
+        const uint32_t t0 = timestamps[guess];
+        const uint32_t t1 = timestamps[guess + 1];
+        const uint32_t dt = t1 - t0;
+        if (dt > 0) {
+            *frac = (float)((double)(anim_time - t0) / (double)dt);
+        } else {
+            *frac = 0.0f;
+        }
+    }
+
+    return frac;
+}
+
+void* __fastcall Hooked_AnimTrackFindKey(
+    const void* this_ptr,
+    void* dummy_edx,
+    const void* timing,
+    const void* track,
+    uint32_t* hint,
+    uint32_t* second,
+    float* frac)
+{
+    if (g_dead || !this_ptr || !timing || !track || !hint || !second || !frac) {
+        return orig_FindKey(this_ptr, dummy_edx, timing, track, hint, second, frac);
+    }
+
+    ++g_calls;
+
+    const bool should_verify = (g_calls <= kVerifyFirst) || ((g_calls & kResampleMask) == 0);
+    if (!should_verify) {
+        __try {
+            return FindKey_Fast(this_ptr, timing, track, hint, second, frac);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            g_dead = true;
+            Log("[M2AnimFindKey] Exception in fast path, retiring hook\n");
+            return orig_FindKey(this_ptr, dummy_edx, timing, track, hint, second, frac);
+        }
+    }
+
+    // Verification path: check results against original client
+    const uint32_t hint_orig_in = *hint;
+    uint32_t mine_hint = hint_orig_in;
+    uint32_t mine_second = 0;
+    float mine_frac = 0.0f;
+
+    __try {
+        FindKey_Fast(this_ptr, timing, track, &mine_hint, &mine_second, &mine_frac);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_dead = true;
+        Log("[M2AnimFindKey] Exception during verification fast path, retiring hook\n");
+        *hint = hint_orig_in;
+        return orig_FindKey(this_ptr, dummy_edx, timing, track, hint, second, frac);
+    }
+
+    // Reset hint to original input before calling original function
+    *hint = hint_orig_in;
+    void* res = orig_FindKey(this_ptr, dummy_edx, timing, track, hint, second, frac);
+
+    const uint32_t ref_hint = *hint;
+    const uint32_t ref_second = *second;
+    const float ref_frac = *frac;
+
+    // Compare results
+    const float frac_diff = fabsf(mine_frac - ref_frac);
+    if (mine_hint != ref_hint || mine_second != ref_second || frac_diff > 1e-4f) {
+        ++g_mismatch;
+        Log("[M2AnimFindKey] Mismatch! hint(%u vs %u), second(%u vs %u), frac(%.6f vs %.6f)\n",
+            mine_hint, ref_hint, mine_second, ref_second, mine_frac, ref_frac);
+        if (g_mismatch > 10) {
+            g_dead = true;
+            Log("[M2AnimFindKey] Too many mismatches, retiring hook\n");
+        }
+        return res;
+    }
+
+    ++g_verified;
+    // Fast results agree: write back fast results
+    *hint = mine_hint;
+    *second = mine_second;
+    *frac = mine_frac;
+    return frac;
+}
+
+} // namespace
+
+bool Init() {
+    if (!Config::g_settings.OptM2AnimFindKey) {
+        return true;
+    }
+
+    if (IsBadReadPtr((void*)kFindKey, 16)) {
+        Log("[M2AnimFindKey] 0x%08X unreadable - not installing\n", (unsigned)kFindKey);
+        return false;
+    }
+
+    if (WineSafe_CreateHook((void*)kFindKey, (void*)Hooked_AnimTrackFindKey,
+                            (void**)&orig_FindKey) != MH_OK) {
+        Log("[M2AnimFindKey] hook NOT created\n");
+        return false;
+    }
+
+    if (WO_EnableHook((void*)kFindKey) != MH_OK) {
+        Log("[M2AnimFindKey] hook created but could not be enabled\n");
+        return false;
+    }
+
+    g_installed = true;
+    Log("[M2AnimFindKey] ACTIVE on sub_8284D0 (0x%08X) - M2 animation track keyframe search. "
+        "Replaced scalar x87 float divisions and store stalls with fast integer search and SSE math. "
+        "Verifying first %lu calls, then 1 in %d.\n",
+        (unsigned)kFindKey, kVerifyFirst, (int)(kResampleMask + 1));
+    return true;
+}
+
+void LogStats() {
+    if (!Config::g_settings.OptM2AnimFindKey) {
+        return;
+    }
+    if (!g_installed) {
+        Log("[M2AnimFindKey] not installed - nothing measured\n");
+        return;
+    }
+    if (g_calls == 0) {
+        Log("[M2AnimFindKey] installed but never called\n");
+        return;
+    }
+    Log("[M2AnimFindKey] %lu calls, %lu verified, %lu mismatches%s\n",
+        g_calls, g_verified, g_mismatch,
+        g_dead ? " - DISABLED" : (g_calls < kVerifyFirst ? " (still verifying)" : ""));
+}
+
+} // namespace M2AnimFindKey

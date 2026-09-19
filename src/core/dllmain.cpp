@@ -51,6 +51,7 @@
 #include "freeze_catcher.h"
 #include "ray_triangle_sse2.h"
 #include "occluder_sphere_sse2.h"
+#include "m2_anim_find_key_fast.h"
 #include "bone_matrix_upload_sse2.h"
 #include "ui_batch_fill_sse2.h"
 #include "particle_fill_sse2.h"
@@ -5648,6 +5649,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("FreezeCatcher::LogStats", FreezeCatcher::LogStats());
     STAT_TIME("RayTriangle::LogStats", RayTriangle::LogStats());
     STAT_TIME("OccluderSphere::LogStats", OccluderSphere::LogStats());
+    STAT_TIME("M2AnimFindKey::LogStats", M2AnimFindKey::LogStats());
     STAT_TIME("ObjMgrEnumFast::LogStats", ObjMgrEnumFast::LogStats());
     STAT_TIME("MpqOpenCensus::LogStats", MpqOpenCensus::LogStats());
     STAT_TIME("BoneMatrixUpload::LogStats", BoneMatrixUpload::LogStats());
@@ -8448,6 +8450,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     CollisionRayOutcode::Init();
     RayTriangle::Init();
     OccluderSphere::Init();
+    M2AnimFindKey::Init();
     BoneMatrixUpload::Init();
     UiBatchFill::Init();
     ParticleFill::Init();
