@@ -91,6 +91,7 @@ constexpr uintptr_t kIsVisible = 0x009839E0;
 constexpr uintptr_t kThreshold = 0x00AA2E74;
 constexpr uintptr_t kIsInside  = 0x00983A60;
 constexpr uintptr_t kThresholdInside = 0x00A3FDB8;
+constexpr uintptr_t kIsPointVisible = 0x00983D70;
 
 constexpr int kPlanes = 6;
 
@@ -101,6 +102,9 @@ isVisible_fn orig_IsVisible = nullptr;
 typedef int (__fastcall* isInside_fn)(void* frustum, void* edx, void* aabb);
 isInside_fn orig_IsInside = nullptr;
 
+typedef void (__fastcall* isPointVisible_fn)(void* frustum, void* edx, const float* pt, uint8_t* outMask);
+isPointVisible_fn orig_IsPointVisible = nullptr;
+
 bool g_installed = false;
 bool g_armed     = false;
 bool g_insideInstalled = false;
@@ -109,6 +113,12 @@ bool g_insideDead      = false;
 unsigned long g_insideCalls = 0;
 unsigned long g_insideVerified = 0;
 double g_thresholdInside = 0.0;
+
+bool g_pointInstalled = false;
+bool g_pointArmed     = false;
+bool g_pointDead      = false;
+unsigned long g_pointCalls = 0;
+unsigned long g_pointVerified = 0;
 // Set at init when the A/B harness names this module, so the hot path
 // tests a plain bool instead of calling out on every invocation.
 bool g_abSubject = false;
@@ -332,6 +342,31 @@ inline int EvaluateInside(void* frustum, void* aabb) {
     return 3;
 }
 
+inline void EvaluatePoint(void* frustum, const float* pt, uint8_t* outMask) {
+    const float* base = (const float*)frustum;
+    __m128d pxy_pt = _mm_cvtps_pd(_mm_castpd_ps(_mm_load_sd((const double*)pt)));
+    double  pt_z   = (double)pt[2];
+
+    uint8_t mask = 0;
+    for (int i = 0; i < kPlanes; i++) {
+        const float* pl = base + 4 * i;
+
+        __m128d pxy  = _mm_cvtps_pd(_mm_castpd_ps(_mm_load_sd((const double*)pl)));
+        __m128d prod = _mm_mul_pd(pxy, pxy_pt);
+
+        double xterm, yterm;
+        _mm_storel_pd(&xterm, prod);
+        _mm_storeh_pd(&yterm, prod);
+
+        double d = (((double)pl[2] * pt_z + yterm) + xterm) + (double)pl[3];
+
+        if (d < g_threshold) {
+            mask |= (uint8_t)(1u << i);
+        }
+    }
+    *outMask = mask;
+}
+
 }  // namespace
 
 // The checked path, kept out of line so the hook itself carries no exception
@@ -457,6 +492,49 @@ int __fastcall Hooked_IsInside(void* frustum, void* edx, void* aabb) {
     return EvaluateInside(frustum, aabb);
 }
 
+__declspec(noinline)
+static void VerifyAgainstClientPoint(void* frustum, void* edx, const float* pt, uint8_t* outMask) {
+    uint8_t mine = 0xFF;
+    __try {
+        EvaluatePoint(frustum, pt, &mine);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        orig_IsPointVisible(frustum, edx, pt, outMask);
+        return;
+    }
+    uint8_t theirs = 0xFF;
+    orig_IsPointVisible(frustum, edx, pt, &theirs);
+    *outMask = theirs;
+    g_pointVerified++;
+
+    if (mine != theirs) {
+        g_pointDead = true;
+        Verdict::Add(Verdict::Bad,
+                     "FrustumAabb IsPointVisible disagreed with the client and retired itself");
+        Log("[FrustumAabb] IsPointVisible DISAGREED with client after %lu tests - retired for session "
+            "(client=0x%02X, sse2=0x%02X)", g_pointVerified, (unsigned)theirs, (unsigned)mine);
+        return;
+    }
+    if (!g_pointArmed && g_pointVerified >= kVerifyFirst) {
+        g_pointArmed = true;
+        Log("[FrustumAabb] IsPointVisible armed: %lu tests agreed with client.", g_pointVerified);
+    }
+}
+
+void __fastcall Hooked_IsPointVisible(void* frustum, void* edx, const float* pt, uint8_t* outMask) {
+    ++g_pointCalls;
+    if (g_pointDead || !frustum || !pt || !outMask) {
+        orig_IsPointVisible(frustum, edx, pt, outMask);
+        return;
+    }
+
+    if (!g_pointArmed || (g_pointCalls & kResampleMask) == 0) {
+        VerifyAgainstClientPoint(frustum, edx, pt, outMask);
+        return;
+    }
+
+    EvaluatePoint(frustum, pt, outMask);
+}
+
 bool Init() {
     if (!Config::g_settings.OptFrustumAabb) return true;
 
@@ -494,6 +572,20 @@ bool Init() {
                 if (WO_EnableHook((void*)kIsInside) == MH_OK) {
                     g_insideInstalled = true;
                     Log("[FrustumAabb] ACTIVE on CFrustum::IsAABBInside (0x%08X)", (unsigned)kIsInside);
+                }
+            }
+        }
+    }
+
+    if (!IsBadReadPtr((void*)kIsPointVisible, 16)) {
+        const unsigned char* p3 = (const unsigned char*)kIsPointVisible;
+        if (p3[0] == 0x55 && p3[1] == 0x8B && p3[2] == 0xEC) {
+            if (WineSafe_CreateHook((void*)kIsPointVisible, (void*)Hooked_IsPointVisible,
+                                    (void**)&orig_IsPointVisible) == MH_OK) {
+                if (WO_EnableHook((void*)kIsPointVisible) == MH_OK) {
+                    g_pointInstalled = true;
+                    SamplingProfiler::RegisterSelfSymbol("FrustumPoint_SSE2", (const void*)&Hooked_IsPointVisible);
+                    Log("[FrustumAabb] ACTIVE on CFrustum::IsPointVisible (0x%08X)", (unsigned)kIsPointVisible);
                 }
             }
         }
@@ -558,11 +650,18 @@ void LogStats() {
             g_insideCalls, g_insideVerified,
             g_insideDead ? " - RETIRED on a disagreement" : (g_insideArmed ? "" : " - still verifying"));
     }
+
+    if (g_pointInstalled && g_pointCalls > 0) {
+        Log("[FrustumAabb] %lu point visibility tests, %lu verified against client%s",
+            g_pointCalls, g_pointVerified,
+            g_pointDead ? " - RETIRED on a disagreement" : (g_pointArmed ? "" : " - still verifying"));
+    }
 }
 
 void Shutdown() {
     if (g_installed) MH_DisableHook((void*)kIsVisible);
     if (g_insideInstalled) MH_DisableHook((void*)kIsInside);
+    if (g_pointInstalled) MH_DisableHook((void*)kIsPointVisible);
 }
 
 }  // namespace FrustumAabb
