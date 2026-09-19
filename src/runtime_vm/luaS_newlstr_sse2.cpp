@@ -53,24 +53,20 @@ static inline bool CompareStringInline(const char* s1, const char* s2, size_t le
     }
 }
 
-void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
-    BumpWrap(g_newlstr_calls, g_newlstr_callWraps);
-    
-    // Bounds check string length and validate pointer
-    if (l >= (1 << 30) || !str || (uintptr_t)str < 0x10000 || (uintptr_t)str >= 0xFFE00000) {
-        return orig_luaS_newlstr(L, str, l);
-    }
-    
-    __try {
+// The table walk itself, with no exception frame around it. Returns the
+// interned string, or null for "not here" - a miss, a shape it does not
+// recognise, or, in the guarded copy below, a fault.
+static __forceinline void* LookupInterned(void* L, const char* str, size_t l) {
+    {
         uintptr_t L_addr = (uintptr_t)L;
         if (L_addr < 0x10000 || L_addr >= 0xFFE00000) {
-            return orig_luaS_newlstr(L, str, l);
+            return nullptr;
         }
-        
+
         // global_State is at L + 0x14
         uintptr_t globalState = *(uintptr_t*)(L_addr + 0x14);
         if (globalState < 0x10000 || globalState >= 0xFFE00000) {
-            return orig_luaS_newlstr(L, str, l);
+            return nullptr;
         }
         
         // Compute Lua 5.1 string hash
@@ -85,7 +81,7 @@ void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
         int nsize = *(int*)(globalState + 0x08);
         
         if (!hash_array || nsize <= 0 || (uintptr_t)hash_array < 0x10000 || (uintptr_t)hash_array >= 0xFFE00000) {
-            return orig_luaS_newlstr(L, str, l);
+            return nullptr;
         }
         
         uint32_t bucket = h & (nsize - 1);
@@ -120,9 +116,48 @@ void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
             // next pointer
             tstring = *(uint32_t*)(tstring + 0);
         }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        // Fall through on any exception
     }
+    return nullptr;
+}
+
+// Faults the guard caught, and how many calls have run guarded so far.
+//
+// The walk above used to run inside a __try on every call, and this hook sits
+// on every string the client interns - every push, every concatenation, every
+// table key, and 2.12% of executing time in a tester profile. An exception
+// frame per call is a cost this project has removed from three other hot
+// detours for the same reason. The guard stays on for the first calls of the
+// session, which is where a wrong offset would show itself, and comes off only
+// if nothing faulted; one fault ever and every later call is guarded again.
+static uint32_t g_caught = 0;
+static uint32_t g_guarded = 0;
+static constexpr uint32_t kGuardCalls = 200000;
+
+static __declspec(noinline) void* LookupGuarded(void* L, const char* str, size_t l) {
+    __try {
+        return LookupInterned(L, str, l);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_caught;
+        return nullptr;
+    }
+}
+
+void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
+    BumpWrap(g_newlstr_calls, g_newlstr_callWraps);
+
+    // Bounds check string length and validate pointer
+    if (l >= (1 << 30) || !str || (uintptr_t)str < 0x10000 || (uintptr_t)str >= 0xFFE00000) {
+        return orig_luaS_newlstr(L, str, l);
+    }
+
+    void* found;
+    if (g_caught || g_guarded < kGuardCalls) {
+        ++g_guarded;
+        found = LookupGuarded(L, str, l);
+    } else {
+        found = LookupInterned(L, str, l);
+    }
+    if (found) return found;
 
     return orig_luaS_newlstr(L, str, l);
 }
@@ -179,6 +214,18 @@ namespace LuaSNewlstr {
             "inline (%.1f%%), %u string(s) resurrected that the collector had "
             "marked dead. Counts are lower bounds.",
             calls, hits, 100.0 * hits / calls, g_newlstr_dead);
+        if (g_caught) {
+            Log("[luaS_newlstr]   %u fault(s) were caught in the table walk, so "
+                "every call stays inside an exception frame. Anything above zero "
+                "here means an offset this reads is wrong on this client.",
+                g_caught);
+        } else if (g_guarded >= kGuardCalls) {
+            Log("[luaS_newlstr]   the first %u calls ran guarded and none faulted, "
+                "so the walk now runs without an exception frame.", kGuardCalls);
+        } else {
+            Log("[luaS_newlstr]   %u of %u guarded calls done; the exception frame "
+                "comes off after that.", g_guarded, kGuardCalls);
+        }
     }
 
     void Shutdown() {

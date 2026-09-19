@@ -189,14 +189,19 @@ int __fastcall Hooked_OverlapBody(const float* self, void* edx, const float* oth
 
     if (g_dead) return orig_Overlap(self, edx, other);
 
-
-    const uint64_t tA = SelfBench::Now();
-    int mine = Sse2Overlap(self, other);
-    const uint64_t tB = SelfBench::Now();
-
     // Unarmed, or one call in kResampleMask+1 afterwards: run the client's own
     // code and compare. Its answer is the one returned either way.
+    //
+    // The two rdtsc below belong to that comparison and used to be taken on
+    // every call, armed or not. This module is 2.98% of executing time in a
+    // tester profile on a function that is a handful of packed compares, and it
+    // was called 2.1 billion times in one session; two serialising reads of the
+    // cycle counter per call are the same order of cost as the work itself.
+    // The two other modules with this harness already take them only here.
     if (!g_armed || (g_calls & kResampleMask) == 0) {
+        const uint64_t tA = SelfBench::Now();
+        const int mine = Sse2Overlap(self, other);
+        const uint64_t tB = SelfBench::Now();
         // The verification already runs both halves on the same input. Timing
         // it is the only paired comparison this project gets without asking a
         // tester to configure anything.
@@ -224,6 +229,7 @@ int __fastcall Hooked_OverlapBody(const float* self, void* edx, const float* oth
         return theirs;
     }
 
+    const int mine = Sse2Overlap(self, other);
     if (mine) Bump(g_overlaps, g_overWraps);
     return mine;
 }

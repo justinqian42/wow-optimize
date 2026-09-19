@@ -73,6 +73,7 @@
 #include "ab_test.h"
 #include "session_verdict.h"
 #include "high_tables.h"
+#include "self_bench.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -265,16 +266,28 @@ static __declspec(noinline) int CompareGuarded(void* a, void* b) {
     }
 }
 
+// Timed here and nowhere else, because this is the one path that runs both
+// halves on the same input. This module replaces a comparator a profile
+// measured at 2.44% of executing time, and in a later profile the detour itself
+// is 2.88% - which says nothing about whether the cache is faster than the
+// chain it removes, since the two numbers come from different machines. The
+// pair below answers that directly, and costs two rdtsc on a path that was
+// already doing the work twice.
+int g_benchSlot = -1;
+
 static __declspec(noinline) int CompareVerify(void* a, void* b) {
     {
         int mine;
+        const unsigned long long tA = SelfBench::Now();
         __try {
             mine = Compare(a, b);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             ++g_caught;
             return orig_Compare(a, b);
         }
+        const unsigned long long tB = SelfBench::Now();
         int theirs = orig_Compare(a, b);
+        SelfBench::Pair(g_benchSlot, tB - tA, SelfBench::Now() - tB);
         g_verified++;
 
         // The client's comparator is a bool-returning predicate. Both of its
@@ -387,6 +400,7 @@ bool Init() {
 
     g_installed = true;
     SamplingProfiler::RegisterSelfSymbol("M2SortKey_Compare", (const void*)&Hooked_Compare);
+    g_benchSlot = SelfBench::Register("M2SortKey");
     Log("[M2SortKey] ACTIVE on the render batch comparator (sub_824B70 @ "
         "0x%08X), 2.44%% of executing time in an uncapped tester session - ninth "
         "in the profile, above every Lua entry. It does no arithmetic; it derives "
