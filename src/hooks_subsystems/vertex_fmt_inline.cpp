@@ -92,6 +92,11 @@ constexpr uintptr_t kRendererP = 0x00C5DF88;
 // different offset would pass every byte check and then read the wrong dword
 // for the rest of the session.
 bool ReplacementAgrees() {
+    if (IsBadReadPtr((const void*)kRendererP, sizeof(uint32_t))) {
+        Log("[VertexFmt] the renderer global at 0x%08X is not readable - not patching", (unsigned)kRendererP);
+        return false;
+    }
+
     uint32_t renderer = 0;
     __try {
         renderer = *(volatile uint32_t*)kRendererP;
@@ -99,20 +104,17 @@ bool ReplacementAgrees() {
         Log("[VertexFmt] the renderer global is not readable yet - not patching");
         return false;
     }
-    if (renderer == 0) {
-        Log("[VertexFmt] the renderer global is null at install time - not patching");
-        return false;
-    }
 
+    void* testPtr = (renderer != 0) ? (void*)renderer : (void*)0x10000;
     char* viaCall = nullptr;
     __try {
-        viaCall = ((Accessor_fn)kAccessor)((void*)renderer, nullptr);
+        viaCall = ((Accessor_fn)kAccessor)(testPtr, nullptr);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Log("[VertexFmt] the accessor faulted when called - not patching");
         return false;
     }
 
-    char* viaMath = (char*)(uintptr_t)(renderer + 532u);
+    char* viaMath = (char*)(uintptr_t)((uintptr_t)testPtr + 532u);
     if (viaCall != viaMath) {
         Log("[VertexFmt] the accessor returns %p but the replacement computes %p. "
             "This build does not use the offset these patches assume - not patching.",

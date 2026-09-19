@@ -338,7 +338,7 @@ namespace Config {
         // cannot change between two vertices of a batch; together those two
         // functions were 5.06% of executing time. Patches machine code in place
         // after verifying it byte for byte, so it is opt-in.
-        bool OptVertexFmtInline = false;
+        bool OptVertexFmtInline = true;
         // The object manager's find-by-GUID re-derived the bucket link offset
         // from the table header on every node of the chain. 2.22% of executing
         // time in a CPU-bound profile. Verifies against the client and retires
@@ -462,7 +462,7 @@ namespace Config {
         // each, until one contains the pointer. Two tester freeze samples landed
         // on the compare inside that loop. Opt-in, and it predicts against the
         // client before it skips anything.
-        bool OptLuaPoolFast = false;
+        bool OptLuaPoolFast = true;
         // The vector animation track (sub_82B0A0). Eight call sites, six of
         // them inside the largest entry in the main-thread profile, against one
         // for the quaternion track. Opt-in, and it compares all twenty output
@@ -486,7 +486,7 @@ namespace Config {
         // deciding where to hand off. Answering "is this key an integer" costs
         // three memory round-trips and an fnstsw there. Opt-in; read-only, so
         // both answers are simply compared.
-        bool OptLuaHGetDispatch = false;
+        bool OptLuaHGetDispatch = true;
         // Holds the shadow cascade centre still for longer. Measured cause of
         // the flicker two testers report below extShadowQuality 5: cascade 0
         // recentres every two yards and each recentre leaves two thirds of the
@@ -516,7 +516,7 @@ namespace Config {
         bool OptTerrainHeightCache = false;
 
         bool OptTextureUnloadDelay = false;
-        bool OptM2MatrixSimd = false;
+        bool OptM2MatrixSimd = true;
         bool OptSpellEffectCulling = false;
         // Read-only watch on the client's own shadow state, for the flicker seen
         // below extShadowQuality 5. Not our bug - a tester reproduced it with

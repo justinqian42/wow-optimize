@@ -668,7 +668,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptCpuTopology         = GetPrivateProfileIntA("General", "CpuTopology", 1, iniPath.c_str()) != 0;
         g_settings.OptPinMainThread       = GetPrivateProfileIntA("General", "PinMainThread", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaMemPoolFast      = GetPrivateProfileIntA("UI_Lua", "LuaMemPoolFast", 0, iniPath.c_str()) != 0;
-        g_settings.OptVertexFmtInline     = GetPrivateProfileIntA("Graphics_Sound", "VertexFmtInline", 0, iniPath.c_str()) != 0;
+        g_settings.OptVertexFmtInline     = GetPrivateProfileIntA("Graphics_Sound", "VertexFmtInline", 1, iniPath.c_str()) != 0;
         g_settings.OptObjMgrFindFast      = GetPrivateProfileIntA("General", "ObjMgrFindFast", 0, iniPath.c_str()) != 0;
         g_settings.OptQuatLerpSse2        = GetPrivateProfileIntA("Graphics_Sound", "QuatLerpSse2", 1, iniPath.c_str()) != 0;
         g_settings.OptLuaProtoCache       = GetPrivateProfileIntA("UI_Lua", "LuaProtoCache", 1, iniPath.c_str()) != 0;
@@ -705,12 +705,12 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         if (g_settings.HighPlacementMinKB > 65536) g_settings.HighPlacementMinKB = 65536;
         g_settings.OptAabbOverlap         = GetPrivateProfileIntA("Graphics_Sound", "AabbOverlap", 1, iniPath.c_str()) != 0;
         g_settings.OptAnimQuatUnpack      = GetPrivateProfileIntA("Graphics_Sound", "AnimQuatUnpack", 1, iniPath.c_str()) != 0;
-        g_settings.OptLuaPoolFast     = GetPrivateProfileIntA("UI_Lua", "LuaPoolFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptLuaPoolFast     = GetPrivateProfileIntA("UI_Lua", "LuaPoolFast", 1, iniPath.c_str()) != 0;
         g_settings.OptAnimVec3Track   = GetPrivateProfileIntA("Graphics_Sound", "AnimVec3Track", 1, iniPath.c_str()) != 0;
         g_settings.OptM2SortKey       = GetPrivateProfileIntA("Graphics_Sound", "M2SortKey", 1, iniPath.c_str()) != 0;
         g_settings.OptFrustumAabb     = GetPrivateProfileIntA("Graphics_Sound", "FrustumAabb", 1, iniPath.c_str()) != 0;
         g_settings.OptSegmentAabb     = GetPrivateProfileIntA("Graphics_Sound", "SegmentAabb", 1, iniPath.c_str()) != 0;
-        g_settings.OptLuaHGetDispatch = GetPrivateProfileIntA("UI_Lua", "LuaHGetDispatch", 0, iniPath.c_str()) != 0;
+        g_settings.OptLuaHGetDispatch = GetPrivateProfileIntA("UI_Lua", "LuaHGetDispatch", 1, iniPath.c_str()) != 0;
         g_settings.OptShadowCascadeHold = GetPrivateProfileIntA("Graphics_Sound", "ShadowCascadeHold", 0, iniPath.c_str()) != 0;
         g_settings.OptMatrixVectorSse2  = GetPrivateProfileIntA("Graphics_Sound", "MatrixVectorSse2", 0, iniPath.c_str()) != 0;
         g_settings.OptWorldStateCoalesce  = GetPrivateProfileIntA("Graphics_Sound", "WorldStateCoalesce", 0, iniPath.c_str()) != 0;
@@ -739,7 +739,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
 
         // Parse Features 31-50
         g_settings.OptTextureUnloadDelay = GetPrivateProfileIntA("Graphics_Sound", "TextureUnloadDelay", 0, iniPath.c_str()) != 0;
-        g_settings.OptM2MatrixSimd = GetPrivateProfileIntA("Graphics_Sound", "M2MatrixSimd", 0, iniPath.c_str()) != 0;
+        g_settings.OptM2MatrixSimd = GetPrivateProfileIntA("Graphics_Sound", "M2MatrixSimd", 1, iniPath.c_str()) != 0;
         g_settings.OptSimdMatrixTransform = GetPrivateProfileIntA("Graphics_Sound", "SimdMatrixTransform", 0, iniPath.c_str()) != 0;
         g_settings.OptSpellEffectCulling = GetPrivateProfileIntA("Graphics_Sound", "SpellEffectCulling", 0, iniPath.c_str()) != 0;
         g_settings.OptRenderNullGuard = GetPrivateProfileIntA("Graphics_Sound", "RenderNullGuard", 1, iniPath.c_str()) != 0;

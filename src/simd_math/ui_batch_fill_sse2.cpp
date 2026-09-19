@@ -111,7 +111,8 @@ static_assert(offsetof(Item, uvOffsetV) == 0x38, "item layout");
 const uintptr_t kHead       = 0x00484F05;
 const uintptr_t kTail       = 0x0048502E;
 const uintptr_t kRegionEnd  = 0x00485034;
-const uint32_t  kRegionFnv  = 0x515B6439u;
+const uint32_t  kRegionFnv        = 0x515B6439u;
+const uint32_t  kRegionFnvInline  = 0x045F2931u;
 const uintptr_t kDevicePtr  = 0x00C5DF88;
 
 const unsigned char kHeadBytes[5] = { 0x33, 0xFF, 0x39, 0x7E, 0x10 };
@@ -420,8 +421,9 @@ static void Restore(uintptr_t at, const unsigned char* saved, int len) {
 bool Init() {
     if (!Config::g_settings.OptUiBatchFill) return true;
 
+    uint32_t h = RegionHash();
     if (!BytesMatch(kHead, kHeadBytes, 5) || !BytesMatch(kTail, kTailBytes, 6) ||
-        RegionHash() != kRegionFnv) {
+        (h != kRegionFnv && h != kRegionFnvInline)) {
         Log("[UiBatchFill] NOT active: the 303 bytes from 0x%08X to 0x%08X are not "
             "the loops this was read from, so nothing was written.",
             (unsigned)kHead, (unsigned)kRegionEnd);
