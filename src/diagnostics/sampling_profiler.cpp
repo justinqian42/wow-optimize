@@ -339,6 +339,11 @@ static void BuildKnownFuncTable() {
         { 0x0082B340,   273, "M2_AnimTrackColor" },         // float scalar (vectorized by anim_scalar_track_sse2.cpp)
         { 0x0082B460,  1081, "M2_AnimTrackSpline" },        // 3D vector cubic spline (vectorized by anim_spline_track_sse2.cpp)
         { 0x0082B8A0,   681, "M2_AnimTrackSplineScalar" },  // scalar cubic spline (vectorized by anim_spline_track_sse2.cpp)
+        { 0x007F9430,    66, "AABB_Transform" },             // 4x4 matrix * AABB (vectorized by aabb_transform_sse2.cpp)
+        { 0x007F93D0,    91, "AABB_Transform3x3" },          // 3x3 matrix * AABB (vectorized by aabb_transform_sse2.cpp)
+        { 0x007F9320,   171, "AABB_TransformCore_Arvo" },     // Arvo bounding box transformation core
+        { 0x0078F370,    39, "AABB_Overlap" },               // box-overlap predicate (vectorized by aabb_overlap_sse2.cpp)
+        { 0x007A50C0,   384, "Scene_VisibilityTraverse" },   // scene-graph culling walk
         { 0x007BCC00,   796, "World_VisibilityTraverse" },  // 64x64 tiles, 16x16 cells
         { 0x0078F6A0,   601, "Terrain_HorizonOcclusionBuild" },
         { 0x00861D90,   235, "luaK_patchlistaux" },      // Lua code generator jump patching

@@ -69,6 +69,7 @@
 #include "anim_vec3_track_sse2.h"
 #include "anim_scalar_track_sse2.h"
 #include "anim_spline_track_sse2.h"
+#include "aabb_transform_sse2.h"
 #include "m2_sort_key_cache.h"
 #include "frustum_aabb_sse2.h"
 #include "segment_aabb_sse2.h"
@@ -5666,6 +5667,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("HighPlacement::LogStats", HighPlacement::LogStats());
     STAT_TIME("ClientWriteBatch::LogStats", ClientWriteBatch::LogStats());
     STAT_TIME("AabbOverlap::LogStats", AabbOverlap::LogStats());
+    STAT_TIME("AabbTransform::LogStats", AabbTransform::LogStats());
     STAT_TIME("AnimQuatUnpack::LogStats", AnimQuatUnpack::LogStats());
     STAT_TIME("AnimVec3Track::LogStats", AnimVec3Track::LogStats());
     STAT_TIME("AnimScalarTrack::LogStats", AnimScalarTrack::LogStats());
@@ -8471,6 +8473,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2AnimReuse::Init();
     CameraReplay::Init();
     AabbOverlap::Init();
+    AabbTransform::Init();
     AnimQuatUnpack::Init();
     AnimVec3Track::Init();
     AnimScalarTrack::Init();
@@ -11563,6 +11566,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             M2BatchMatrix::Shutdown();
             AnimScalarTrack::Shutdown();
             AnimSplineTrack::Shutdown();
+            AabbTransform::Shutdown();
             M2AnimStride::Shutdown();
             M2AnimReuse::Shutdown();
             SamplingProfiler::Shutdown();
