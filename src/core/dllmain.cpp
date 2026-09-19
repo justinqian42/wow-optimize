@@ -68,6 +68,7 @@
 #include "anim_quat_unpack_sse2.h"
 #include "anim_vec3_track_sse2.h"
 #include "anim_scalar_track_sse2.h"
+#include "anim_spline_track_sse2.h"
 #include "m2_sort_key_cache.h"
 #include "frustum_aabb_sse2.h"
 #include "segment_aabb_sse2.h"
@@ -5668,6 +5669,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("AnimQuatUnpack::LogStats", AnimQuatUnpack::LogStats());
     STAT_TIME("AnimVec3Track::LogStats", AnimVec3Track::LogStats());
     STAT_TIME("AnimScalarTrack::LogStats", AnimScalarTrack::LogStats());
+    STAT_TIME("AnimSplineTrack::LogStats", AnimSplineTrack::LogStats());
     STAT_TIME("M2SortKey::LogStats", M2SortKey::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
@@ -8472,6 +8474,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     AnimQuatUnpack::Init();
     AnimVec3Track::Init();
     AnimScalarTrack::Init();
+    AnimSplineTrack::Init();
     M2SortKey::Init();
     FrustumAabb::Init();
     SegmentAabb::Init();
@@ -11559,6 +11562,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             M2MatrixSlot::Shutdown();
             M2BatchMatrix::Shutdown();
             AnimScalarTrack::Shutdown();
+            AnimSplineTrack::Shutdown();
             M2AnimStride::Shutdown();
             M2AnimReuse::Shutdown();
             SamplingProfiler::Shutdown();

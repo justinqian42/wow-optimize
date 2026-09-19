@@ -588,6 +588,9 @@ namespace Config {
         // Hardware double-precision SSE2 rewrite of the M2 scalar and color
         // animation track evaluators (sub_82AF40 and sub_82B340).
         bool OptAnimScalarTrack = true;
+        // Hardware double-precision SSE2 rewrite of the M2 3D vector and scalar
+        // cubic spline animation track evaluators (sub_82B460 and sub_82B8A0).
+        bool OptAnimSplineTrack = true;
         // Holds a distant model's skeleton for a frame by taking the
         // client's own no-bones branch out of the bone loop. The tail still
         // runs, so materials and attachments keep animating.
