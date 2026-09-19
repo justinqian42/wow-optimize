@@ -173,6 +173,7 @@ static void BuildKnownFuncTable() {
 
         // --- Math / transform library ---
         { 0x004C1B30,    90, "CMatrix::TranslateLocal" },
+        { 0x004C1B90,    86, "CMatrix::ScaleLocal" },
         { 0x004C1C40,   170, "CMatrix::FromQuaternion" },
         { 0x004C1F00,   533, "CMatrix::Multiply" },
         { 0x004C2120,   140, "CMatrix::ScalarMul" },
@@ -180,9 +181,11 @@ static void BuildKnownFuncTable() {
         { 0x004C2210,    93, "RowAffinePoint" },
         { 0x004C2270,   140, "sub_4C2270_vec4_x_mat4" },
         { 0x004C2300,   111, "InPlacePointXform" },
+        { 0x004C2370,    43, "CMatrix::MultiplyInPlace" },
         { 0x004C23D0,   104, "CMatrix::Transpose" },
         { 0x004C2440,  2892, "CMatrix_AdjugateDet" },
         { 0x004C2FC0,   212, "CMatrix::InvertRigid" },
+        { 0x004C3290,   103, "CMatrix::CreateRotateZ" },
         { 0x004C3300,    60, "CMatrix::RotateX" },
         { 0x004C3340,    60, "CMatrix::RotateY" },
         { 0x004C3380,    60, "CMatrix::RotateZ" },

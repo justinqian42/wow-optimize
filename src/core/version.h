@@ -369,6 +369,13 @@
 // and redundant memcpy operations. Pointer-validated + SEH + shadow verification.
 #define TEST_DISABLE_MATRIX_ROTATE_SSE2         0
 
+// SSE2 CMatrix::MultiplyInPlace (sub_4C2370, 27 callers), CMatrix::ScaleLocal
+// (sub_4C1B90, 18 callers), and CMatrix::CreateRotateZ (sub_4C3290, 13 callers).
+// Vectorizes in-place 4x4 matrix multiplication, 3-axis local scaling, and
+// Z-rotation matrix generation in IEEE double precision matching stock accumulation
+// order. Pointer-validated + SEH + shadow verification.
+#define TEST_DISABLE_MATRIX_OPS_SSE2            0
+
 // Quaternion -> 3x3 rotation matrix (sub_4C1C40), the arithmetic core behind
 // all three of the client's quaternion wrappers. Runs once per animated bone
 // per frame inside sub_82F0F0, the largest single entry in the main-thread
