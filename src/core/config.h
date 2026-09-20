@@ -523,6 +523,7 @@ namespace Config {
         // loads, on a leaf called from 26 sites. Compared bit for bit against the
         // client per call before it answers; opt-in until run.
         bool OptFloorSplit = false;
+        bool OptSkyCloudTexels = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so

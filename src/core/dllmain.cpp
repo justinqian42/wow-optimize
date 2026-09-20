@@ -75,6 +75,7 @@
 #include "m2_batch_sort.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
+#include "sky_cloud_texels.h"
 #include "particle_track_eval_sse2.h"
 #include "shader_const_dedup_sse2.h"
 #include "batch_colour_convert.h"
@@ -5731,6 +5732,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("BatchColourConvert::LogStats", BatchColourConvert::LogStats());
     STAT_TIME("SpellEffectCulling::LogStats", SpellEffectCulling::LogStats());
     STAT_TIME("FloorSplit::LogStats", FloorSplit::LogStats());
+    STAT_TIME("SkyCloudTexels::LogStats", SkyCloudTexels::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
@@ -8545,6 +8547,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     ShaderConstDedup::Init();
     BatchColourConvert::Init();
     FloorSplit::Init();
+    SkyCloudTexels::Init();
     FrustumAabb::Init();
     SegmentAabb::Init();
     LuaHGetDispatch::Init();
@@ -11635,6 +11638,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             ShaderConstDedup::Shutdown();
             BatchColourConvert::Shutdown();
             FloorSplit::Shutdown();
+            SkyCloudTexels::Shutdown();
             LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();

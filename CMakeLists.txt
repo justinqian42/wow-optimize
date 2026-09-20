@@ -171,6 +171,7 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/m2_batch_sort.cpp
     src/simd_math/collision_poly_clip_sse2.cpp
     src/hooks_subsystems/sky_texture_reuse.cpp
+    src/hooks_subsystems/sky_cloud_texels.cpp
     src/simd_math/particle_track_eval_sse2.cpp
     src/simd_math/shader_const_dedup_sse2.cpp
     src/simd_math/batch_colour_convert.cpp

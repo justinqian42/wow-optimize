@@ -168,6 +168,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "ShaderConstDedup", &Settings::OptShaderConstDedup },
     { "Graphics_Sound", "BatchColourConvert", &Settings::OptBatchColourConvert },
     { "Graphics_Sound", "FloorSplit", &Settings::OptFloorSplit },
+    { "Graphics_Sound", "SkyCloudTexels", &Settings::OptSkyCloudTexels },
     { "Graphics_Sound", "FrustumAabb", &Settings::OptFrustumAabb },
     { "Graphics_Sound", "SegmentAabb", &Settings::OptSegmentAabb },
     { "UI_Lua", "LuaHGetDispatch", &Settings::OptLuaHGetDispatch },
@@ -735,6 +736,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptShaderConstDedup = GetPrivateProfileIntA("Graphics_Sound", "ShaderConstDedup", 0, iniPath.c_str()) != 0;
         g_settings.OptBatchColourConvert = GetPrivateProfileIntA("Graphics_Sound", "BatchColourConvert", 0, iniPath.c_str()) != 0;
         g_settings.OptFloorSplit      = GetPrivateProfileIntA("Graphics_Sound", "FloorSplit", 0, iniPath.c_str()) != 0;
+        g_settings.OptSkyCloudTexels  = GetPrivateProfileIntA("Graphics_Sound", "SkyCloudTexels", 0, iniPath.c_str()) != 0;
         g_settings.OptFrustumAabb     = GetPrivateProfileIntA("Graphics_Sound", "FrustumAabb", 0, iniPath.c_str()) != 0;
         g_settings.OptSegmentAabb     = GetPrivateProfileIntA("Graphics_Sound", "SegmentAabb", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaHGetDispatch = GetPrivateProfileIntA("UI_Lua", "LuaHGetDispatch", 0, iniPath.c_str()) != 0;

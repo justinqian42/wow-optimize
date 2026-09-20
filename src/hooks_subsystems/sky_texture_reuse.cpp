@@ -66,6 +66,7 @@
 #include <cstring>
 
 #include "sky_texture_reuse.h"
+#include "sky_cloud_texels.h"
 #include "MinHook.h"
 #include "version.h"
 #include "config.h"
@@ -389,9 +390,30 @@ void ApplyBook(void* self, const Book& b) {
     WR8(self, kF_rebuildAll, 0);
 }
 
+// The client's own build, timed, with the texel comparison bracketing it. Every
+// path that reaches the loops goes through here so the milliseconds and the
+// comparison both count the same passes.
+void RunClientBuild(void* self, void* edx) {
+    SkyCloudTexels::Before(self);
+    LARGE_INTEGER tA, tB;
+    QueryPerformanceCounter(&tA);
+    g_orig(self, edx);
+    QueryPerformanceCounter(&tB);
+    g_buildTicks += tB.QuadPart - tA.QuadPart;
+    ++g_buildTimed;
+    ++g_built;
+    SkyCloudTexels::After(self);
+}
+
 void __fastcall Detour(void* self, void* edx) {
     ++g_calls;
     if (g_dead || !self) { g_orig(self, edx); return; }
+    if (!Config::g_settings.OptSkyTextureReuse) {
+        // Only the texel comparison wanted this hook. Nothing is remembered and
+        // nothing is skipped; the client builds every pass.
+        RunClientBuild(self, edx);
+        return;
+    }
     if (g_owner == 0) g_owner = GetCurrentThreadId();
     if (GetCurrentThreadId() != g_owner) { ++g_odd; g_orig(self, edx); return; }
 
@@ -432,13 +454,7 @@ void __fastcall Detour(void* self, void* edx) {
     }
 
     const uint64_t before = repeat ? HashRows(self, firstRow, rows) : 0;
-    LARGE_INTEGER tA, tB;
-    QueryPerformanceCounter(&tA);
-    g_orig(self, edx);
-    QueryPerformanceCounter(&tB);
-    g_buildTicks += tB.QuadPart - tA.QuadPart;
-    ++g_buildTimed;
-    ++g_built;
+    RunClientBuild(self, edx);
 
     if (!BookMatches(self, book)) {
         Retire("the fields the function leaves behind are not what this predicted");
@@ -472,7 +488,11 @@ bool BytesMatch(uintptr_t addr, const unsigned char* want, size_t n) {
 }  // namespace
 
 bool Init() {
-    if (!Config::g_settings.OptSkyTextureReuse) return true;
+    // The hook is shared. SkyCloudTexels reads the same call and two modules
+    // cannot hook one address, so this installs it whenever either wants it, and
+    // the reuse logic below stays gated on its own switch.
+    if (!Config::g_settings.OptSkyTextureReuse &&
+        !Config::g_settings.OptSkyCloudTexels) return true;
 
     if (!BytesMatch(kTarget, kPrologue, sizeof(kPrologue))) {
         Log("[SkyTextureReuse] NOT active: the bytes at 0x%08X are not the cloud "
@@ -527,7 +547,8 @@ void Shutdown() {
 }
 
 void LogStats() {
-    if (!Config::g_settings.OptSkyTextureReuse) return;
+    if (!Config::g_settings.OptSkyTextureReuse &&
+        !Config::g_settings.OptSkyCloudTexels) return;
     if (!g_installed) {
         Log("[SkyTextureReuse] not installed - the reason is at the top of this log");
         return;
