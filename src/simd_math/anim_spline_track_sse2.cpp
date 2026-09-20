@@ -434,12 +434,7 @@ void __cdecl Hooked_SplineVec3(void* obj, void* state, void* track,
         return;
     }
     const unsigned long long t = AbTest::TickIn();
-    __try {
-        Hooked_SplineVec3Body(obj, state, track, out, defVal);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        orig_SplineVec3(obj, state, track, out, defVal);
-    }
+    Hooked_SplineVec3Body(obj, state, track, out, defVal);
     AbTest::TickOut(t);
 }
 
@@ -450,12 +445,7 @@ void __cdecl Hooked_SplineScalar(void* obj, void* state, void* track,
         return;
     }
     const unsigned long long t = AbTest::TickIn();
-    __try {
-        Hooked_SplineScalarBody(obj, state, track, out, defVal);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        orig_SplineScalar(obj, state, track, out, defVal);
-    }
+    Hooked_SplineScalarBody(obj, state, track, out, defVal);
     AbTest::TickOut(t);
 }
 

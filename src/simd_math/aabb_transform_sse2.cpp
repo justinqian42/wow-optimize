@@ -562,15 +562,10 @@ void __cdecl Hooked_Transform4x4(const float* m, const float* in_aabb, float* ou
         return;
     }
     const unsigned long long t = AbTest::TickIn();
-    __try {
-        if (AbTest::StandAside()) {
-            orig_Transform4x4(m, in_aabb, out_aabb);
-        } else {
-            Hooked_Transform4x4Body(m, in_aabb, out_aabb);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
+    if (AbTest::StandAside()) {
         orig_Transform4x4(m, in_aabb, out_aabb);
+    } else {
+        Hooked_Transform4x4Body(m, in_aabb, out_aabb);
     }
     AbTest::TickOut(t);
 }
@@ -581,15 +576,10 @@ void __cdecl Hooked_Transform3x3(const float* m, const float* in_aabb, float* ou
         return;
     }
     const unsigned long long t = AbTest::TickIn();
-    __try {
-        if (AbTest::StandAside()) {
-            orig_Transform3x3(m, in_aabb, out_aabb);
-        } else {
-            Hooked_Transform3x3Body(m, in_aabb, out_aabb);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
+    if (AbTest::StandAside()) {
         orig_Transform3x3(m, in_aabb, out_aabb);
+    } else {
+        Hooked_Transform3x3Body(m, in_aabb, out_aabb);
     }
     AbTest::TickOut(t);
 }
@@ -599,17 +589,8 @@ float* __cdecl Hooked_TransformAffine(float* out_aabb, const float* in_aabb, con
         return Hooked_TransformAffineBody(out_aabb, in_aabb, m);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_TransformAffine(out_aabb, in_aabb, m);
-        } else {
-            res = Hooked_TransformAffineBody(out_aabb, in_aabb, m);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_TransformAffine(out_aabb, in_aabb, m);
-    }
+    float* res = AbTest::StandAside() ? orig_TransformAffine(out_aabb, in_aabb, m)
+                                      : Hooked_TransformAffineBody(out_aabb, in_aabb, m);
     AbTest::TickOut(t);
     return res;
 }
@@ -619,17 +600,8 @@ float* __fastcall Hooked_AabbUnion(float* this_box, void* edx, float* out_box, c
         return Hooked_AabbUnionBody(this_box, edx, out_box, other_box);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_AabbUnion(this_box, edx, out_box, other_box);
-        } else {
-            res = Hooked_AabbUnionBody(this_box, edx, out_box, other_box);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_AabbUnion(this_box, edx, out_box, other_box);
-    }
+    float* res = AbTest::StandAside() ? orig_AabbUnion(this_box, edx, out_box, other_box)
+                                      : Hooked_AabbUnionBody(this_box, edx, out_box, other_box);
     AbTest::TickOut(t);
     return res;
 }
@@ -639,17 +611,8 @@ float* __cdecl Hooked_Vec3Min(float* out_vec, const float* a, const float* b) {
         return Hooked_Vec3MinBody(out_vec, a, b);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_Vec3Min(out_vec, a, b);
-        } else {
-            res = Hooked_Vec3MinBody(out_vec, a, b);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_Vec3Min(out_vec, a, b);
-    }
+    float* res = AbTest::StandAside() ? orig_Vec3Min(out_vec, a, b)
+                                      : Hooked_Vec3MinBody(out_vec, a, b);
     AbTest::TickOut(t);
     return res;
 }
@@ -659,17 +622,8 @@ float* __cdecl Hooked_Vec3Max(float* out_vec, const float* a, const float* b) {
         return Hooked_Vec3MaxBody(out_vec, a, b);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_Vec3Max(out_vec, a, b);
-        } else {
-            res = Hooked_Vec3MaxBody(out_vec, a, b);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_Vec3Max(out_vec, a, b);
-    }
+    float* res = AbTest::StandAside() ? orig_Vec3Max(out_vec, a, b)
+                                      : Hooked_Vec3MaxBody(out_vec, a, b);
     AbTest::TickOut(t);
     return res;
 }
@@ -814,17 +768,8 @@ float* __cdecl Hooked_FromVertices(float* out_box, const float* verts, uint32_t 
         return Hooked_FromVerticesBody(out_box, verts, count);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_FromVertices(out_box, verts, count);
-        } else {
-            res = Hooked_FromVerticesBody(out_box, verts, count);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_FromVertices(out_box, verts, count);
-    }
+    float* res = AbTest::StandAside() ? orig_FromVertices(out_box, verts, count)
+                                      : Hooked_FromVerticesBody(out_box, verts, count);
     AbTest::TickOut(t);
     return res;
 }

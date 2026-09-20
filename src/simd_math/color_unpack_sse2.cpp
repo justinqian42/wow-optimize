@@ -657,7 +657,8 @@ void Hooked_ColorHSVToRGBBody(const float* hsv, float* rgb) {
 }
 
 // ============================================================================
-// Hook Detours with AbTest and SEH Protection
+// ============================================================================
+// Hook Detours with AbTest
 // ============================================================================
 
 float* __fastcall Hooked_ColorUnpackBGRA(float* this_out, void* edx, const uint8_t* bgra) {
@@ -665,17 +666,8 @@ float* __fastcall Hooked_ColorUnpackBGRA(float* this_out, void* edx, const uint8
         return Hooked_ColorUnpackBGRABody(this_out, edx, bgra);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_ColorUnpackBGRA(this_out, edx, bgra);
-        } else {
-            res = Hooked_ColorUnpackBGRABody(this_out, edx, bgra);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_ColorUnpackBGRA(this_out, edx, bgra);
-    }
+    float* res = AbTest::StandAside() ? orig_ColorUnpackBGRA(this_out, edx, bgra)
+                                      : Hooked_ColorUnpackBGRABody(this_out, edx, bgra);
     AbTest::TickOut(t);
     return res;
 }
@@ -685,17 +677,8 @@ float* __fastcall Hooked_ColorUnpackBGR(float* this_out, void* edx, const uint8_
         return Hooked_ColorUnpackBGRBody(this_out, edx, bgr);
     }
     const unsigned long long t = AbTest::TickIn();
-    float* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_ColorUnpackBGR(this_out, edx, bgr);
-        } else {
-            res = Hooked_ColorUnpackBGRBody(this_out, edx, bgr);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_ColorUnpackBGR(this_out, edx, bgr);
-    }
+    float* res = AbTest::StandAside() ? orig_ColorUnpackBGR(this_out, edx, bgr)
+                                      : Hooked_ColorUnpackBGRBody(this_out, edx, bgr);
     AbTest::TickOut(t);
     return res;
 }
@@ -705,17 +688,8 @@ uint32_t __fastcall Hooked_ColorPackBGRA(uint32_t* this_out, void* edx, float a,
         return Hooked_ColorPackBGRABody(this_out, edx, a, r, g, b);
     }
     const unsigned long long t = AbTest::TickIn();
-    uint32_t res = 0;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_ColorPackBGRA(this_out, edx, a, r, g, b);
-        } else {
-            res = Hooked_ColorPackBGRABody(this_out, edx, a, r, g, b);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_ColorPackBGRA(this_out, edx, a, r, g, b);
-    }
+    uint32_t res = AbTest::StandAside() ? orig_ColorPackBGRA(this_out, edx, a, r, g, b)
+                                        : Hooked_ColorPackBGRABody(this_out, edx, a, r, g, b);
     AbTest::TickOut(t);
     return res;
 }
@@ -725,17 +699,8 @@ uint8_t* __fastcall Hooked_ColorPackBGR(uint8_t* this_out, void* edx, const floa
         return Hooked_ColorPackBGRBody(this_out, edx, rgb);
     }
     const unsigned long long t = AbTest::TickIn();
-    uint8_t* res = nullptr;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_ColorPackBGR(this_out, edx, rgb);
-        } else {
-            res = Hooked_ColorPackBGRBody(this_out, edx, rgb);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_ColorPackBGR(this_out, edx, rgb);
-    }
+    uint8_t* res = AbTest::StandAside() ? orig_ColorPackBGR(this_out, edx, rgb)
+                                        : Hooked_ColorPackBGRBody(this_out, edx, rgb);
     AbTest::TickOut(t);
     return res;
 }
@@ -745,17 +710,8 @@ int __fastcall Hooked_Vec3DominantAxis(const float* this_vec, void* edx) {
         return Hooked_Vec3DominantAxisBody(this_vec, edx);
     }
     const unsigned long long t = AbTest::TickIn();
-    int res = 0;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_Vec3DominantAxis(this_vec, edx);
-        } else {
-            res = Hooked_Vec3DominantAxisBody(this_vec, edx);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_Vec3DominantAxis(this_vec, edx);
-    }
+    int res = AbTest::StandAside() ? orig_Vec3DominantAxis(this_vec, edx)
+                                   : Hooked_Vec3DominantAxisBody(this_vec, edx);
     AbTest::TickOut(t);
     return res;
 }
@@ -765,17 +721,8 @@ int __fastcall Hooked_Vec3RecessiveAxis(const float* this_vec, void* edx) {
         return Hooked_Vec3RecessiveAxisBody(this_vec, edx);
     }
     const unsigned long long t = AbTest::TickIn();
-    int res = 0;
-    __try {
-        if (AbTest::StandAside()) {
-            res = orig_Vec3RecessiveAxis(this_vec, edx);
-        } else {
-            res = Hooked_Vec3RecessiveAxisBody(this_vec, edx);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
-        res = orig_Vec3RecessiveAxis(this_vec, edx);
-    }
+    int res = AbTest::StandAside() ? orig_Vec3RecessiveAxis(this_vec, edx)
+                                   : Hooked_Vec3RecessiveAxisBody(this_vec, edx);
     AbTest::TickOut(t);
     return res;
 }
@@ -786,15 +733,10 @@ void __cdecl Hooked_ColorRGBToHSV(const float* rgb, float* hsv) {
         return;
     }
     const unsigned long long t = AbTest::TickIn();
-    __try {
-        if (AbTest::StandAside()) {
-            orig_ColorRGBToHSV(rgb, hsv);
-        } else {
-            Hooked_ColorRGBToHSVBody(rgb, hsv);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
+    if (AbTest::StandAside()) {
         orig_ColorRGBToHSV(rgb, hsv);
+    } else {
+        Hooked_ColorRGBToHSVBody(rgb, hsv);
     }
     AbTest::TickOut(t);
 }
@@ -805,15 +747,10 @@ void __cdecl Hooked_ColorHSVToRGB(const float* hsv, float* rgb) {
         return;
     }
     const unsigned long long t = AbTest::TickIn();
-    __try {
-        if (AbTest::StandAside()) {
-            orig_ColorHSVToRGB(hsv, rgb);
-        } else {
-            Hooked_ColorHSVToRGBBody(hsv, rgb);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_dead = true;
+    if (AbTest::StandAside()) {
         orig_ColorHSVToRGB(hsv, rgb);
+    } else {
+        Hooked_ColorHSVToRGBBody(hsv, rgb);
     }
     AbTest::TickOut(t);
 }
