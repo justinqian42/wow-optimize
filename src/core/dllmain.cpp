@@ -1108,60 +1108,44 @@ extern "C" void InvalidateObjVisCacheFor(void* This);
 #endif
 extern "C" void InvalidateUnitApiCacheFor(uint64_t guid);
 
+__declspec(noinline) static void InvalidateForUnlinkNode(void* This) {
+    __try {
+        uint32_t* j = (uint32_t*)This;
+        uint64_t guid = ((uint64_t)j[13] << 32) | j[12];
+        InvalidateUnitApiCacheFor(guid);
+        GuidLookupCache::Invalidate(guid);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 static void* __fastcall Hooked_UnlinkNode(void* This, void* unused) {
     if (This) {
         InvalidateDeferredFieldUpdatesFor(This);
 #if !TEST_DISABLE_OBJ_VIS_CACHE
         InvalidateObjVisCacheFor(This);
 #endif
-        __try {
-            uint32_t* j = (uint32_t*)This;
-            uint64_t guid = ((uint64_t)j[13] << 32) | j[12];
-            InvalidateUnitApiCacheFor(guid);
-            GuidLookupCache::Invalidate(guid);
-        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        InvalidateForUnlinkNode(This);
     }
     void* result = orig_UnlinkNode(This);
     RcuObjMgr::UpdateActiveRcuArray();
     return result;
 }
 
-static void __fastcall Hooked_OnFieldUpdate(void* This, void* unused, int fieldId, int value) {
-    if (This) {
-        __try {
-            uint32_t* j = (uint32_t*)This;
-            uint64_t guid = ((uint64_t)j[13] << 32) | j[12];
-            InvalidateUnitApiCacheFor(guid);
-        } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    }
-#if TEST_DISABLE_DEFERRED_FIELD_UPDATES
-    return orig_OnFieldUpdate(This, fieldId, value);
-#else
-    if (LoadingDefrag::IsLoadingActive()) {
-        return orig_OnFieldUpdate(This, fieldId, value);
-    }
+__declspec(noinline) static void InvalidateForFieldUpdate(void* This) {
     __try {
-        // Critical fields (HP, Mana, GUID, Flags, Level) process immediately
-        if (fieldId < 0x40) {
-            if (Config::g_settings.OptWorldStateCoalesce) {
-                if (WorldStateCoalesce::ProcessFieldUpdate(This, fieldId, value, (void*)orig_OnFieldUpdate)) {
-                    return;
-                }
-            }
-            return orig_OnFieldUpdate(This, fieldId, value);
-        }
+        uint32_t* j = (uint32_t*)This;
+        uint64_t guid = ((uint64_t)j[13] << 32) | j[12];
+        InvalidateUnitApiCacheFor(guid);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
 
-        // Process display, mount, and scale fields immediately to prevent model stretching/flickering
-        if (fieldId == 70 || fieldId == 71 || fieldId == 74 || fieldId == 75 || fieldId == 117) {
-            return orig_OnFieldUpdate(This, fieldId, value);
-        }
-
+__declspec(noinline) static bool TryEnqueueFieldUpdate(void* This, int fieldId, int value) {
+    __try {
         AcquireSRWLockExclusive(&g_fieldQueueLock);
         LONG tail = g_fieldTail;
         LONG nextTail = (tail + 1) & FIELD_QUEUE_MASK;
         if (nextTail == g_fieldHead) {
             ReleaseSRWLockExclusive(&g_fieldQueueLock);
-            return orig_OnFieldUpdate(This, fieldId, value); // Queue full
+            return false; // Queue full
         }
 
         g_fieldQueue[tail].fieldId = fieldId;
@@ -1169,27 +1153,72 @@ static void __fastcall Hooked_OnFieldUpdate(void* This, void* unused, int fieldI
         g_fieldQueue[tail].unit = This;
         g_fieldTail = nextTail;
         ReleaseSRWLockExclusive(&g_fieldQueueLock);
-        return;
+        return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static void __fastcall Hooked_OnFieldUpdate(void* This, void* unused, int fieldId, int value) {
+    if (This) {
+        InvalidateForFieldUpdate(This);
+    }
+#if TEST_DISABLE_DEFERRED_FIELD_UPDATES
+    return orig_OnFieldUpdate(This, fieldId, value);
+#else
+    if (LoadingDefrag::IsLoadingActive()) {
         return orig_OnFieldUpdate(This, fieldId, value);
+    }
+
+    // Critical fields (HP, Mana, GUID, Flags, Level) process immediately
+    if (fieldId < 0x40) {
+        if (Config::g_settings.OptWorldStateCoalesce) {
+            if (WorldStateCoalesce::ProcessFieldUpdate(This, fieldId, value, (void*)orig_OnFieldUpdate)) {
+                return;
+            }
+        }
+        return orig_OnFieldUpdate(This, fieldId, value);
+    }
+
+    // Process display, mount, and scale fields immediately to prevent model stretching/flickering
+    if (fieldId == 70 || fieldId == 71 || fieldId == 74 || fieldId == 75 || fieldId == 117) {
+        return orig_OnFieldUpdate(This, fieldId, value);
+    }
+
+    if (!TryEnqueueFieldUpdate(This, fieldId, value)) {
+        orig_OnFieldUpdate(This, fieldId, value);
     }
 #endif
 }
 
 extern "C" void InvalidateDeferredFieldUpdatesFor(void* unit) {
 #if !TEST_DISABLE_DEFERRED_FIELD_UPDATES
-    if (!unit) return;
+    if (unit == nullptr) return;
+
     AcquireSRWLockExclusive(&g_fieldQueueLock);
     LONG head = g_fieldHead;
     LONG tail = g_fieldTail;
+
     while (head != tail) {
         if (g_fieldQueue[head].unit == unit) {
             g_fieldQueue[head].unit = nullptr;
         }
         head = (head + 1) & FIELD_QUEUE_MASK;
     }
+
     ReleaseSRWLockExclusive(&g_fieldQueueLock);
 #endif
+}
+
+__declspec(noinline) static void SafeDispatchDeferredFieldUpdate(void* unit, int fieldId, int value) {
+    __try {
+        uintptr_t p = (uintptr_t)unit;
+        if (p > 0x10000 && p < 0x7FFE0000) {
+            orig_OnFieldUpdate(unit, fieldId, value);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        // Unit was freed - safe to ignore
+    }
 }
 
 static void FlushFieldUpdates() {
@@ -1197,13 +1226,18 @@ static void FlushFieldUpdates() {
     // Thread safety: Flush must only run on the main thread
     if (g_mainThreadId != 0 && GetCurrentThreadId() != g_mainThreadId) return;
 
-    static constexpr int TEMP_SIZE = 4096;
-    static FieldTask tempQueue[TEMP_SIZE];
+    // If not locked quickly, skip this frame to prevent hitching
+    if (!TryAcquireSRWLockExclusive(&g_fieldQueueLock)) {
+        return;
+    }
+
+    constexpr int TEMP_SIZE = 256;
+    FieldTask tempQueue[TEMP_SIZE];
     int tempCount = 0;
 
-    AcquireSRWLockExclusive(&g_fieldQueueLock);
     LONG head = g_fieldHead;
     LONG tail = g_fieldTail;
+
     if (head == tail) {
         ReleaseSRWLockExclusive(&g_fieldQueueLock);
         return;
@@ -1224,14 +1258,7 @@ static void FlushFieldUpdates() {
     for (int i = 0; i < tempCount; i++) {
         void* unit = tempQueue[i].unit;
         if (unit != nullptr) {
-            __try {
-                uintptr_t p = (uintptr_t)unit;
-                if (p > 0x10000 && p < 0xFFE00000) {
-                    orig_OnFieldUpdate(unit, tempQueue[i].fieldId, tempQueue[i].value);
-                }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-                // Unit was freed - safe to ignore
-            }
+            SafeDispatchDeferredFieldUpdate(unit, tempQueue[i].fieldId, tempQueue[i].value);
         }
     }
 #endif
@@ -1242,12 +1269,26 @@ static bool InstallFieldUpdateHook() {
     Log("Deferred field updates: DISABLED (test toggle)");
     return false;
 #else
-    // Both of these used to return false without a word, so the log showed this
-    // module's section header and then nothing at all. A tester crashed 0x1A0
-    // bytes from this hook's target and the log gave no way to tell whether the
-    // hook was even installed - which is the one thing needed to rule it in or
-    // out. Same shape as the Lua bytecode cache, found the same day.
     void* target = (void*)0x006A3C40;
+    void* unlink_target = (void*)0x004D4C20;
+
+    if (!WowOpt_ClientPatchAllowed(target) || !WowOpt_ClientPatchAllowed(unlink_target)) {
+        Log("Deferred field updates: NOT active - client patches disallowed by policy");
+        return false;
+    }
+
+    static const unsigned char kExp_OnFieldUpdate[8] = { 0x55, 0x8B, 0xEC, 0x53, 0x8B, 0x5D, 0x0C, 0x56 };
+    static const unsigned char kExp_UnlinkNode[8]    = { 0x56, 0x8D, 0x41, 0x08, 0x57, 0x8B, 0x38, 0x85 };
+
+    if (IsBadReadPtr(target, 8) || memcmp(target, kExp_OnFieldUpdate, 8) != 0) {
+        Log("Deferred field updates: NOT active - bad prologue at 0x006A3C40");
+        return false;
+    }
+    if (IsBadReadPtr(unlink_target, 8) || memcmp(unlink_target, kExp_UnlinkNode, 8) != 0) {
+        Log("Deferred field updates: NOT active - bad prologue at 0x004D4C20");
+        return false;
+    }
+
     MH_STATUS st = WineSafe_CreateHook(target, (void*)Hooked_OnFieldUpdate,
                                        (void**)&orig_OnFieldUpdate);
     if (st != MH_OK) {
@@ -1264,7 +1305,6 @@ static bool InstallFieldUpdateHook() {
         return false;
     }
 
-    void* unlink_target = (void*)0x004D4C20;
     if (WineSafe_CreateHook(unlink_target, (void*)Hooked_UnlinkNode, (void**)&orig_UnlinkNode) == MH_OK) {
         WO_EnableHook(unlink_target);
     }
