@@ -507,6 +507,10 @@ namespace Config {
         // built the same rows, after proving on live data that the rebuild came
         // out byte for byte identical. Measures whether that ever happens.
         bool OptSkyTextureReuse = false;
+        // The per-particle track evaluation: the same arithmetic in SSE2 doubles,
+        // with the client's round-to-nearest converts. Compared byte for byte
+        // against the client per call before it answers; opt-in until run.
+        bool OptParticleTrackEval = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so

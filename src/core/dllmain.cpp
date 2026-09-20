@@ -75,6 +75,7 @@
 #include "m2_batch_sort.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
+#include "particle_track_eval_sse2.h"
 #include "frustum_aabb_sse2.h"
 #include "segment_aabb_sse2.h"
 #include "runtime_vm/lua_hget_dispatch.h"
@@ -5682,6 +5683,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("LuaErrorDiag::LogStats", LuaErrorDiagLogStats());
+    STAT_TIME("ParticleTrackEval::LogStats", ParticleTrackEval::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
@@ -8492,6 +8494,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2BatchSort::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
+    ParticleTrackEval::Init();
     FrustumAabb::Init();
     SegmentAabb::Init();
     LuaHGetDispatch::Init();
@@ -11575,6 +11578,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             M2BatchSort::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
+            ParticleTrackEval::Shutdown();
             LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();
