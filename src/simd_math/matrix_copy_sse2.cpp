@@ -787,35 +787,76 @@ static bool NormalizeAgreesWithClient(const float* before, const float* ours,
     return memcmp(theirs, ours, 3 * sizeof(float)) == 0;
 }
 
+// One body for both entry points, and the exception frame is not in it.
+//
+// C3Vector::Normalize(guarded) at 0x004C3600 is 1.89% of executing main-thread
+// time in a tester profile, and a __try region costs a prologue on every call
+// whether anything faults or not. The guard is kept while it proves itself -
+// the same shape the matrix copy and multiply in this file already use - and
+// dropped once it has run kNormProve calls without catching anything. One catch
+// and it stays on for the rest of the session and says so.
+//
+// Returns false when the caller should hand the call to the client: the vector
+// was left untouched in that case, or put back the way it was.
+static bool NormalizeBody(float* self, void* edx, bool guardedVariant,
+                          void (__fastcall* orig)(float*, void*)) {
+    float before[3] = { self[0], self[1], self[2] };
+    SSE2_Vec3NormalizeInPlace(self, guardedVariant);
+    if (!g_normTrusted) {
+        long n = InterlockedIncrement(&g_normChecked);
+        if (!NormalizeAgreesWithClient(before, self, orig, edx)) {
+            g_normAbandoned = true;
+            Log("[MatrixSSE2] %s disagreed with the client on call "
+                "%ld - handing every call back to the original",
+                guardedVariant ? "C3Vector::Normalize(guarded)" : "C3Vector::Normalize",
+                n);
+            self[0] = before[0]; self[1] = before[1]; self[2] = before[2];
+            return false;
+        }
+        if (n >= NORM_VERIFY_CALLS) {
+            g_normTrusted = true;
+            Log("[MatrixSSE2] Vector normalise agreed with the client on "
+                "%ld consecutive real calls - running ours alone", n);
+        }
+    }
+    return true;
+}
+
+static constexpr unsigned long kNormProve = 200000;
+static unsigned long g_normProved = 0;
+static unsigned long g_normFaults = 0;
+static volatile LONG g_normFaultLogged = 0;
+
+__declspec(noinline) static bool NormalizeGuarded(float* self, void* edx,
+                                                  bool guardedVariant,
+                                                  void (__fastcall* orig)(float*, void*)) {
+    __try {
+        return NormalizeBody(self, edx, guardedVariant, orig);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // The fault is on the initial load, so nothing was written yet and the
+        // client's own routine handles the vector exactly as it would have.
+        ++g_normFaults;
+        if (InterlockedCompareExchange(&g_normFaultLogged, 1, 0) == 0)
+            Log("[MatrixSSE2] the pointer guard caught a fault in the vector "
+                "normalise. It stays on for the rest of this session.");
+        return false;
+    }
+}
+
+static __forceinline bool NormalizeDispatch(float* self, void* edx, bool guardedVariant,
+                                            void (__fastcall* orig)(float*, void*)) {
+    if (g_normFaults || g_normProved < kNormProve) {
+        ++g_normProved;
+        return NormalizeGuarded(self, edx, guardedVariant, orig);
+    }
+    return NormalizeBody(self, edx, guardedVariant, orig);
+}
+
 static void __fastcall Hooked_Vec3Norm(float* self, void* edx) {
     ++g_vec3norm_calls;
     if (g_normAbandoned) { pOrigVec3Norm(self, edx); return; }
     if ((uintptr_t)self > 0x10000 && (uintptr_t)self < 0xFFE00000) {
-        __try {
-            float before[3] = { self[0], self[1], self[2] };
-            SSE2_Vec3NormalizeInPlace(self, false);
-            if (!g_normTrusted) {
-                long n = InterlockedIncrement(&g_normChecked);
-                if (!NormalizeAgreesWithClient(before, self, pOrigVec3Norm, edx)) {
-                    g_normAbandoned = true;
-                    Log("[MatrixSSE2] C3Vector::Normalize disagreed with the client on call "
-                        "%ld - handing every call back to the original", n);
-                    self[0] = before[0]; self[1] = before[1]; self[2] = before[2];
-                    pOrigVec3Norm(self, edx);
-                    return;
-                }
-                if (n >= NORM_VERIFY_CALLS) {
-                    g_normTrusted = true;
-                    Log("[MatrixSSE2] Vector normalise agreed with the client on "
-                        "%ld consecutive real calls - running ours alone", n);
-                }
-            }
-            return;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            // Bad pointer surfaced during the read -- nothing was written yet
-            // (the fault is on the initial load), so deferring to the original
-            // leaves the vector exactly as the engine would handle it.
-        }
+        if (NormalizeDispatch(self, edx, false, pOrigVec3Norm)) return;
     }
     pOrigVec3Norm(self, edx);
 }
@@ -824,28 +865,7 @@ static void __fastcall Hooked_Vec3NormSafe(float* self, void* edx) {
     ++g_vec3norm_calls;
     if (g_normAbandoned) { pOrigVec3NormSafe(self, edx); return; }
     if ((uintptr_t)self > 0x10000 && (uintptr_t)self < 0xFFE00000) {
-        __try {
-            float before[3] = { self[0], self[1], self[2] };
-            SSE2_Vec3NormalizeInPlace(self, true);
-            if (!g_normTrusted) {
-                long n = InterlockedIncrement(&g_normChecked);
-                if (!NormalizeAgreesWithClient(before, self, pOrigVec3NormSafe, edx)) {
-                    g_normAbandoned = true;
-                    Log("[MatrixSSE2] C3Vector::Normalize(guarded) disagreed with the client on call "
-                        "%ld - handing every call back to the original", n);
-                    self[0] = before[0]; self[1] = before[1]; self[2] = before[2];
-                    pOrigVec3NormSafe(self, edx);
-                    return;
-                }
-                if (n >= NORM_VERIFY_CALLS) {
-                    g_normTrusted = true;
-                    Log("[MatrixSSE2] Vector normalise agreed with the client on "
-                        "%ld consecutive real calls - running ours alone", n);
-                }
-            }
-            return;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-        }
+        if (NormalizeDispatch(self, edx, true, pOrigVec3NormSafe)) return;
     }
     pOrigVec3NormSafe(self, edx);
 }
@@ -3411,6 +3431,15 @@ void MatrixCopySSE2_LogStats(void) {
         g_matProved, g_matFaults,
         g_matArmed ? "armed" : (g_matFaults ? "held on by a catch"
                                             : "still proving"));
+    // The same guard on the vector normalise, which a tester profile puts at
+    // 1.89% of executing time on its own.
+    Log("[MatrixSSE2]   normalise guard: %lu call(s) ran under it, it caught %lu, "
+        "and it is %s.",
+        g_normProved, g_normFaults,
+        g_normFaults ? "held on by a catch"
+                     : (g_normProved >= kNormProve ? "off, so the normalise carries "
+                                                     "no exception frame"
+                                                   : "still proving"));
     Log("[MatrixSSE2]   transpose %lu, from3x3 %lu, "
         "pointxform-in-place %lu (%lu verified), vecmat-rotate %lu (%lu verified), invert-rigid %lu",
         g_mattranspose_calls, g_matfrom3x3_calls,
