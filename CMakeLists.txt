@@ -235,6 +235,7 @@ add_library(wow_optimize SHARED
     src/runtime_vm/lua_gc_fast.cpp
     src/runtime_vm/lua_gc_fast.h
     src/runtime_vm/lua_gc_governor.cpp
+    src/runtime_vm/lua_gc_pace.cpp
     src/runtime_vm/lua_gc_governor.h
     src/hooks_subsystems/sound_mixer_opt.cpp
     src/hooks_subsystems/sound_mixer_opt.h

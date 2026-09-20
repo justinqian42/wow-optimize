@@ -2291,6 +2291,8 @@ Stats GetStats() {
     s.gcStepsTotal        = State.gcStepsTotal;
     s.gcPause             = Config.gcPause;
     s.gcStepMul           = Config.gcStepMul;
+    s.gcPauseOrig         = State.origGCPause;
+    s.gcStepMulOrig       = State.origGCStepMul;
     return s;
 }
 

@@ -274,6 +274,7 @@ namespace Config {
         // stop stepping it by hand, so the pace it normally sets can be
         // measured against doing nothing. Off, because on is what ships today.
         bool OptLuaGcStockPace = false;
+        bool OptLuaGcPace = false;
         // Diagnostic. Samples the tables the collector walks and reports how
         // many of their slots are empty, which is the number a table compactor
         // would have to justify itself against.

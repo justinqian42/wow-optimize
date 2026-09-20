@@ -43,6 +43,10 @@ struct Stats {
     int    gcStepsTotal;
     int    gcPause;
     int    gcStepMul;
+    // What the client itself had before this DLL wrote over them. Needed to
+    // compare the two pacings rather than assert that ours is better.
+    int    gcPauseOrig;
+    int    gcStepMulOrig;
 };
 
 Stats GetStats();

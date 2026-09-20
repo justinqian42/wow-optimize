@@ -830,6 +830,7 @@ void ClearCombatLogCache();
 #include "wow_memory_opt.h"
 #include "sound_mixer_opt.h"
 #include "lua_gc_governor.h"
+#include "lua_gc_pace.h"
 #include "async_tex_loader.h"
 #include "mip_bias_governor.h"
 #include "perf_diagnostics.h"
@@ -2292,6 +2293,7 @@ static void MainThreadPump() {
 #if !TEST_DISABLE_LUA_GC_GOVERNOR
         LuaGCGovernor::OnFrame(elapsedMs);
 #endif
+        LuaGcPace::OnFrame();
 #if !TEST_DISABLE_ADAPTIVE_FARCLIP
     #endif
 #if !TEST_DISABLE_NET_ADDON_COALESCER
@@ -5682,6 +5684,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CrashDumper::FirstChanceSummary", CrashDumper::ReportFirstChanceSummary());
     STAT_TIME("PerfDiagnostics::LogStats", PerfDiagnostics::LogStats());
     STAT_TIME("LuaGCGovernor::LogStats", LuaGCGovernor::LogStats());
+    STAT_TIME("LuaGcPace::LogStats", LuaGcPace::LogStats());
     STAT_TIME("LuaMemPoolFast::LogStats", LuaMemPoolFast::LogStats());
     STAT_TIME("HeapCompactor_LogStats", HeapCompactor_LogStats());
     STAT_TIME("VertexFmtInline::LogStats", VertexFmtInline::LogStats());
@@ -9577,6 +9580,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("");
     Log("--- Adaptive Lua GC Governor ---");
     if (Config::g_settings.OptLuaGcCoalesce) LuaGCGovernor::Init();
+    LuaGcPace::Init();
 
     Log("");
     Log("--- Adaptive Farclip Controller ---");
@@ -11726,6 +11730,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             WorldStateCoalesce::Shutdown();
             SoundMixerOpt::Shutdown();
             LuaGCGovernor::Shutdown();
+            LuaGcPace::Shutdown();
             AdaptiveFarclip::Shutdown();
             FontGlyphCache::Shutdown();
             CombatLogFilter::Shutdown();

@@ -227,11 +227,21 @@ void LogStats() {
             "SamplingProfiler to see it.");
         return;
     }
+    // Who set the pause this figure is the cost of. Saying "set here" is wrong
+    // in the session that made it worth printing: this governor only installs
+    // under LuaGcCoalesce, that switch is off by default, and a default session
+    // reaches the pacing code zero times while lua_optimize.cpp has already
+    // written its own pause and step multiplier into every VM. The line credited
+    // this module for a setting it never made, which is the kind of confidently
+    // wrong diagnostic that steers a day of work.
     Log("[GCGovernor]   the client's own collector, over the last %lu profiler "
         "samples: luaC_traversetable %.2f%% (%lu), luaC_sweeplist %.2f%% (%lu), "
-        "%.2f%% together. That is the cost of the pause set here, and it is not "
-        "in the step figures above.",
-        win, tp, ts, sp, ss, tp + sp);
+        "%.2f%% together. It is not in the step figures above. %s",
+        win, tp, ts, sp, ss, tp + sp,
+        g_reachedPace > 0
+            ? "That is the cost of the pause this governor set."
+            : "This governor never reached its pacing code, so that is the cost "
+              "of the pause set in lua_optimize.cpp, not of anything here.");
 }
 
 // Where this is allowed to collect from, and what that rules out.
