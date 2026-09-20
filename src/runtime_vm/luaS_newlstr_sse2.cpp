@@ -7,6 +7,8 @@
 #include <emmintrin.h>
 #include "MinHook.h"
 #include "version.h"
+#include "config.h"
+#include "self_bench.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -142,18 +144,69 @@ static __declspec(noinline) void* LookupGuarded(void* L, const char* str, size_t
     }
 }
 
+// Nothing here ever asked the client whether it agrees.
+//
+// This walk reads the client's string table through six offsets taken from a
+// disassembly - the global state at L+0x14, the hash array and its size at
+// G+0x00 and G+0x08, the collector's current white at G+0x15, and a TString's
+// length and bytes at +16 and +20 - and hands back whatever it finds as an
+// interned string. Every other replacement in this tree runs both halves on the
+// same input for a while and retires itself on the first disagreement; this one
+// was the hottest of them at 2.12% of executing time in a field profile and had
+// no check at all. A wrong offset would not fault. It would return the wrong
+// string, or resurrect the wrong object, and nothing would say so.
+//
+// Interning is idempotent: asking the client for a string that is already in
+// the table returns that same pointer and allocates nothing. So a sample of
+// calls can simply ask it and compare pointers, which is both the verification
+// and the only paired timing this module can get.
+constexpr uint32_t kVerifyFirst  = 20000;
+constexpr uint32_t kResampleMask = 4095;
+static uint32_t g_verified = 0;
+static uint32_t g_disagreed = 0;
+static bool     g_dead = false;
+static int      g_benchSlot = -1;
+
+static __declspec(noinline) void RetireOnDisagreement(const char* str, size_t l,
+                                                      void* mine, void* theirs) {
+    ++g_disagreed;
+    g_dead = true;
+    Log("[luaS_newlstr] RETIRED: for a %u-byte string the table walk here answered "
+        "0x%08X and the client answered 0x%08X. Every intern from here on is the "
+        "client's own. First bytes: %.16s",
+        (unsigned)l, (unsigned)(uintptr_t)mine, (unsigned)(uintptr_t)theirs, str);
+}
+
 void* __cdecl Hooked_luaS_newlstr(void* L, const char* str, size_t l) {
     BumpWrap(g_newlstr_calls, g_newlstr_callWraps);
 
     // Bounds check string length and validate pointer
-    if (l >= (1 << 30) || !str || (uintptr_t)str < 0x10000 || (uintptr_t)str >= 0xFFE00000) {
+    if (g_dead || l >= (1 << 30) || !str || (uintptr_t)str < 0x10000 ||
+        (uintptr_t)str >= 0xFFE00000) {
         return orig_luaS_newlstr(L, str, l);
     }
+
+    const bool checking = (g_verified < kVerifyFirst) ||
+                          ((g_newlstr_calls & kResampleMask) == 0);
 
     void* found;
     if (g_caught || g_guarded < kGuardCalls) {
         ++g_guarded;
         found = LookupGuarded(L, str, l);
+    } else if (checking) {
+        const unsigned long long tA = SelfBench::Now();
+        found = LookupInterned(L, str, l);
+        const unsigned long long tB = SelfBench::Now();
+        if (found) {
+            void* theirs = orig_luaS_newlstr(L, str, l);
+            SelfBench::Pair(g_benchSlot, tB - tA, SelfBench::Now() - tB);
+            if (theirs != found) {
+                RetireOnDisagreement(str, l, found, theirs);
+                return theirs;
+            }
+            ++g_verified;
+        }
+        return found ? found : orig_luaS_newlstr(L, str, l);
     } else {
         found = LookupInterned(L, str, l);
     }
@@ -183,7 +236,11 @@ namespace LuaSNewlstr {
         }
         
         g_installed = true;
-        Log("[luaS_newlstr] ACTIVE (Hooked at 0x%08X)", ADDR_luaS_newlstr);
+        g_benchSlot = SelfBench::Register("LuaStrIntern");
+        Log("[luaS_newlstr] ACTIVE at 0x%08X - every string the client interns comes "
+            "through here. The first %u finds are checked against the client's own "
+            "answer and one in %u after that; the first different pointer retires it.",
+            ADDR_luaS_newlstr, kVerifyFirst, kResampleMask + 1);
         return true;
     }
 
@@ -214,6 +271,16 @@ namespace LuaSNewlstr {
             "inline (%.1f%%), %u string(s) resurrected that the collector had "
             "marked dead. Counts are lower bounds.",
             calls, hits, 100.0 * hits / calls, g_newlstr_dead);
+        if (g_disagreed) {
+            Log("[luaS_newlstr]   DISABLED: an answer differed from the client's. The "
+                "line saying which is earlier in this log.");
+        } else if (g_verified < kVerifyFirst) {
+            Log("[luaS_newlstr]   %u of %u finds checked against the client so far, "
+                "none differed.", g_verified, kVerifyFirst);
+        } else {
+            Log("[luaS_newlstr]   %u finds checked against the client, none differed; "
+                "one in %u is still checked.", g_verified, kResampleMask + 1);
+        }
         if (g_caught) {
             Log("[luaS_newlstr]   %u fault(s) were caught in the table walk, so "
                 "every call stays inside an exception frame. Anything above zero "
