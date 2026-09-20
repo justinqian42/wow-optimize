@@ -511,6 +511,10 @@ namespace Config {
         // with the client's round-to-nearest converts. Compared byte for byte
         // against the client per call before it answers; opt-in until run.
         bool OptParticleTrackEval = false;
+        // The shader constant shadow compare: one packed compare a register in place
+        // of four x87 compares. No arithmetic in it, so the bits are the same by
+        // construction; compared against the client per call before it answers.
+        bool OptShaderConstDedup = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
