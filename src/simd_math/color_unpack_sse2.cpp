@@ -1176,23 +1176,31 @@ bool Init() {
         return false;
     }
 
-    const unsigned char* pUnpackBgra = (const unsigned char*)kColorUnpackBGRA;
-    const unsigned char* pUnpackBgr  = (const unsigned char*)kColorUnpackBGR;
-    const unsigned char* pPackBgra   = (const unsigned char*)kColorPackBGRA;
-    const unsigned char* pPackBgr    = (const unsigned char*)kColorPackBGR;
-    const unsigned char* pRGBToHSV   = (const unsigned char*)kColorRGBToHSV;
-    const unsigned char* pHSVToRGB   = (const unsigned char*)kColorHSVToRGB;
-    const unsigned char* pDom        = (const unsigned char*)kVec3DomAxis;
-    const unsigned char* pRec        = (const unsigned char*)kVec3RecAxis;
+    static const unsigned char kExp_UnpackBgra[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0xC1, 0x8B, 0x4D, 0x08 };
+    static const unsigned char kExp_UnpackBgr[8]  = { 0x55, 0x8B, 0xEC, 0x8B, 0xC1, 0x8B, 0x4D, 0x08 };
+    static const unsigned char kExp_PackBgra[8]   = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x80, 0x7D };
+    static const unsigned char kExp_PackBgr[8]    = { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0xC1, 0x8B, 0x4D };
+    static const unsigned char kExp_RGBToHSV[8]   = { 0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0x57 };
+    static const unsigned char kExp_HSVToRGB[8]   = { 0x55, 0x8B, 0xEC, 0xD9, 0xEE, 0x8B, 0x4D, 0x08 };
+    static const unsigned char kExp_Dom[8]        = { 0xD9, 0x01, 0xD9, 0xE1, 0xD9, 0x41, 0x04, 0xD9 };
+    static const unsigned char kExp_Rec[8]        = { 0xD9, 0x01, 0xD9, 0xE1, 0xD9, 0x41, 0x04, 0xD9 };
 
-    if (pUnpackBgra[0] != 0x55 || pUnpackBgra[1] != 0x8B || pUnpackBgra[2] != 0xEC ||
-        pUnpackBgr[0]  != 0x55 || pUnpackBgr[1]  != 0x8B || pUnpackBgr[2]  != 0xEC ||
-        pPackBgra[0]   != 0x55 || pPackBgra[1]   != 0x8B || pPackBgra[2]   != 0xEC ||
-        pPackBgr[0]    != 0x55 || pPackBgr[1]    != 0x8B || pPackBgr[2]    != 0xEC ||
-        pRGBToHSV[0]   != 0x55 || pRGBToHSV[1]   != 0x8B || pRGBToHSV[2]   != 0xEC ||
-        pHSVToRGB[0]   != 0x55 || pHSVToRGB[1]   != 0x8B || pHSVToRGB[2]   != 0xEC ||
-        pDom[0]        != 0xD9 || pDom[1]        != 0x01 || pDom[2]        != 0xD9 || pDom[3] != 0xE1 ||
-        pRec[0]        != 0xD9 || pRec[1]        != 0x01 || pRec[2]        != 0xD9 || pRec[3] != 0xE1) {
+    auto CheckPrologue8 = [](void* addr, const unsigned char expected[8], const char* name) -> bool {
+        if (IsBadReadPtr(addr, 8) || memcmp(addr, expected, 8) != 0) {
+            Log("[ColorUnpack] BAD PROLOGUE for %s at 0x%08X", name, (uintptr_t)addr);
+            return false;
+        }
+        return true;
+    };
+
+    if (!CheckPrologue8((void*)kColorUnpackBGRA, kExp_UnpackBgra, "Color_UnpackBGRA") ||
+        !CheckPrologue8((void*)kColorUnpackBGR,  kExp_UnpackBgr,  "Color_UnpackBGR") ||
+        !CheckPrologue8((void*)kColorPackBGRA,   kExp_PackBgra,   "Color_PackBGRA") ||
+        !CheckPrologue8((void*)kColorPackBGR,    kExp_PackBgr,    "Color_PackBGR") ||
+        !CheckPrologue8((void*)kColorRGBToHSV,   kExp_RGBToHSV,   "Color_RGBToHSV") ||
+        !CheckPrologue8((void*)kColorHSVToRGB,   kExp_HSVToRGB,   "Color_HSVToRGB") ||
+        !CheckPrologue8((void*)kVec3DomAxis,     kExp_Dom,        "Vec3_DominantAxis") ||
+        !CheckPrologue8((void*)kVec3RecAxis,     kExp_Rec,        "Vec3_RecessiveAxis")) {
         Log("[ColorUnpack] unexpected prologue bytes - not installing.");
         return false;
     }

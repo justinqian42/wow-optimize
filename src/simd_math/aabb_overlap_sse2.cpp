@@ -259,6 +259,11 @@ bool Init() {
         Log("[AabbOverlap] 0x%08X unreadable - not installing", (unsigned)kOverlap);
         return false;
     }
+    static const unsigned char kExp_Overlap[8] = { 0x55, 0x8B, 0xEC, 0xD9, 0x41, 0x0C, 0x8B, 0x55 };
+    if (memcmp((const void*)kOverlap, kExp_Overlap, 8) != 0) {
+        Log("[AabbOverlap] BAD PROLOGUE for AabbOverlap at 0x%08X", (unsigned)kOverlap);
+        return false;
+    }
     if (WineSafe_CreateHook((void*)kOverlap, (void*)Hooked_Overlap,
                             (void**)&orig_Overlap) != MH_OK) {
         Log("[AabbOverlap] hook NOT created");

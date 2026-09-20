@@ -322,12 +322,9 @@ bool Init() {
         Log("[AnimVec3Track] 0x%08X unreadable - not installing", (unsigned)kVecTrack);
         return false;
     }
-    // push ebp / mov ebp, esp / mov edx, [ebp+arg_4]
-    const unsigned char* p = (const unsigned char*)kVecTrack;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC || p[3] != 0x8B) {
-        Log("[AnimVec3Track] 0x%08X does not start with the prologue this was read "
-            "from (%02X %02X %02X %02X) - not installing",
-            (unsigned)kVecTrack, p[0], p[1], p[2], p[3]);
+    static const unsigned char kExp_VecTrack[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x0C, 0x0F, 0xB7 };
+    if (memcmp((const void*)kVecTrack, kExp_VecTrack, 8) != 0) {
+        Log("[AnimVec3Track] BAD PROLOGUE for AnimVec3Track at 0x%08X", (unsigned)kVecTrack);
         return false;
     }
     if (WineSafe_CreateHook((void*)kVecTrack, (void*)Hooked_VecTrack,

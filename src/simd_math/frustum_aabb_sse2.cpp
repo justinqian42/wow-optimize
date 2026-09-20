@@ -727,19 +727,29 @@ const float* __fastcall Hooked_Translate(float* frustum, void* edx, const float*
     return delta;
 }
 
+static inline bool CheckPrologue8(void* addr, const unsigned char expected[8], const char* name) {
+    if (IsBadReadPtr(addr, 8) || memcmp(addr, expected, 8) != 0) {
+        Log("[FrustumAabb] BAD PROLOGUE for %s at 0x%08X", name, (uintptr_t)addr);
+        return false;
+    }
+    return true;
+}
+
 bool Init() {
     if (!Config::g_settings.OptFrustumAabb) return true;
 
-    if (IsBadReadPtr((void*)kIsVisible, 16) || IsBadReadPtr((void*)kThreshold, 4)) {
-        Log("[FrustumAabb] 0x%08X unreadable - not installing", (unsigned)kIsVisible);
+    if (IsBadReadPtr((void*)kThreshold, 4)) {
+        Log("[FrustumAabb] 0x%08X unreadable - not installing", (unsigned)kThreshold);
         return false;
     }
-    // push ebp / mov ebp, esp / sub esp, 8
-    const unsigned char* p = (const unsigned char*)kIsVisible;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC || p[3] != 0x83) {
-        Log("[FrustumAabb] 0x%08X does not start with the prologue this was read "
-            "from (%02X %02X %02X %02X) - not installing",
-            (unsigned)kIsVisible, p[0], p[1], p[2], p[3]);
+
+    static const unsigned char kExp_IsVisible[8]       = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45 };
+    static const unsigned char kExp_IsInside[8]        = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45 };
+    static const unsigned char kExp_IsPointVisible[8]  = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x08, 0x56, 0x8B };
+    static const unsigned char kExp_IsSphereVisible[8] = { 0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0xD9 };
+    static const unsigned char kExp_Translate[8]       = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0xD9, 0x41 };
+
+    if (!CheckPrologue8((void*)kIsVisible, kExp_IsVisible, "CFrustum::IsAABBVisible")) {
         return false;
     }
 
@@ -755,61 +765,50 @@ bool Init() {
         return false;
     }
 
-    if (!IsBadReadPtr((void*)kIsInside, 16) && !IsBadReadPtr((void*)kThresholdInside, 4)) {
-        const unsigned char* p2 = (const unsigned char*)kIsInside;
-        if (p2[0] == 0x55 && p2[1] == 0x8B && p2[2] == 0xEC && p2[3] == 0x83) {
-            g_thresholdInside = (double)*(const float*)kThresholdInside;
-            if (WineSafe_CreateHook((void*)kIsInside, (void*)Hooked_IsInside,
-                                    (void**)&orig_IsInside) == MH_OK) {
-                if (WO_EnableHook((void*)kIsInside) == MH_OK) {
-                    g_insideInstalled = true;
-                    SamplingProfiler::RegisterSelfSymbol("FrustumInside_SSE2", (const void*)&Hooked_IsInside);
-                    Log("[FrustumAabb] ACTIVE on CFrustum::IsAABBInside (0x%08X)", (unsigned)kIsInside);
-                }
+    if (!IsBadReadPtr((void*)kThresholdInside, 4) &&
+        CheckPrologue8((void*)kIsInside, kExp_IsInside, "CFrustum::IsAABBInside")) {
+        g_thresholdInside = (double)*(const float*)kThresholdInside;
+        if (WineSafe_CreateHook((void*)kIsInside, (void*)Hooked_IsInside,
+                                (void**)&orig_IsInside) == MH_OK) {
+            if (WO_EnableHook((void*)kIsInside) == MH_OK) {
+                g_insideInstalled = true;
+                SamplingProfiler::RegisterSelfSymbol("FrustumInside_SSE2", (const void*)&Hooked_IsInside);
+                Log("[FrustumAabb] ACTIVE on CFrustum::IsAABBInside (0x%08X)", (unsigned)kIsInside);
             }
         }
     }
 
-    if (!IsBadReadPtr((void*)kIsPointVisible, 16)) {
-        const unsigned char* p3 = (const unsigned char*)kIsPointVisible;
-        if (p3[0] == 0x55 && p3[1] == 0x8B && p3[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kIsPointVisible, (void*)Hooked_IsPointVisible,
-                                    (void**)&orig_IsPointVisible) == MH_OK) {
-                if (WO_EnableHook((void*)kIsPointVisible) == MH_OK) {
-                    g_pointInstalled = true;
-                    SamplingProfiler::RegisterSelfSymbol("FrustumPoint_SSE2", (const void*)&Hooked_IsPointVisible);
-                    Log("[FrustumAabb] ACTIVE on CFrustum::IsPointVisible (0x%08X)", (unsigned)kIsPointVisible);
-                }
+    if (CheckPrologue8((void*)kIsPointVisible, kExp_IsPointVisible, "CFrustum::IsPointVisible")) {
+        if (WineSafe_CreateHook((void*)kIsPointVisible, (void*)Hooked_IsPointVisible,
+                                (void**)&orig_IsPointVisible) == MH_OK) {
+            if (WO_EnableHook((void*)kIsPointVisible) == MH_OK) {
+                g_pointInstalled = true;
+                SamplingProfiler::RegisterSelfSymbol("FrustumPoint_SSE2", (const void*)&Hooked_IsPointVisible);
+                Log("[FrustumAabb] ACTIVE on CFrustum::IsPointVisible (0x%08X)", (unsigned)kIsPointVisible);
             }
         }
     }
 
-    if (!IsBadReadPtr((void*)kIsSphereVisible, 16)) {
-        const unsigned char* p4 = (const unsigned char*)kIsSphereVisible;
-        if (p4[0] == 0x55 && p4[1] == 0x8B && p4[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kIsSphereVisible, (void*)Hooked_IsSphereVisible,
-                                    (void**)&orig_IsSphereVisible) == MH_OK) {
-                if (WO_EnableHook((void*)kIsSphereVisible) == MH_OK) {
-                    g_sphereInstalled = true;
-                    SamplingProfiler::RegisterSelfSymbol("FrustumSphere_SSE2", (const void*)&Hooked_IsSphereVisible);
-                    Log("[FrustumAabb] ACTIVE on CFrustum::IsSphereVisible (0x%08X)", (unsigned)kIsSphereVisible);
-                }
+    if (CheckPrologue8((void*)kIsSphereVisible, kExp_IsSphereVisible, "CFrustum::IsSphereVisible")) {
+        if (WineSafe_CreateHook((void*)kIsSphereVisible, (void*)Hooked_IsSphereVisible,
+                                (void**)&orig_IsSphereVisible) == MH_OK) {
+            if (WO_EnableHook((void*)kIsSphereVisible) == MH_OK) {
+                g_sphereInstalled = true;
+                SamplingProfiler::RegisterSelfSymbol("FrustumSphere_SSE2", (const void*)&Hooked_IsSphereVisible);
+                Log("[FrustumAabb] ACTIVE on CFrustum::IsSphereVisible (0x%08X)", (unsigned)kIsSphereVisible);
             }
         }
     }
 
-    if (!IsBadReadPtr((void*)kTranslate, 16)) {
-        const unsigned char* p5 = (const unsigned char*)kTranslate;
-        if (p5[0] == 0x55 && p5[1] == 0x8B && p5[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kTranslate, (void*)Hooked_Translate,
-                                    (void**)&orig_Translate) == MH_OK) {
-                if (WO_EnableHook((void*)kTranslate) == MH_OK) {
-                    g_transInstalled = true;
-                    SamplingProfiler::RegisterSelfSymbol("FrustumTranslate_SSE2", (const void*)&Hooked_Translate);
-                    Log("[FrustumAabb] ACTIVE on CFrustum::Translate (0x%08X), 560 bytes, "
-                        "translates 10 points and updates 6 plane equations with double-precision SSE2.",
-                        (unsigned)kTranslate);
-                }
+    if (CheckPrologue8((void*)kTranslate, kExp_Translate, "CFrustum::Translate")) {
+        if (WineSafe_CreateHook((void*)kTranslate, (void*)Hooked_Translate,
+                                (void**)&orig_Translate) == MH_OK) {
+            if (WO_EnableHook((void*)kTranslate) == MH_OK) {
+                g_transInstalled = true;
+                SamplingProfiler::RegisterSelfSymbol("FrustumTranslate_SSE2", (const void*)&Hooked_Translate);
+                Log("[FrustumAabb] ACTIVE on CFrustum::Translate (0x%08X), 560 bytes, "
+                    "translates 10 points and updates 6 plane equations with double-precision SSE2.",
+                    (unsigned)kTranslate);
             }
         }
     }

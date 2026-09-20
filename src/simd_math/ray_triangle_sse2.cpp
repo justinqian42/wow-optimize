@@ -861,6 +861,14 @@ static bool SelfTestPointInPolygon2D() {
     return true;
 }
 
+static inline bool CheckPrologue8(void* addr, const unsigned char expected[8], const char* name) {
+    if (IsBadReadPtr(addr, 8) || memcmp(addr, expected, 8) != 0) {
+        Log("[RayTriangle] BAD PROLOGUE for %s at 0x%08X", name, (uintptr_t)addr);
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool Init() {
@@ -878,99 +886,92 @@ bool Init() {
     SelfTestRayPlaneIntersect();
     SelfTestPointInPolygon2D();
 
+    static const unsigned char kExp_Target16[8]    = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0x8B, 0x55 };
+    static const unsigned char kExp_Target32[8]    = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0xD9, 0x45 };
+    static const unsigned char kExp_TargetPlane[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x08, 0x8B, 0x55 };
+    static const unsigned char kExp_TargetPoly[8]  = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C, 0x8B, 0x4D };
+
     // 16-bit indices target (0x00983490)
-    if (!IsBadReadPtr((void*)kTarget16, 16)) {
-        const unsigned char* p16 = (const unsigned char*)kTarget16;
-        if (p16[0] == 0x55 && p16[1] == 0x8B && p16[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kTarget16, (void*)&Hooked_Test16,
-                                    (void**)&g_ch16.origTest) == MH_OK) {
-                if (WO_EnableHook((void*)kTarget16) == MH_OK) {
-                    g_ch16.installed = true;
-                    g_ch16.abSubject = abSubject;
-                    g_ch16.benchSlot = SelfBench::Register("RayTri16");
-                    SamplingProfiler::RegisterSelfSymbol(g_ch16.symbolName, (const void*)&Hooked_Test16);
-                    Log("[RayTriangle] ACTIVE on 16-bit indices (0x%08X), the shared "
-                        "ray-triangle test for the collision family (sub_7C6600, sub_7C6790, "
-                        "sub_7C6C30, sub_7C6D50, sub_81E110). Verified first %ld calls.",
-                        (unsigned)kTarget16, kVerifyFirst);
-                } else {
-                    Log("[RayTriangle] NOT active: could not enable 16-bit hook at 0x%08X.", (unsigned)kTarget16);
-                }
+    if (CheckPrologue8((void*)kTarget16, kExp_Target16, "RayTriIntersect16")) {
+        if (WineSafe_CreateHook((void*)kTarget16, (void*)&Hooked_Test16,
+                                (void**)&g_ch16.origTest) == MH_OK) {
+            if (WO_EnableHook((void*)kTarget16) == MH_OK) {
+                g_ch16.installed = true;
+                g_ch16.abSubject = abSubject;
+                g_ch16.benchSlot = SelfBench::Register("RayTri16");
+                SamplingProfiler::RegisterSelfSymbol(g_ch16.symbolName, (const void*)&Hooked_Test16);
+                Log("[RayTriangle] ACTIVE on 16-bit indices (0x%08X), the shared "
+                    "ray-triangle test for the collision family (sub_7C6600, sub_7C6790, "
+                    "sub_7C6C30, sub_7C6D50, sub_81E110). Verified first %ld calls.",
+                    (unsigned)kTarget16, kVerifyFirst);
             } else {
-                Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget16);
+                Log("[RayTriangle] NOT active: could not enable 16-bit hook at 0x%08X.", (unsigned)kTarget16);
             }
+        } else {
+            Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget16);
         }
     }
 
     // 32-bit indices target (0x009836B0)
-    if (!IsBadReadPtr((void*)kTarget32, 16)) {
-        const unsigned char* p32 = (const unsigned char*)kTarget32;
-        if (p32[0] == 0x55 && p32[1] == 0x8B && p32[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kTarget32, (void*)&Hooked_Test32,
-                                    (void**)&g_ch32.origTest) == MH_OK) {
-                if (WO_EnableHook((void*)kTarget32) == MH_OK) {
-                    g_ch32.installed = true;
-                    g_ch32.abSubject = abSubject;
-                    g_ch32.benchSlot = SelfBench::Register("RayTri32");
-                    SamplingProfiler::RegisterSelfSymbol(g_ch32.symbolName, (const void*)&Hooked_Test32);
-                    Log("[RayTriangle] ACTIVE on 32-bit indices (0x%08X), terrain/mesh "
-                        "collision paths (sub_7A3570, sub_7C8DD0, sub_7D8730). "
-                        "Verified first %ld calls.",
-                        (unsigned)kTarget32, kVerifyFirst);
-                } else {
-                    Log("[RayTriangle] NOT active: could not enable 32-bit hook at 0x%08X.", (unsigned)kTarget32);
-                }
+    if (CheckPrologue8((void*)kTarget32, kExp_Target32, "RayTriIntersect32")) {
+        if (WineSafe_CreateHook((void*)kTarget32, (void*)&Hooked_Test32,
+                                (void**)&g_ch32.origTest) == MH_OK) {
+            if (WO_EnableHook((void*)kTarget32) == MH_OK) {
+                g_ch32.installed = true;
+                g_ch32.abSubject = abSubject;
+                g_ch32.benchSlot = SelfBench::Register("RayTri32");
+                SamplingProfiler::RegisterSelfSymbol(g_ch32.symbolName, (const void*)&Hooked_Test32);
+                Log("[RayTriangle] ACTIVE on 32-bit indices (0x%08X), terrain/mesh "
+                    "collision paths (sub_7A3570, sub_7C8DD0, sub_7D8730). "
+                    "Verified first %ld calls.",
+                    (unsigned)kTarget32, kVerifyFirst);
             } else {
-                Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget32);
+                Log("[RayTriangle] NOT active: could not enable 32-bit hook at 0x%08X.", (unsigned)kTarget32);
             }
+        } else {
+            Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTarget32);
         }
     }
 
     // RayPlane target (0x00982FB0)
-    if (!IsBadReadPtr((void*)kTargetPlane, 16)) {
-        const unsigned char* pPlane = (const unsigned char*)kTargetPlane;
-        if (pPlane[0] == 0x55 && pPlane[1] == 0x8B && pPlane[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kTargetPlane, (void*)&Hooked_RayPlane,
-                                    (void**)&g_chPlane.origTest) == MH_OK) {
-                if (WO_EnableHook((void*)kTargetPlane) == MH_OK) {
-                    g_chPlane.installed = true;
-                    g_chPlane.abSubject = abSubject;
-                    g_chPlane.benchSlot = SelfBench::Register("RayPlane");
-                    SamplingProfiler::RegisterSelfSymbol(g_chPlane.symbolName, (const void*)&Hooked_RayPlane);
-                    Log("[RayTriangle] ACTIVE on RayPlaneIntersect (0x%08X), ray-plane "
-                        "collision paths (sub_792360, sub_7AF280, sub_7AF520, sub_7D78C0, sub_984E50). "
-                        "Verified first %ld calls.",
-                        (unsigned)kTargetPlane, kVerifyFirst);
-                } else {
-                    Log("[RayTriangle] NOT active: could not enable hook at 0x%08X.", (unsigned)kTargetPlane);
-                }
+    if (CheckPrologue8((void*)kTargetPlane, kExp_TargetPlane, "RayPlaneIntersect")) {
+        if (WineSafe_CreateHook((void*)kTargetPlane, (void*)&Hooked_RayPlane,
+                                (void**)&g_chPlane.origTest) == MH_OK) {
+            if (WO_EnableHook((void*)kTargetPlane) == MH_OK) {
+                g_chPlane.installed = true;
+                g_chPlane.abSubject = abSubject;
+                g_chPlane.benchSlot = SelfBench::Register("RayPlane");
+                SamplingProfiler::RegisterSelfSymbol(g_chPlane.symbolName, (const void*)&Hooked_RayPlane);
+                Log("[RayTriangle] ACTIVE on RayPlaneIntersect (0x%08X), ray-plane "
+                    "collision paths (sub_792360, sub_7AF280, sub_7AF520, sub_7D78C0, sub_984E50). "
+                    "Verified first %ld calls.",
+                    (unsigned)kTargetPlane, kVerifyFirst);
             } else {
-                Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTargetPlane);
+                Log("[RayTriangle] NOT active: could not enable hook at 0x%08X.", (unsigned)kTargetPlane);
             }
+        } else {
+            Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTargetPlane);
         }
     }
 
     // PointInPoly target (0x009830D0)
-    if (!IsBadReadPtr((void*)kTargetPoly, 16)) {
-        const unsigned char* pPoly = (const unsigned char*)kTargetPoly;
-        if (pPoly[0] == 0x55 && pPoly[1] == 0x8B && pPoly[2] == 0xEC) {
-            if (WineSafe_CreateHook((void*)kTargetPoly, (void*)&Hooked_PointInPoly,
-                                    (void**)&g_chPoly.origTest) == MH_OK) {
-                if (WO_EnableHook((void*)kTargetPoly) == MH_OK) {
-                    g_chPoly.installed = true;
-                    g_chPoly.abSubject = abSubject;
-                    g_chPoly.benchSlot = SelfBench::Register("PointInPoly");
-                    SamplingProfiler::RegisterSelfSymbol(g_chPoly.symbolName, (const void*)&Hooked_PointInPoly);
-                    Log("[RayTriangle] ACTIVE on PointInPolygon2D (0x%08X), polygon raycast "
-                        "and portal culling (sub_58E0D0, sub_58E310, sub_7A7210, sub_7AF280, sub_7AF520, sub_7D78C0, sub_984E50). "
-                        "Verified first %ld calls.",
-                        (unsigned)kTargetPoly, kVerifyFirst);
-                } else {
-                    Log("[RayTriangle] NOT active: could not enable hook at 0x%08X.", (unsigned)kTargetPoly);
-                }
+    if (CheckPrologue8((void*)kTargetPoly, kExp_TargetPoly, "PointInPolygon2D")) {
+        if (WineSafe_CreateHook((void*)kTargetPoly, (void*)&Hooked_PointInPoly,
+                                (void**)&g_chPoly.origTest) == MH_OK) {
+            if (WO_EnableHook((void*)kTargetPoly) == MH_OK) {
+                g_chPoly.installed = true;
+                g_chPoly.abSubject = abSubject;
+                g_chPoly.benchSlot = SelfBench::Register("PointInPoly");
+                SamplingProfiler::RegisterSelfSymbol(g_chPoly.symbolName, (const void*)&Hooked_PointInPoly);
+                Log("[RayTriangle] ACTIVE on PointInPolygon2D (0x%08X), polygon raycast "
+                    "and portal culling (sub_58E0D0, sub_58E310, sub_7A7210, sub_7AF280, sub_7AF520, sub_7D78C0, sub_984E50). "
+                    "Verified first %ld calls.",
+                    (unsigned)kTargetPoly, kVerifyFirst);
             } else {
-                Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTargetPoly);
+                Log("[RayTriangle] NOT active: could not enable hook at 0x%08X.", (unsigned)kTargetPoly);
             }
+        } else {
+            Log("[RayTriangle] NOT active: could not hook 0x%08X.", (unsigned)kTargetPoly);
         }
     }
 

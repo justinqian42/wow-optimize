@@ -173,15 +173,11 @@ static float* __fastcall HookMatrixIdentityBody(float* self, void* /*edx*/) {
 
     uintptr_t s = (uintptr_t)self;
     if (s > 0x10000 && s < 0xFFE00000) {
-        __try {
-            _mm_storeu_ps(self,      kIdentityRow0);
-            _mm_storeu_ps(self + 4,  kIdentityRow1);
-            _mm_storeu_ps(self + 8,  kIdentityRow2);
-            _mm_storeu_ps(self + 12, kIdentityRow3);
-            return self;
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
-            // Bad pointer during store
-        }
+        _mm_storeu_ps(self,      kIdentityRow0);
+        _mm_storeu_ps(self + 4,  kIdentityRow1);
+        _mm_storeu_ps(self + 8,  kIdentityRow2);
+        _mm_storeu_ps(self + 12, kIdentityRow3);
+        return self;
     }
 
     return pOrigMatIdentity(self, nullptr);
@@ -2996,6 +2992,14 @@ static bool SelfTestMatrixOps() {
 }
 #endif
 
+static inline bool CheckPrologue8(void* addr, const unsigned char expected[8], const char* name) {
+    if (memcmp(addr, expected, 8) != 0) {
+        Log("[MatrixSSE2] BAD PROLOGUE for %s at 0x%08X", name, (uintptr_t)addr);
+        return false;
+    }
+    return true;
+}
+
 // Install hooks
 bool InstallMatrixCopySSE2() {
     g_abSubject = AbTest::IsSubject("M2MatrixSimd", &g_abSubject);
@@ -3013,15 +3017,20 @@ bool InstallMatrixCopySSE2() {
         void**      orig;
         const char* name;
         uint32_t    xrefs;
+        const unsigned char* prologue;
     };
 
+    static const unsigned char kExp_Copy[8]  = { 0x55, 0x8B, 0xEC, 0x8B, 0xC1, 0x8B, 0x4D, 0x08 };
+    static const unsigned char kExp_Ident[8] = { 0xD9, 0xE8, 0x8B, 0xC1, 0xD9, 0x10, 0xD9, 0xEE };
+
     HookDef hooks[] = {
-        { (void*)0x00407F80, (void*)HookMatrixCopy,     (void**)&pOrigMatCopy,     "MatrixCopy",     247 },
-        { (void*)0x00407F40, (void*)HookMatrixIdentity, (void**)&pOrigMatIdentity, "MatrixIdentity",  53 },
+        { (void*)0x00407F80, (void*)HookMatrixCopy,     (void**)&pOrigMatCopy,     "MatrixCopy",     247, kExp_Copy },
+        { (void*)0x00407F40, (void*)HookMatrixIdentity, (void**)&pOrigMatIdentity, "MatrixIdentity",  53, kExp_Ident },
     };
 
     int installed = 0;
     for (auto& h : hooks) {
+        if (!CheckPrologue8(h.addr, h.prologue, h.name)) continue;
         if (WineSafe_CreateHook(h.addr, h.hook, h.orig) == MH_OK) {
              if (WO_EnableHook(h.addr) == MH_OK) {
                  installed++;
@@ -3038,10 +3047,12 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_MULTIPLY
+    static const unsigned char kExp_MatMul[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x10, 0x8B, 0x55 };
     if (!SelfTestMatrixMultiply()) {
         // The self-test said why; installing anyway would be the whole point of
         // having one thrown away.
-    } else if (WineSafe_CreateHook((void*)0x004C1F00, (void*)HookMatrixMultiply,
+    } else if (CheckPrologue8((void*)0x004C1F00, kExp_MatMul, "MatrixMultiply") &&
+               WineSafe_CreateHook((void*)0x004C1F00, (void*)HookMatrixMultiply,
                                    (void**)&pOrigMatMul) == MH_OK &&
                WO_EnableHook((void*)0x004C1F00) == MH_OK) {
         Log("[MatrixSSE2] Hooked MatrixMultiply at 0x004C1F00 "
@@ -3054,11 +3065,14 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_QUAT_MATRIX_SSE2
+    static const unsigned char kExp_QuatToMatrix[8]     = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45 };
+    static const unsigned char kExp_QuatToMatrixFull[8] = { 0x55, 0x8B, 0xEC, 0xD9, 0xEE, 0x8B, 0x45, 0x08 };
     if (!SelfTestQuatToMatrix()) {
         // The self-test said why. Installing anyway would throw away the only
         // thing standing between a misread spill slot and a subtly wrong bone
         // rotation on every animated model in the game.
-    } else if (WineSafe_CreateHook((void*)0x004C1C40, (void*)Hooked_QuatToMatrix,
+    } else if (CheckPrologue8((void*)0x004C1C40, kExp_QuatToMatrix, "QuatToMatrix") &&
+               WineSafe_CreateHook((void*)0x004C1C40, (void*)Hooked_QuatToMatrix,
                                    (void**)&pOrigQuatToMatrix) == MH_OK &&
                WO_EnableHook((void*)0x004C1C40) == MH_OK) {
         Log("[MatrixSSE2] Hooked QuatToMatrix at 0x004C1C40 "
@@ -3067,7 +3081,8 @@ bool InstallMatrixCopySSE2() {
         // Only worth attempting once the core has proved itself and installed;
         // this shares its arithmetic, so if that did not pass there is nothing
         // here worth installing either.
-        if (WineSafe_CreateHook((void*)0x004C1DE0, (void*)Hooked_QuatToMatrixFull,
+        if (CheckPrologue8((void*)0x004C1DE0, kExp_QuatToMatrixFull, "QuatToMatrix(full)") &&
+            WineSafe_CreateHook((void*)0x004C1DE0, (void*)Hooked_QuatToMatrixFull,
                                 (void**)&pOrigQuatToMatrixFull) == MH_OK &&
             WO_EnableHook((void*)0x004C1DE0) == MH_OK) {
             Log("[MatrixSSE2] Hooked QuatToMatrix(full) at 0x004C1DE0 "
@@ -3083,7 +3098,10 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_VECTOR_SSE2
-    if (WineSafe_CreateHook((void*)0x004C21B0, (void*)Hooked_MatVec3Mul,
+    static const unsigned char kExp_MatVec3Mul[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x10, 0x8B, 0x55 };
+    static const unsigned char kExp_MatVec4Mul[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x10, 0x8B, 0x4D };
+    if (CheckPrologue8((void*)0x004C21B0, kExp_MatVec3Mul, "MatVec3Mul") &&
+        WineSafe_CreateHook((void*)0x004C21B0, (void*)Hooked_MatVec3Mul,
                             (void**)&pOrigMatVec3Mul) == MH_OK &&
         WO_EnableHook((void*)0x004C21B0) == MH_OK) {
         Log("[MatrixSSE2] Hooked MatVec3Mul at 0x004C21B0 (SSE2, 100+ xrefs)");
@@ -3091,7 +3109,8 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] MatVec3Mul hook FAILED");
     }
 
-    if (WineSafe_CreateHook((void*)0x004C2270, (void*)Hooked_MatVec4Mul,
+    if (CheckPrologue8((void*)0x004C2270, kExp_MatVec4Mul, "MatVec4Mul") &&
+        WineSafe_CreateHook((void*)0x004C2270, (void*)Hooked_MatVec4Mul,
                             (void**)&pOrigMatVec4Mul) == MH_OK &&
         WO_EnableHook((void*)0x004C2270) == MH_OK) {
         Log("[MatrixSSE2] Hooked MatVec4Mul at 0x004C2270 (SSE2, 20 xrefs)");
@@ -3103,7 +3122,10 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_VEC_NORMALIZE_SSE2
-    if (WineSafe_CreateHook((void*)0x004C3420, (void*)Hooked_Vec3Norm,
+    static const unsigned char kExp_Vec3Norm[8]     = { 0xD9, 0x01, 0xD9, 0x41, 0x04, 0xD9, 0x41, 0x08 };
+    static const unsigned char kExp_Vec3NormSafe[8] = { 0xD9, 0x41, 0x08, 0xD9, 0x41, 0x04, 0xD9, 0x01 };
+    if (CheckPrologue8((void*)0x004C3420, kExp_Vec3Norm, "C3Vector::Normalize") &&
+        WineSafe_CreateHook((void*)0x004C3420, (void*)Hooked_Vec3Norm,
                             (void**)&pOrigVec3Norm) == MH_OK &&
         WO_EnableHook((void*)0x004C3420) == MH_OK) {
         Log("[MatrixSSE2] Hooked C3Vector::Normalize at 0x004C3420 "
@@ -3112,7 +3134,8 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] C3Vector::Normalize hook FAILED");
     }
 
-    if (WineSafe_CreateHook((void*)0x004C3600, (void*)Hooked_Vec3NormSafe,
+    if (CheckPrologue8((void*)0x004C3600, kExp_Vec3NormSafe, "C3Vector::Normalize(guarded)") &&
+        WineSafe_CreateHook((void*)0x004C3600, (void*)Hooked_Vec3NormSafe,
                             (void**)&pOrigVec3NormSafe) == MH_OK &&
         WO_EnableHook((void*)0x004C3600) == MH_OK) {
         Log("[MatrixSSE2] Hooked C3Vector::Normalize(guarded) at 0x004C3600 "
@@ -3125,7 +3148,12 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_EXT_SSE2
-    if (WineSafe_CreateHook((void*)0x004C23D0, (void*)Hooked_MatTranspose,
+    static const unsigned char kExp_MatTranspose[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0xD9, 0x01 };
+    static const unsigned char kExp_PointXformIP[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x0C, 0x8B, 0x45 };
+    static const unsigned char kExp_VecMatRotate[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x10, 0x8B, 0x4D };
+    static const unsigned char kExp_MatFrom3x3[8]   = { 0x55, 0x8B, 0xEC, 0x8B, 0xC1, 0x8B, 0x4D, 0x08 };
+    if (CheckPrologue8((void*)0x004C23D0, kExp_MatTranspose, "CMatrix::Transpose") &&
+        WineSafe_CreateHook((void*)0x004C23D0, (void*)Hooked_MatTranspose,
                             (void**)&pOrigMatTranspose) == MH_OK &&
         WO_EnableHook((void*)0x004C23D0) == MH_OK) {
         Log("[MatrixSSE2] Hooked CMatrix::Transpose at 0x004C23D0 (SSE2 _MM_TRANSPOSE4_PS)");
@@ -3133,7 +3161,8 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] CMatrix::Transpose hook FAILED");
     }
 
-    if (WineSafe_CreateHook((void*)0x004C2300, (void*)Hooked_PointXformInPlace,
+    if (CheckPrologue8((void*)0x004C2300, kExp_PointXformIP, "PointTransformInPlace") &&
+        WineSafe_CreateHook((void*)0x004C2300, (void*)Hooked_PointXformInPlace,
                             (void**)&pOrigPointXformIP) == MH_OK &&
         WO_EnableHook((void*)0x004C2300) == MH_OK) {
         SamplingProfiler::RegisterSelfSymbol("PointXformInPlace_SSE2", (const void*)&Hooked_PointXformInPlace);
@@ -3142,7 +3171,8 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] PointTransformInPlace hook FAILED");
     }
 
-    if (WineSafe_CreateHook((void*)0x005FED20, (void*)Hooked_VectorMatrixRotate,
+    if (CheckPrologue8((void*)0x005FED20, kExp_VecMatRotate, "VectorMatrixRotate") &&
+        WineSafe_CreateHook((void*)0x005FED20, (void*)Hooked_VectorMatrixRotate,
                             (void**)&pOrigVectorMatrixRotate) == MH_OK &&
         WO_EnableHook((void*)0x005FED20) == MH_OK) {
         SamplingProfiler::RegisterSelfSymbol("VectorMatrixRotate_SSE2", (const void*)&Hooked_VectorMatrixRotate);
@@ -3151,7 +3181,8 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] VectorMatrixRotate hook FAILED");
     }
 
-    if (WineSafe_CreateHook((void*)0x004C3680, (void*)Hooked_MatFrom3x3,
+    if (CheckPrologue8((void*)0x004C3680, kExp_MatFrom3x3, "CMatrix::From3x3") &&
+        WineSafe_CreateHook((void*)0x004C3680, (void*)Hooked_MatFrom3x3,
                             (void**)&pOrigMatFrom3x3) == MH_OK &&
         WO_EnableHook((void*)0x004C3680) == MH_OK) {
         Log("[MatrixSSE2] Hooked CMatrix::From3x3 at 0x004C3680 (SSE2, 5 callers)");
@@ -3163,7 +3194,9 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_INVERT_SSE2
-    if (WineSafe_CreateHook((void*)0x004C2FC0, (void*)Hooked_MatInvertRigid,
+    static const unsigned char kExp_MatInvRigid[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x48, 0x56, 0x8B };
+    if (CheckPrologue8((void*)0x004C2FC0, kExp_MatInvRigid, "CMatrix::InvertRigid") &&
+        WineSafe_CreateHook((void*)0x004C2FC0, (void*)Hooked_MatInvertRigid,
                             (void**)&pOrigMatInvRigid) == MH_OK &&
         WO_EnableHook((void*)0x004C2FC0) == MH_OK) {
         Log("[MatrixSSE2] Hooked CMatrix::InvertRigid at 0x004C2FC0 (SSE2, ~34 callers)");
@@ -3175,7 +3208,10 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_MISC_SSE2
-    if (WineSafe_CreateHook((void*)0x004C2120, (void*)Hooked_MatScalarMul,
+    static const unsigned char kExp_MatScalarMul[8]   = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x0C, 0x8B, 0x45 };
+    static const unsigned char kExp_RowAffinePoint[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x0C, 0x8B, 0x55 };
+    if (CheckPrologue8((void*)0x004C2120, kExp_MatScalarMul, "CMatrix::ScalarMul") &&
+        WineSafe_CreateHook((void*)0x004C2120, (void*)Hooked_MatScalarMul,
                             (void**)&pOrigMatScalarMul) == MH_OK &&
         WO_EnableHook((void*)0x004C2120) == MH_OK) {
         Log("[MatrixSSE2] Hooked CMatrix::ScalarMul at 0x004C2120 (SSE2, 4 callers)");
@@ -3183,7 +3219,8 @@ bool InstallMatrixCopySSE2() {
         Log("[MatrixSSE2] CMatrix::ScalarMul hook FAILED");
     }
 
-    if (WineSafe_CreateHook((void*)0x004C2210, (void*)Hooked_RowAffinePoint,
+    if (CheckPrologue8((void*)0x004C2210, kExp_RowAffinePoint, "RowAffinePoint") &&
+        WineSafe_CreateHook((void*)0x004C2210, (void*)Hooked_RowAffinePoint,
                             (void**)&pOrigRowAffinePoint) == MH_OK &&
         WO_EnableHook((void*)0x004C2210) == MH_OK) {
         Log("[MatrixSSE2] Hooked RowAffinePoint at 0x004C2210 (SSE2, 6 callers)");
@@ -3195,7 +3232,9 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_TRANSLATE_SSE2
-    if (WineSafe_CreateHook((void*)0x004C1B30, (void*)Hooked_MatTranslateLocal,
+    static const unsigned char kExp_MatTranslateLocal[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0xD9, 0x41 };
+    if (CheckPrologue8((void*)0x004C1B30, kExp_MatTranslateLocal, "CMatrix::TranslateLocal") &&
+        WineSafe_CreateHook((void*)0x004C1B30, (void*)Hooked_MatTranslateLocal,
                             (void**)&pOrigMatTranslate) == MH_OK &&
         WO_EnableHook((void*)0x004C1B30) == MH_OK) {
         SamplingProfiler::RegisterSelfSymbol("MatTranslateLocal_SSE2", (const void*)&Hooked_MatTranslateLocal);
@@ -3207,7 +3246,9 @@ bool InstallMatrixCopySSE2() {
     Log("[MatrixSSE2] CMatrix::TranslateLocal DISABLED via feature flag");
 #endif
 
-    if (WineSafe_CreateHook((void*)0x005FECB0, (void*)Hooked_BoxScale,
+    static const unsigned char kExp_BoxScale[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0xC1, 0xD9, 0x00, 0xD9 };
+    if (CheckPrologue8((void*)0x005FECB0, kExp_BoxScale, "CBox::Scale") &&
+        WineSafe_CreateHook((void*)0x005FECB0, (void*)Hooked_BoxScale,
                             (void**)&pOrigBoxScale) == MH_OK &&
         WO_EnableHook((void*)0x005FECB0) == MH_OK) {
         SamplingProfiler::RegisterSelfSymbol("BoxScale_SSE2", (const void*)&Hooked_BoxScale);
@@ -3217,10 +3258,14 @@ bool InstallMatrixCopySSE2() {
     }
 
 #if !TEST_DISABLE_MATRIX_ROTATE_SSE2
+    static const unsigned char kExp_MatRotateX[8] = { 0x55, 0x8B, 0xEC, 0xD9, 0x45, 0x08, 0x81, 0xEC };
+    static const unsigned char kExp_MatRotateY[8] = { 0x55, 0x8B, 0xEC, 0xD9, 0x45, 0x08, 0x81, 0xEC };
+    static const unsigned char kExp_MatRotateZ[8] = { 0x55, 0x8B, 0xEC, 0xD9, 0x45, 0x08, 0x81, 0xEC };
     if (!SelfTestMatrixRotate()) {
         Log("[MatrixSSE2] SelfTestMatrixRotate FAILED, rotation hooks disabled");
     } else {
-        if (WineSafe_CreateHook((void*)0x004C3300, (void*)Hooked_MatRotateX,
+        if (CheckPrologue8((void*)0x004C3300, kExp_MatRotateX, "CMatrix::RotateX") &&
+            WineSafe_CreateHook((void*)0x004C3300, (void*)Hooked_MatRotateX,
                                 (void**)&pOrigMatRotateX) == MH_OK &&
             WO_EnableHook((void*)0x004C3300) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatRotateX_SSE2", (const void*)&Hooked_MatRotateX);
@@ -3229,7 +3274,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::RotateX hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C3340, (void*)Hooked_MatRotateY,
+        if (CheckPrologue8((void*)0x004C3340, kExp_MatRotateY, "CMatrix::RotateY") &&
+            WineSafe_CreateHook((void*)0x004C3340, (void*)Hooked_MatRotateY,
                                 (void**)&pOrigMatRotateY) == MH_OK &&
             WO_EnableHook((void*)0x004C3340) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatRotateY_SSE2", (const void*)&Hooked_MatRotateY);
@@ -3238,7 +3284,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::RotateY hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C3380, (void*)Hooked_MatRotateZ,
+        if (CheckPrologue8((void*)0x004C3380, kExp_MatRotateZ, "CMatrix::RotateZ") &&
+            WineSafe_CreateHook((void*)0x004C3380, (void*)Hooked_MatRotateZ,
                                 (void**)&pOrigMatRotateZ) == MH_OK &&
             WO_EnableHook((void*)0x004C3380) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatRotateZ_SSE2", (const void*)&Hooked_MatRotateZ);
@@ -3250,10 +3297,22 @@ bool InstallMatrixCopySSE2() {
 #endif
 
 #if !TEST_DISABLE_MATRIX_OPS_SSE2
+    static const unsigned char kExp_MatMulInPlace[8]    = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x83, 0xEC };
+    static const unsigned char kExp_MatScaleLocal[8]    = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0xD9, 0x00 };
+    static const unsigned char kExp_MatScale3x3[8]      = { 0x55, 0x8B, 0xEC, 0xD9, 0x01, 0xD9, 0x45, 0x08 };
+    static const unsigned char kExp_MatCreateRotateX[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x8D, 0x45 };
+    static const unsigned char kExp_MatCreateRotateY[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x8D, 0x45 };
+    static const unsigned char kExp_MatCreateRotateZ[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x8D, 0x45 };
+    static const unsigned char kExp_MatCreateRotAxis[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x80, 0x7D };
+    static const unsigned char kExp_MatRotateQuat[8]    = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x80, 0x00, 0x00 };
+    static const unsigned char kExp_Vec3Scale[8]        = { 0x55, 0x8B, 0xEC, 0x8B, 0xC1, 0xD9, 0x00, 0xD9 };
+    static const unsigned char kExp_Vec3InvScale[8]     = { 0x55, 0x8B, 0xEC, 0xD9, 0xE8, 0x8B, 0xC1, 0xD8 };
+
     if (!SelfTestMatrixOps()) {
         Log("[MatrixSSE2] SelfTestMatrixOps FAILED, matrix ops hooks disabled");
     } else {
-        if (WineSafe_CreateHook((void*)0x004C2370, (void*)Hooked_MatMulInPlace,
+        if (CheckPrologue8((void*)0x004C2370, kExp_MatMulInPlace, "CMatrix::MultiplyInPlace") &&
+            WineSafe_CreateHook((void*)0x004C2370, (void*)Hooked_MatMulInPlace,
                                 (void**)&pOrigMatMulInPlace) == MH_OK &&
             WO_EnableHook((void*)0x004C2370) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatMulInPlace_SSE2", (const void*)&Hooked_MatMulInPlace);
@@ -3262,7 +3321,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::MultiplyInPlace hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C1B90, (void*)Hooked_MatScaleLocal,
+        if (CheckPrologue8((void*)0x004C1B90, kExp_MatScaleLocal, "CMatrix::ScaleLocal") &&
+            WineSafe_CreateHook((void*)0x004C1B90, (void*)Hooked_MatScaleLocal,
                                 (void**)&pOrigMatScaleLocal) == MH_OK &&
             WO_EnableHook((void*)0x004C1B90) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatScaleLocal_SSE2", (const void*)&Hooked_MatScaleLocal);
@@ -3271,7 +3331,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::ScaleLocal hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C1BF0, (void*)Hooked_MatScale3x3,
+        if (CheckPrologue8((void*)0x004C1BF0, kExp_MatScale3x3, "CMatrix::Scale3x3") &&
+            WineSafe_CreateHook((void*)0x004C1BF0, (void*)Hooked_MatScale3x3,
                                 (void**)&pOrigMatScale3x3) == MH_OK &&
             WO_EnableHook((void*)0x004C1BF0) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatScale3x3_SSE2", (const void*)&Hooked_MatScale3x3);
@@ -3280,7 +3341,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::Scale3x3 hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C31B0, (void*)Hooked_MatCreateRotateX,
+        if (CheckPrologue8((void*)0x004C31B0, kExp_MatCreateRotateX, "CMatrix::CreateRotateX") &&
+            WineSafe_CreateHook((void*)0x004C31B0, (void*)Hooked_MatCreateRotateX,
                                 (void**)&pOrigMatCreateRotateX) == MH_OK &&
             WO_EnableHook((void*)0x004C31B0) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatCreateRotateX_SSE2", (const void*)&Hooked_MatCreateRotateX);
@@ -3289,7 +3351,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::CreateRotateX hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C3220, (void*)Hooked_MatCreateRotateY,
+        if (CheckPrologue8((void*)0x004C3220, kExp_MatCreateRotateY, "CMatrix::CreateRotateY") &&
+            WineSafe_CreateHook((void*)0x004C3220, (void*)Hooked_MatCreateRotateY,
                                 (void**)&pOrigMatCreateRotateY) == MH_OK &&
             WO_EnableHook((void*)0x004C3220) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatCreateRotateY_SSE2", (const void*)&Hooked_MatCreateRotateY);
@@ -3298,7 +3361,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::CreateRotateY hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C3290, (void*)Hooked_MatCreateRotateZ,
+        if (CheckPrologue8((void*)0x004C3290, kExp_MatCreateRotateZ, "CMatrix::CreateRotateZ") &&
+            WineSafe_CreateHook((void*)0x004C3290, (void*)Hooked_MatCreateRotateZ,
                                 (void**)&pOrigMatCreateRotateZ) == MH_OK &&
             WO_EnableHook((void*)0x004C3290) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatCreateRotateZ_SSE2", (const void*)&Hooked_MatCreateRotateZ);
@@ -3307,7 +3371,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::CreateRotateZ hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C3460, (void*)Hooked_MatCreateRotateAxisAngle,
+        if (CheckPrologue8((void*)0x004C3460, kExp_MatCreateRotAxis, "CMatrix::CreateRotateAxisAngle") &&
+            WineSafe_CreateHook((void*)0x004C3460, (void*)Hooked_MatCreateRotateAxisAngle,
                                 (void**)&pOrigMatCreateRotateAxisAngle) == MH_OK &&
             WO_EnableHook((void*)0x004C3460) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatCreateRotateAxisAngle_SSE2", (const void*)&Hooked_MatCreateRotateAxisAngle);
@@ -3316,7 +3381,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::CreateRotateAxisAngle hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C33C0, (void*)Hooked_MatRotateQuat,
+        if (CheckPrologue8((void*)0x004C33C0, kExp_MatRotateQuat, "CMatrix::RotateQuat") &&
+            WineSafe_CreateHook((void*)0x004C33C0, (void*)Hooked_MatRotateQuat,
                                 (void**)&pOrigMatRotateQuat) == MH_OK &&
             WO_EnableHook((void*)0x004C33C0) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("MatRotateQuat_SSE2", (const void*)&Hooked_MatRotateQuat);
@@ -3325,7 +3391,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] CMatrix::RotateQuat hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C35A0, (void*)Hooked_Vec3Scale,
+        if (CheckPrologue8((void*)0x004C35A0, kExp_Vec3Scale, "Vec3_Scale") &&
+            WineSafe_CreateHook((void*)0x004C35A0, (void*)Hooked_Vec3Scale,
                                 (void**)&pOrigVec3Scale) == MH_OK &&
             WO_EnableHook((void*)0x004C35A0) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("Vec3Scale_SSE2", (const void*)&Hooked_Vec3Scale);
@@ -3334,7 +3401,8 @@ bool InstallMatrixCopySSE2() {
             Log("[MatrixSSE2] Vec3_Scale hook FAILED");
         }
 
-        if (WineSafe_CreateHook((void*)0x004C35D0, (void*)Hooked_Vec3InvScale,
+        if (CheckPrologue8((void*)0x004C35D0, kExp_Vec3InvScale, "Vec3_InvScale") &&
+            WineSafe_CreateHook((void*)0x004C35D0, (void*)Hooked_Vec3InvScale,
                                 (void**)&pOrigVec3InvScale) == MH_OK &&
             WO_EnableHook((void*)0x004C35D0) == MH_OK) {
             SamplingProfiler::RegisterSelfSymbol("Vec3InvScale_SSE2", (const void*)&Hooked_Vec3InvScale);

@@ -313,10 +313,11 @@ bool Init() {
         return false;
     }
 
-    const unsigned char* pS = (const unsigned char*)kTrackScalar;
-    const unsigned char* pC = (const unsigned char*)kTrackColor;
-    if (pS[0] != 0x55 || pS[1] != 0x8B || pS[2] != 0xEC ||
-        pC[0] != 0x55 || pC[1] != 0x8B || pC[2] != 0xEC) {
+    static const unsigned char kExp_TrackScalar[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x0C, 0x0F, 0xB7 };
+    static const unsigned char kExp_TrackColor[8]  = { 0x55, 0x8B, 0xEC, 0x51, 0x53, 0x8B, 0x5D, 0x0C };
+
+    if (memcmp((const void*)kTrackScalar, kExp_TrackScalar, 8) != 0 ||
+        memcmp((const void*)kTrackColor, kExp_TrackColor, 8) != 0) {
         Log("[AnimScalarTrack] unexpected prologue bytes - not installing.");
         return false;
     }

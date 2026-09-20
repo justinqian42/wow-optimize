@@ -311,12 +311,9 @@ bool Init() {
         Log("[SegmentAabb] 0x%08X unreadable - not installing", (unsigned)kTest);
         return false;
     }
-    // push ebp / mov ebp, esp / sub esp, 34h
-    const unsigned char* p = (const unsigned char*)kTest;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC || p[3] != 0x83) {
-        Log("[SegmentAabb] 0x%08X does not start with the prologue this was read "
-            "from (%02X %02X %02X %02X) - not installing",
-            (unsigned)kTest, p[0], p[1], p[2], p[3]);
+    static const unsigned char kExp_Test[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0x8B, 0x45 };
+    if (memcmp((const void*)kTest, kExp_Test, 8) != 0) {
+        Log("[SegmentAabb] BAD PROLOGUE for SegmentAabb at 0x%08X", (unsigned)kTest);
         return false;
     }
 

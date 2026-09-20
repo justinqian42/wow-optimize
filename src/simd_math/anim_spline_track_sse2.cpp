@@ -470,10 +470,11 @@ bool Init() {
         return false;
     }
 
-    const unsigned char* pV = (const unsigned char*)kTrackSplineVec3;
-    const unsigned char* pS = (const unsigned char*)kTrackSplineScalar;
-    if (pV[0] != 0x55 || pV[1] != 0x8B || pV[2] != 0xEC ||
-        pS[0] != 0x55 || pS[1] != 0x8B || pS[2] != 0xEC) {
+    static const unsigned char kExp_TrackSplineVec3[8]   = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x0C, 0x0F, 0xB7 };
+    static const unsigned char kExp_TrackSplineScalar[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x0C, 0x0F, 0xB7 };
+
+    if (memcmp((const void*)kTrackSplineVec3, kExp_TrackSplineVec3, 8) != 0 ||
+        memcmp((const void*)kTrackSplineScalar, kExp_TrackSplineScalar, 8) != 0) {
         Log("[AnimSplineTrack] unexpected prologue bytes - not installing.");
         return false;
     }

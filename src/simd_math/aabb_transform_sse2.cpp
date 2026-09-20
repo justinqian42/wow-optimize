@@ -1038,23 +1038,32 @@ bool Init() {
         return false;
     }
 
-    const unsigned char* p4      = (const unsigned char*)kTransform4x4;
-    const unsigned char* p3      = (const unsigned char*)kTransform3x3;
-    const unsigned char* pAffine = (const unsigned char*)kTransformAffine;
-    const unsigned char* pUnion  = (const unsigned char*)kAabbUnion;
-    const unsigned char* pVMin   = (const unsigned char*)kVec3Min;
-    const unsigned char* pVMax   = (const unsigned char*)kVec3Max;
-
-    if (p4[0]      != 0x55 || p4[1]      != 0x8B || p4[2]      != 0xEC ||
-        p3[0]      != 0x55 || p3[1]      != 0x8B || p3[2]      != 0xEC ||
-        pAffine[0] != 0x55 || pAffine[1] != 0x8B || pAffine[2] != 0xEC ||
-        pUnion[0]  != 0x55 || pUnion[1]  != 0x8B || pUnion[2]  != 0xEC ||
-        pVMin[0]   != 0x55 || pVMin[1]   != 0x8B || pVMin[2]   != 0xEC ||
-        pVMax[0]   != 0x55 || pVMax[1]   != 0x8B || pVMax[2]   != 0xEC
+    static const unsigned char kExp_Transform4x4[8]    = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x08, 0x8B, 0x42 };
+    static const unsigned char kExp_Transform3x3[8]    = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0xD9, 0xEE };
+    static const unsigned char kExp_TransformAffine[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x10, 0x8B, 0x48 };
+    static const unsigned char kExp_AabbUnion[8]       = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x0C, 0x83, 0xEC };
+    static const unsigned char kExp_Vec3Min[8]         = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x10, 0x8B, 0x4D };
+    static const unsigned char kExp_Vec3Max[8]         = { 0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x10, 0x8B, 0x4D };
 #if !TEST_DISABLE_AABB_FROM_VERTS_SSE2
-        || ((const unsigned char*)kFromVertices)[0] != 0x55
-        || ((const unsigned char*)kFromVertices)[1] != 0x8B
-        || ((const unsigned char*)kFromVertices)[2] != 0xEC
+    static const unsigned char kExp_FromVertices[8]    = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x57, 0x8B };
+#endif
+
+    auto CheckPrologue8 = [](void* addr, const unsigned char expected[8], const char* name) -> bool {
+        if (IsBadReadPtr(addr, 8) || memcmp(addr, expected, 8) != 0) {
+            Log("[AabbTransform] BAD PROLOGUE for %s at 0x%08X", name, (uintptr_t)addr);
+            return false;
+        }
+        return true;
+    };
+
+    if (!CheckPrologue8((void*)kTransform4x4, kExp_Transform4x4, "Transform4x4") ||
+        !CheckPrologue8((void*)kTransform3x3, kExp_Transform3x3, "Transform3x3") ||
+        !CheckPrologue8((void*)kTransformAffine, kExp_TransformAffine, "TransformAffine") ||
+        !CheckPrologue8((void*)kAabbUnion, kExp_AabbUnion, "AabbUnion") ||
+        !CheckPrologue8((void*)kVec3Min, kExp_Vec3Min, "Vec3Min") ||
+        !CheckPrologue8((void*)kVec3Max, kExp_Vec3Max, "Vec3Max")
+#if !TEST_DISABLE_AABB_FROM_VERTS_SSE2
+        || !CheckPrologue8((void*)kFromVertices, kExp_FromVertices, "AabbFromVertices")
 #endif
     ) {
         Log("[AabbTransform] unexpected prologue bytes - not installing.");
