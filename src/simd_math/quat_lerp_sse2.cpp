@@ -80,6 +80,7 @@
 #include "config.h"
 #include "ab_test.h"
 #include "session_verdict.h"
+#include "self_bench.h"
 #include "sampling_profiler.h"
 
 extern "C" void Log(const char* fmt, ...);
@@ -119,6 +120,11 @@ constexpr long kResampleMask = 1023;
 
 unsigned long g_calls      = 0;
 unsigned long g_agreements = 0;
+// Timed where the verification already runs both halves on the same input.
+// A replacement nobody has timed against the client is a replacement nobody
+// knows is one; this project already shipped a hash that was slower for its
+// whole life and counted every call as a win.
+int g_benchSlot = -1;
 volatile LONG g_armed      = 0;
 // Set at init when the A/B harness names this module, so the hot path
 // tests a plain bool instead of calling out on every invocation.
@@ -215,9 +221,13 @@ float* __cdecl Hooked_QuatLerpBody(float* out, float t, const float* a, const fl
     float theirs[4];
     float mine[4];
     __try {
+        const unsigned long long tA = SelfBench::Now();
         orig_QuatLerp(out, t, a, b);
+        const unsigned long long tB = SelfBench::Now();
         theirs[0] = out[0]; theirs[1] = out[1]; theirs[2] = out[2]; theirs[3] = out[3];
+        const unsigned long long tC = SelfBench::Now();
         LerpNormalise(mine, t, a, b);
+        SelfBench::Pair(g_benchSlot, SelfBench::Now() - tC, tB - tA);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Retire("the vector path faulted during verification");
         return out;
@@ -407,6 +417,7 @@ bool Init() {
 
     g_installed = true;
     SamplingProfiler::RegisterSelfSymbol("QuatLerp_SSE2", (const void*)&Hooked_QuatLerp);
+    g_benchSlot = SelfBench::Register("QuatLerp");
     Log("[QuatLerp] ACTIVE on sub_982630, the per-bone quaternion interpolation. "
         "Two components at a time in double rather than one at a time on the "
         "x87 stack, which makes it bit-identical to the client rather than "

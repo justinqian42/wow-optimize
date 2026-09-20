@@ -96,6 +96,7 @@
 #include "sampling_profiler.h"
 #include "ab_test.h"
 #include "session_verdict.h"
+#include "self_bench.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -143,6 +144,11 @@ bool g_dead      = false;
 // than correctness. The report says the counts are lower bounds.
 unsigned long g_calls    = 0;
 unsigned long g_verified = 0;
+// Timed where the verification already runs both halves on the same
+// input. Nothing else in a session can say whether this replacement is
+// faster than the client code it stands in front of, and one of them in
+// this project turned out not to be.
+int g_benchSlot = -1;
 unsigned long g_lerps    = 0;
 unsigned long g_blends   = 0;
 
@@ -257,11 +263,15 @@ void __cdecl Hooked_VecTrackBody(void* obj, void* state, void* track,
     if (!g_armed || (g_calls & kResampleMask) == 0) {
         uint32_t saved[5], theirs[5];
         memcpy(saved, out, sizeof(saved));
+        const unsigned long long tA = SelfBench::Now();
         orig_VecTrack(obj, state, track, out, defVec);
+        const unsigned long long tB = SelfBench::Now();
         memcpy(theirs, out, sizeof(theirs));
         memcpy(out, saved, sizeof(saved));
 
+        const unsigned long long tC = SelfBench::Now();
         Evaluate(obj, (uint8_t*)state, (uint8_t*)track, out, defVec);
+        SelfBench::Pair(g_benchSlot, SelfBench::Now() - tC, tB - tA);
         g_verified++;
 
         if (memcmp(out, theirs, sizeof(theirs)) != 0) {
@@ -339,6 +349,7 @@ bool Init() {
 
     g_installed = true;
     SamplingProfiler::RegisterSelfSymbol("AnimVec3Track_SSE2", (const void*)&Hooked_VecTrack);
+    g_benchSlot = SelfBench::Register("AnimVec3Track");
     Log("[AnimVec3Track] ACTIVE on sub_82B0A0 (0x%08X), the vector animation "
         "track. Eight call sites, six of them inside the largest entry in the "
         "main-thread profile, against one for the quaternion track already "
