@@ -109,25 +109,31 @@ static int __cdecl Hooked_ClntObjMgrEnum(int (__cdecl *callback)(uint32_t, uint3
     return orig_ClntObjMgrEnum(callback, context);
 }
 
-static void* __fastcall Hooked_GetObjectByGUID(void* pThis, void* unused, uint64_t guid) {
-    if (guid == 0 || !pThis) return nullptr;
-
+__declspec(noinline) static void* FindObjectInRcuArray(RcuObjectArray* arr, uint32_t targetLow, uint32_t targetHigh) {
     __try {
-        RcuObjectArray* arr = g_rcuArray.load(std::memory_order_acquire);
-        if (arr) {
-            uint32_t targetLow = (uint32_t)guid;
-            uint32_t targetHigh = (uint32_t)(guid >> 32);
-            for (uint32_t i = 0; i < arr->count; i++) {
-                void* obj = arr->objects[i];
-                if (obj && (uintptr_t)obj >= 0x10000 && (uintptr_t)obj < 0xFFE00000) {
-                    uint32_t* j = (uint32_t*)obj;
-                    if (j[12] == targetLow && j[13] == targetHigh) {
-                        return obj;
-                    }
+        for (uint32_t i = 0; i < arr->count; i++) {
+            void* obj = arr->objects[i];
+            if (obj && (uintptr_t)obj >= 0x10000 && (uintptr_t)obj < 0x7FFE0000) {
+                const uint32_t* j = (const uint32_t*)obj;
+                if (j[12] == targetLow && j[13] == targetHigh) {
+                    return obj;
                 }
             }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
+
+static void* __fastcall Hooked_GetObjectByGUID(void* pThis, void* unused, uint64_t guid) {
+    if (guid == 0 || !pThis) return nullptr;
+
+    RcuObjectArray* arr = g_rcuArray.load(std::memory_order_acquire);
+    if (arr) {
+        uint32_t targetLow = (uint32_t)guid;
+        uint32_t targetHigh = (uint32_t)(guid >> 32);
+        void* obj = FindObjectInRcuArray(arr, targetLow, targetHigh);
+        if (obj) return obj;
+    }
 
     return orig_GetObjectByGUID ? orig_GetObjectByGUID(pThis, guid) : nullptr;
 }
@@ -139,13 +145,30 @@ bool Init() {
     }
     Log("[RcuObjMgr] Init");
 
+    void* enumTarget = (void*)0x004D4B30;
+    void* getObjTarget = (void*)0x006792E0;
+
+    if (!WowOpt_ClientPatchAllowed(enumTarget) || !WowOpt_ClientPatchAllowed(getObjTarget)) {
+        Log("[RcuObjMgr] Client patches disallowed by policy - not hooking");
+        return false;
+    }
+
+    static const unsigned char kExp_Enum[8]   = { 0x55, 0x8B, 0xEC, 0xA1, 0xBC, 0x39, 0xD4, 0x00 };
+    static const unsigned char kExp_GetObj[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x41, 0x24, 0x83, 0xF8 };
+
+    if (IsBadReadPtr(enumTarget, 8) || memcmp(enumTarget, kExp_Enum, 8) != 0) {
+        Log("[RcuObjMgr] 0x%08X bad prologue or unreadable - not installing", (unsigned)enumTarget);
+        return false;
+    }
+    if (IsBadReadPtr(getObjTarget, 8) || memcmp(getObjTarget, kExp_GetObj, 8) != 0) {
+        Log("[RcuObjMgr] 0x%08X bad prologue or unreadable - not installing", (unsigned)getObjTarget);
+        return false;
+    }
+
     for (int i = 0; i < 16; i++) {
         g_oldArrays[i].store(nullptr);
     }
     g_rcuArray.store(nullptr);
-
-    void* enumTarget = (void*)0x004D4B30;
-    void* getObjTarget = (void*)0x006792E0;
 
     if (WineSafe_CreateHook(enumTarget, (void*)Hooked_ClntObjMgrEnum, (void**)&orig_ClntObjMgrEnum) == MH_OK) {
         WO_EnableHook(enumTarget);

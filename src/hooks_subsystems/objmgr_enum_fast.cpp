@@ -258,6 +258,17 @@ void OnFrame() { ++g_frames; }
 bool Init() {
     if (!Config::g_settings.OptObjMgrEnumFast) return true;
 
+    if (!WowOpt_ClientPatchAllowed((const void*)kEnum)) {
+        Log("[ObjMgrEnum] Client patches disallowed by policy - not hooking");
+        return false;
+    }
+
+    static const unsigned char kExp_Enum[8] = { 0x55, 0x8B, 0xEC, 0xA1, 0xBC, 0x39, 0xD4, 0x00 };
+    if (IsBadReadPtr((const void*)kEnum, 8) || memcmp((const void*)kEnum, kExp_Enum, 8) != 0) {
+        Log("[ObjMgrEnum] 0x%08X bad prologue or unreadable - not installing", (unsigned)kEnum);
+        return false;
+    }
+
     if (Config::g_settings.OptRcuObjMgr) {
         Log("[ObjMgrEnum] NOT active: RcuObjMgr is on and hooks the same "
             "address. That one serves the enumeration out of a snapshot; this "
