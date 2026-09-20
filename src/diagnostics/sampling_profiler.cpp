@@ -11,6 +11,7 @@
 #include <tlhelp32.h>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <algorithm>
 #include "sampling_profiler.h"
 #include "session_verdict.h"
@@ -856,11 +857,138 @@ extern "C" void WowOpt_NoteDetour(uintptr_t target, const void* detour) {
     RegisterSelfSymbol(n, detour);
 }
 
+// Every function in this DLL, read from wow_optimize.sym beside the DLL.
+//
+// The registered symbols below are entry points with no size, which is why a
+// sample landing in an unregistered neighbour used to be printed under the name
+// above it. The linker map has every function and its address; the build turns
+// it into this file. With it loaded, a symbol owns the bytes up to the next
+// one, so an address resolves to exactly one function or to nothing.
+//
+// The file is optional. Without it everything below works as it did, and the
+// profile header says which of the two it is.
+struct MapSym { uint32_t rva; const char* name; };
+static MapSym*  g_mapSyms = nullptr;
+static int      g_mapSymCount = 0;
+static char*    g_mapText = nullptr;
+static bool     g_mapTried = false;
+static char     g_mapWhy[160] = "";
+
+static int __cdecl MapSymLess(const void* a, const void* b) {
+    const uint32_t ra = ((const MapSym*)a)->rva, rb = ((const MapSym*)b)->rva;
+    return ra < rb ? -1 : (ra > rb ? 1 : 0);
+}
+
+static void LoadMapSymbols() {
+    if (g_mapTried) return;
+    g_mapTried = true;
+    if (!g_selfBase) { lstrcpynA(g_mapWhy, "our own module was not identified", sizeof(g_mapWhy)); return; }
+
+    char path[MAX_PATH];
+    if (!GetModuleFileNameA((HMODULE)g_selfBase, path, sizeof(path))) {
+        lstrcpynA(g_mapWhy, "the DLL's own path could not be read", sizeof(g_mapWhy));
+        return;
+    }
+    int n = lstrlenA(path);
+    while (n > 0 && path[n - 1] != '.') --n;
+    if (n == 0 || n + 4 >= MAX_PATH) { lstrcpynA(g_mapWhy, "the DLL's path has no extension", sizeof(g_mapWhy)); return; }
+    lstrcpyA(path + n, "sym");
+
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        wsprintfA(g_mapWhy, "no symbol file beside the DLL (%s)", path);
+        return;
+    }
+    DWORD size = GetFileSize(h, nullptr);
+    if (size == INVALID_FILE_SIZE || size == 0 || size > (16u << 20)) {
+        CloseHandle(h);
+        lstrcpynA(g_mapWhy, "the symbol file is empty or implausibly large", sizeof(g_mapWhy));
+        return;
+    }
+    g_mapText = (char*)VirtualAlloc(nullptr, size + 1, MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN,
+                                    PAGE_READWRITE);
+    DWORD got = 0;
+    if (!g_mapText || !ReadFile(h, g_mapText, size, &got, nullptr) || got != size) {
+        CloseHandle(h);
+        if (g_mapText) { VirtualFree(g_mapText, 0, MEM_RELEASE); g_mapText = nullptr; }
+        lstrcpynA(g_mapWhy, "the symbol file could not be read", sizeof(g_mapWhy));
+        return;
+    }
+    CloseHandle(h);
+    g_mapText[size] = 0;
+
+    int lines = 0;
+    for (DWORD i = 0; i < size; ++i) if (g_mapText[i] == '\n') ++lines;
+    g_mapSyms = (MapSym*)VirtualAlloc(nullptr, (SIZE_T)(lines + 1) * sizeof(MapSym),
+                                      MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE);
+    if (!g_mapSyms) {
+        VirtualFree(g_mapText, 0, MEM_RELEASE); g_mapText = nullptr;
+        lstrcpynA(g_mapWhy, "the symbol table could not be committed", sizeof(g_mapWhy));
+        return;
+    }
+
+    char* p = g_mapText;
+    while (*p) {
+        char* line = p;
+        while (*p && *p != '\n') ++p;
+        if (*p) *p++ = 0;
+        int len = lstrlenA(line);
+        if (len && line[len - 1] == '\r') line[len - 1] = 0;
+        if (line[0] != '0' || line[1] != 'x') continue;
+        uint32_t rva = 0;
+        char* q = line + 2;
+        while (*q && *q != ' ') {
+            const char c = *q;
+            uint32_t d;
+            if (c >= '0' && c <= '9') d = (uint32_t)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = (uint32_t)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') d = (uint32_t)(c - 'A' + 10);
+            else break;
+            rva = rva * 16 + d;
+            ++q;
+        }
+        if (*q != ' ') continue;
+        ++q;
+        if (!*q) continue;
+        g_mapSyms[g_mapSymCount].rva = rva;
+        g_mapSyms[g_mapSymCount].name = q;
+        ++g_mapSymCount;
+    }
+    qsort(g_mapSyms, (size_t)g_mapSymCount, sizeof(MapSym), MapSymLess);
+    if (g_mapSymCount == 0) lstrcpynA(g_mapWhy, "the symbol file held no usable lines", sizeof(g_mapWhy));
+}
+
+// The function that owns this address, bounded by the next symbol, or null.
+static const char* ResolveMapSymbol(uintptr_t addr, uintptr_t* outDelta) {
+    if (!g_mapSymCount || !g_selfBase || addr < g_selfBase || addr >= g_selfEnd) return nullptr;
+    const uint32_t rva = (uint32_t)(addr - g_selfBase);
+    int lo = 0, hi = g_mapSymCount - 1, best = -1;
+    while (lo <= hi) {
+        const int mid = (lo + hi) / 2;
+        if (g_mapSyms[mid].rva <= rva) { best = mid; lo = mid + 1; }
+        else hi = mid - 1;
+    }
+    if (best < 0) return nullptr;
+    // Several names can share an address after identical code folding; the
+    // first of them is as good an answer as any, and the bound is the next
+    // address that differs.
+    int next = best;
+    while (next < g_mapSymCount && g_mapSyms[next].rva == g_mapSyms[best].rva) ++next;
+    const uint32_t end = (next < g_mapSymCount) ? g_mapSyms[next].rva : 0xFFFFFFFFu;
+    if (rva >= end) return nullptr;
+    if (outDelta) *outDelta = rva - g_mapSyms[best].rva;
+    return g_mapSyms[best].name;
+}
+
 // Nearest registered symbol at or below addr, within a sane distance. The bound
 // matters: without it every unregistered hot spot would be attributed to whichever
 // registered function happens to sit lowest in the image, which is worse than
 // admitting we do not know.
 static const char* ResolveSelfSymbol(uintptr_t addr, uintptr_t* outDelta = nullptr) {
+    // The map, when it is there, answers exactly; the entry points are the
+    // fallback and are a guess past the first few hundred bytes.
+    if (const char* exact = ResolveMapSymbol(addr, outDelta)) return exact;
     const char* best = nullptr;
     // Was 16 KB. Nothing here knows a detour's size, so every byte of that
     // distance is a chance to name an unregistered neighbour instead: a tester
@@ -1252,6 +1380,7 @@ static void DumpResults() {
 
     // Snapshot loaded modules so system samples can be attributed to a DLL.
     BuildModuleTable();
+    LoadMapSymbols();
     BuildNtFuncTable();
 
     // Buckets: one per named function, one "system_dll", plus one per non-empty
@@ -1498,6 +1627,16 @@ static void DumpResults() {
     // timer around the same call reads as large - which is how M2_AnimateModel
     // came to be 0.17% in this table and 2.47 ms of a 23.4 ms frame in the
     // animation census on the same day. Neither instrument was wrong.
+    if (g_mapSymCount)
+        Log("[SamplingProfiler] our own addresses are resolved against %d function(s) "
+            "read from wow_optimize.sym, so a name below means the address is inside "
+            "that function and not merely after it.", g_mapSymCount);
+    else
+        Log("[SamplingProfiler] wow_optimize.sym was not loaded (%s), so our own "
+            "addresses fall back to the hooks registered at runtime - those are entry "
+            "points with no size, and a name is only trustworthy within the first few "
+            "hundred bytes.", g_mapWhy[0] ? g_mapWhy : "reason not recorded");
+
     Log("[SamplingProfiler] === TOP %d HOT FUNCTIONS/REGIONS - self time, whole "
         "function; a +0xNNN suffix on a client function is where the weight sits "
         "inside it, not a split, because those have known sizes. A line reading "

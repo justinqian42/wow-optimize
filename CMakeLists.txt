@@ -525,6 +525,45 @@ target_link_libraries(wow_optimize PRIVATE
 
 target_link_options(wow_optimize PRIVATE /MAP)
 
+# The sampling profiler resolves an address inside this DLL to the nearest
+# symbol it was handed at runtime, and those are entry points with no size, so a
+# sample landing in an unregistered neighbour used to be printed under the name
+# above it. The linker already knows every function's address; this turns the
+# map it writes into a small table the profiler reads at startup, so a profile
+# names our own code exactly rather than guessing.
+#
+# The generator is written out at configure time rather than kept as a separate
+# script, so the build stays one file. The .sym is optional at runtime: without
+# it the profiler falls back to the registered entry points and says so.
+set(WO_SYMGEN "${CMAKE_CURRENT_BINARY_DIR}/wo_make_sym.cmake")
+file(WRITE "${WO_SYMGEN}" [=[
+file(STRINGS "${MAPFILE}" lines)
+set(base "")
+set(out "")
+foreach(line IN LISTS lines)
+  if(base STREQUAL "" AND line MATCHES "Preferred load address is ([0-9a-fA-F]+)")
+    set(base "${CMAKE_MATCH_1}")
+  endif()
+  if(NOT base STREQUAL "" AND line MATCHES "^ [0-9a-fA-F]+:[0-9a-fA-F]+ +([^ ]+) +([0-9a-fA-F]+) f")
+    set(name "${CMAKE_MATCH_1}")
+    set(rvabase "${CMAKE_MATCH_2}")
+    math(EXPR rva "0x${rvabase} - 0x${base}" OUTPUT_FORMAT HEXADECIMAL)
+    string(SUBSTRING "${name}" 0 63 name)
+    string(APPEND out "${rva} ${name}
+")
+  endif()
+endforeach()
+file(WRITE "${SYMFILE}" "${out}")
+]=])
+
+add_custom_command(TARGET wow_optimize POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DMAPFILE=$<TARGET_FILE_DIR:wow_optimize>/wow_optimize.map
+            -DSYMFILE=$<TARGET_FILE_DIR:wow_optimize>/wow_optimize.sym
+            -P "${WO_SYMGEN}"
+    COMMENT "Writing wow_optimize.sym from the linker map"
+    VERBATIM)
+
 target_include_directories(wow_optimize PRIVATE
     ${minhook_SOURCE_DIR}/include
     ${mimalloc_SOURCE_DIR}/include
