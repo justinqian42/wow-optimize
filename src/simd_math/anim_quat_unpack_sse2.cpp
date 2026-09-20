@@ -398,6 +398,16 @@ bool Init() {
     g_scale = _mm_set1_pd((double)scaleF);
     g_one   = _mm_set1_pd(1.0);
 
+    // push ebp / mov ebp, esp / mov edx, [ebp+arg_4] / fldz
+    const unsigned char* p = (const unsigned char*)kTrackQuat;
+    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC || p[3] != 0x8B ||
+        p[4] != 0x55 || p[5] != 0x0C || p[6] != 0xD9 || p[7] != 0xEE) {
+        Log("[AnimQuatUnpack] 0x%08X does not start with the prologue this was read "
+            "from (%02X %02X %02X %02X %02X %02X %02X %02X) - not installing",
+            (unsigned)kTrackQuat, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+        return false;
+    }
+
     if (WineSafe_CreateHook((void*)kTrackQuat, (void*)Hooked_TrackQuat,
                             (void**)&orig_TrackQuat) != MH_OK) {
         Log("[AnimQuatUnpack] hook NOT created");

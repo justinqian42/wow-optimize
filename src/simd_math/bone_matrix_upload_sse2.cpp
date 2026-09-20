@@ -18,19 +18,21 @@
 // bone matrix a skinning shader wants. Twenty-four memory operations to move
 // forty-eight bytes.
 // ---------------------------------------------------------------------------
-// There are two of them
+// There are three of them
 //
 // A scan for functions holding ten or more fld/fstp pairs and no floating point
 // arithmetic at all found twenty-one in the client, and two are this same loop:
-// one in sub_829BA0 and one in sub_8203B0, which the sampling profiler already
-// carried in its symbol table as "Hot_8203B0" because an earlier profile had put
-// it near the top. Same transpose, same destination (sub_683560's buffer plus
-// 496), same sub_683580(0, 31, 3*count) after it. They differ only in where the
+// one in sub_829BA0 and one in sub_8203B0. An exhaustive scan of all callers of
+// sub_683580 (SetVertexShaderConstantF for bone registers) revealed a third
+// identical loop in sub_820AE0 (the multi-texture M2 batch draw path), which
+// was missed because sub_820AE0 has floating point arithmetic elsewhere in the
+// function. Same transpose, same destination (sub_683560's buffer plus 496),
+// same sub_683580(0, 31, 3*count) after it. They differ only in where the
 // batch record, the bone remap table and the matrix array are reached from.
 //
-// Both are patched. The transpose, the learning phase and the counters are
-// shared; each site has its own thunk because each derives its pointers from a
-// different register.
+// All three are patched. The transpose, the learning phase and the counters
+// are shared; each site has its own thunk because each derives its pointers
+// from different registers/stack offsets.
 //
 // The scan is worth keeping: ten fld and ten fstp with no fadd, fmul, fcom or
 // fild anywhere is a function that moves floats without computing anything, and
@@ -88,7 +90,21 @@
 //              [esi+60h] the record whose +98h is the matrix array base
 //   out   nothing. esi, ebx and ebp preserved; everything else dead.
 //
-// The x87 stack is balanced in both originals and untouched here, so it is
+// Site C, sub_820AE0, 0x00820C41 -> 0x00820CD4:
+//
+//   in    eax  destination, advances 48 bytes a bone
+//         edx  0, the bone counter
+//         edi  the batch record: [edi+0Ch] count, [edi+0Eh] first bone
+//         [ebp-1Ch] the bone remap table base
+//         [ebp-20h] the matrix array base
+//         [ebp-10h] running total of bones across sub-batches
+//   out   eax  advanced by 48 * count
+//         [ebp-10h] += count
+//         edi  preserved (read on subsequent sub-batches)
+//         ebx  reloaded from [ebp-8] immediately at 0x00820CD4
+//         ecx, edx dead / scratch
+//
+// The x87 stack is balanced in all originals and untouched here, so it is
 // unchanged either way. No MMX, so no emms.
 //
 // Loads hoisted that the client repeats every bone: the two or three that reach
@@ -126,7 +142,7 @@ extern "C" void Log(const char* fmt, ...);
 
 namespace BoneMatrixUpload {
 
-enum { kSiteA = 0, kSiteB = 1, kSites = 2 };
+enum { kSiteA = 0, kSiteB = 1, kSiteC = 2, kSites = 3 };
 
 // The bytes each jump overwrites or splits, and the bytes at each loop's tail.
 // Both are checked before anything is written: a client that does not match is
@@ -154,6 +170,17 @@ static const unsigned char kTailB[18] = {
     0x8B, 0x8E, 0x90, 0x00, 0x00, 0x00, 0x0F, 0xB7, 0x49, 0x0C,
     0x3B, 0xD1, 0x0F, 0x82, 0x5E, 0xFF, 0xFF, 0xFF
 };
+// C head: 0F B7 4F 0E        movzx ecx, word ptr [edi+0Eh]
+//         8B 5D E4           mov   ebx, [ebp-1Ch]
+// C tail: 0F B7 49 0C        movzx ecx, word ptr [ecx+0Ch]
+//         3B D1              cmp   edx, ecx
+//         0F 82 6D FF FF FF  jb    loc_820C41
+static const unsigned char kHeadC[7] = {
+    0x0F, 0xB7, 0x4F, 0x0E, 0x8B, 0x5D, 0xE4
+};
+static const unsigned char kTailC[12] = {
+    0x0F, 0xB7, 0x49, 0x0C, 0x3B, 0xD1, 0x0F, 0x82, 0x6D, 0xFF, 0xFF, 0xFF
+};
 
 struct Site {
     const char*          name;
@@ -170,12 +197,15 @@ struct Site {
 
 static void ThunkA();
 static void ThunkB();
+static void ThunkC();
 
 static Site g_site[kSites] = {
     { "sub_829BA0", 0x00829D02, 0x00829D8D, kHeadA, 10, kTailA, 12,
       nullptr, (void*)0x00829D99, false },
     { "sub_8203B0", 0x00820480, 0x00820510, kHeadB,  6, kTailB, 18,
       nullptr, (void*)0x00820522, false },
+    { "sub_820AE0", 0x00820C41, 0x00820CC8, kHeadC,  7, kTailC, 12,
+      nullptr, (void*)0x00820CD4, false },
 };
 static unsigned char g_saved[kSites][10] = {};
 
@@ -309,10 +339,22 @@ extern "C" unsigned __cdecl BoneMatrixUpload_RunB(float* dst,
                                      BoneMatrixUpload::kSiteB);
 }
 
+// Site C: sub_820AE0 (multi-texture M2 batch draw path). Remap table is
+// already in [ebp-1Ch] and matrix array base in [ebp-20h].
+extern "C" unsigned __cdecl BoneMatrixUpload_RunC(float* dst,
+                                                  const unsigned short* batch,
+                                                  const unsigned short* remap,
+                                                  const unsigned char* matrixBase)
+{
+    return BoneMatrixUpload::RunCore(dst, batch, remap, matrixBase,
+                                     BoneMatrixUpload::kSiteC);
+}
+
 namespace BoneMatrixUpload {
 
 static void* g_returnA = (void*)0x00829D99;
 static void* g_returnB = (void*)0x00820522;
+static void* g_returnC = (void*)0x00820CD4;
 
 // Register marshalling only; the contracts are in the header comment. ebp
 // belongs to the client for as long as this runs, which is why [ebp-14h] is read
@@ -356,6 +398,32 @@ static __declspec(naked) void ThunkB() {
         call BoneMatrixUpload_RunB
         add  esp, 16
         jmp  dword ptr [g_returnB]
+    }
+}
+
+// Site C: sub_820AE0, 0x00820C41 -> 0x00820CD4.
+// Destination is advanced by count * 48, caller's running total in [ebp-10h]
+// is updated, edi is preserved, and landing pad reloads ebx from [ebp-8].
+static __declspec(naked) void ThunkC() {
+    __asm {
+        push eax                        // destination
+        mov  ecx, [ebp-20h]             // matrixBase
+        push ecx
+        mov  edx, [ebp-1Ch]             // remap table
+        push edx
+        push edi                        // batch
+        push eax                        // dst
+        call BoneMatrixUpload_RunC
+        add  esp, 16
+        // eax = count
+        add  [ebp-10h], eax             // update caller's running bone total
+
+        lea  edx, [eax+eax*2]           // count * 3
+        shl  edx, 4                     // count * 48
+        pop  eax                        // original destination
+        add  eax, edx                   // advanced destination
+
+        jmp  dword ptr [g_returnC]
     }
 }
 
@@ -419,6 +487,7 @@ bool Init() {
 
     g_site[kSiteA].thunk = (void*)&ThunkA;
     g_site[kSiteB].thunk = (void*)&ThunkB;
+    g_site[kSiteC].thunk = (void*)&ThunkC;
 
     int done = 0;
     for (int i = 0; i < kSites; ++i)
@@ -435,13 +504,14 @@ bool Init() {
 
     SamplingProfiler::RegisterSelfSymbol("BoneMatrixUpload_RunA", (const void*)&BoneMatrixUpload_RunA);
     SamplingProfiler::RegisterSelfSymbol("BoneMatrixUpload_RunB", (const void*)&BoneMatrixUpload_RunB);
+    SamplingProfiler::RegisterSelfSymbol("BoneMatrixUpload_RunC", (const void*)&BoneMatrixUpload_RunC);
 
     Log("[BoneUpload] ACTIVE on %d of %d bone matrix upload loops. The one in "
         "sub_829BA0 is 3.35%% of executing time in the corrected profile and the "
         "largest entry with nothing shipped against it; the one in sub_8203B0 is "
-        "the same transpose in a second draw path, which the profiler already "
-        "carried as a hot symbol. Twelve x87 load/store pairs a bone become four "
-        "loads, seven shuffles and three stores. There is no arithmetic in it, "
+        "the same transpose in a second draw path; the one in sub_820AE0 is the "
+        "multi-texture M2 batch draw path. Twelve x87 load/store pairs a bone become "
+        "four loads, seven shuffles and three stores. There is no arithmetic in it, "
         "so it is bit-exact by construction rather than by measurement - the "
         "first %u bones are still done both ways and compared, because the "
         "layout can be misread even where the maths cannot be wrong.",

@@ -281,8 +281,9 @@ static void BuildKnownFuncTable() {
         // the whole loop, which is why 158 of its 418 instructions are x87.
         // Named from a profile before anyone had read it. It contains the same
         // bone matrix transpose as sub_829BA0, in a second draw path, and
-        // BoneMatrixUpload patches both.
+        // BoneMatrixUpload patches all three (sub_829BA0, sub_8203B0, sub_820AE0).
         { 0x008203B0,   872, "M2_BoneMatrixUploadB" },
+        { 0x00820AE0,  1109, "M2_BoneMatrixUploadC" },
         { 0x00857CA0,  5151, "luaV_execute" },
         // The Lua bytecode dispatch loop, and the client has two of them.
         // luaD_call at 0x00856760 picks by the byte at G(L)+20 - the script
