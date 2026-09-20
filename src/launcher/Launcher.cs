@@ -78,6 +78,14 @@ namespace WowOptimizeLauncher {
             "SoundVolumeLimit",
         };
 
+        // A replacement for something the client already does, as opposed to a
+        // census, a look-and-sound trade, a crash guard or one that lost its
+        // measurement. What "TRY THE UNPROVEN ONES" is allowed to turn on.
+        public static bool IsReplacement(string key) {
+            return !In(DiagKeys, key) && !In(TradeKeys, key) && !In(LostKeys, key)
+                && !In(LogKeys, key) && !In(FixKeys, key);
+        }
+
         private static bool In(string[] set, string key) {
             for (int i = 0; i < set.Length; i++) {
                 if (set[i] == key) return true;
@@ -971,6 +979,27 @@ namespace WowOptimizeLauncher {
                 + "This is the first thing to try when something is wrong. If the "
                 + "problem is still there with everything off, it is not us.");
             leftPanel.Controls.Add(btnVanilla);
+            y += 38;
+
+            DarkButton btnProve = new DarkButton(Color.FromArgb(0, 200, 140), false);
+            btnProve.Text = "TRY THE UNPROVEN ONES";
+            btnProve.Size = new Size(btnWidth, 32);
+            btnProve.Location = new Point(15, y);
+            btnProve.Click += delegate { SetUpProvingRun(); };
+            toolTip.SetToolTip(btnProve,
+                "Everything MAX PERFORMANCE leaves on, plus every replacement "
+                + "marked [!] - the ones nobody has run in a game yet - and the "
+                + "sampling profiler.\r\n\r\n"
+                + "Each of those replacements checks its own answers against the "
+                + "game's for thousands of calls before it answers anything, keeps "
+                + "checking one call in a few thousand after that, and switches "
+                + "itself off for the session at the first disagreement. The log "
+                + "says which armed, which retired and why.\r\n\r\n"
+                + "This is the session that decides whether they ship on. Play "
+                + "normally for half an hour or more - a city, some combat - then "
+                + "send Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT "
+                + "afterwards to put it back.");
+            leftPanel.Controls.Add(btnProve);
             y += 40;
 
             y += AddSectionLabel(leftPanel, "WHEN SOMETHING IS WRONG", y);
@@ -1645,6 +1674,51 @@ namespace WowOptimizeLauncher {
         
         
         
+        // The session that turns an unproven replacement into a proven one.
+        //
+        // Every [!] switch is one that was written against the disassembly,
+        // verified offline where the maths allows it, and never run in a game.
+        // They stay off for everyone until a log says otherwise, and nothing in
+        // this launcher asked for that log: MAX PERFORMANCE deliberately leaves
+        // them at their own default, which is off, so pressing every button in
+        // the tool still produced a session that measured none of them.
+        //
+        // The profiler comes with them, because a session that proves a
+        // replacement safe and cannot say what the frame time was spent on
+        // answers half the question. The censuses stay off - they cost frames
+        // and would move the very numbers this run is for.
+        private void SetUpProvingRun() {
+            int unproven = 0, on = 0, off = 0;
+            foreach (SettingItem item in settingsMap.Values) {
+                if (item.Ctrl == null) continue;
+                bool want;
+                if (item.Key == "SamplingProfiler") {
+                    want = true;
+                } else if (item.Experimental) {
+                    // Only the ones that are a replacement for something the
+                    // client does. A census is experimental too and belongs off.
+                    want = Kinds.IsReplacement(item.Key);
+                    if (want) unproven++;
+                } else {
+                    want = Kinds.HelpsSpeed(item.Key);
+                }
+                item.Ctrl.Checked = want;
+                if (want) on++; else off++;
+            }
+            UpdateActiveModulesCount();
+            SaveSettings();
+            MessageBox.Show(
+                unproven.ToString() + " unproven replacement(s) on, " + on.ToString()
+                + " features on in all.\r\n\r\n"
+                + "Each one checks its answers against the game's before it answers "
+                + "anything, and switches itself off at the first disagreement. "
+                + "Nothing here changes how the game looks or sounds.\r\n\r\n"
+                + "Play normally for half an hour or more, then send "
+                + "Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT to put "
+                + "it back.\r\n\r\nSaved. Launch when ready.",
+                "Try the unproven ones", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         private void RestoreDefaults() {
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl != null) {
