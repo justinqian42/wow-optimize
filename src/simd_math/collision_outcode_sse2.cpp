@@ -343,7 +343,14 @@ extern "C" char __fastcall CollisionOutcode_Hooked(void* thisPtr, void* /*edx*/,
     const float* bounds = *(const float**)(T + kT_bounds);
     if (!bounds) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
 
-    uint8_t codes[kMaxVerts];
+    // Not a local. A 452-byte array in this frame is what makes MSVC give the
+    // function a /GS cookie - a load, an xor and a store on entry and a call to
+    // __security_check_cookie on exit - and this runs 13911655 times in a field
+    // session. The exception frame came off this path already; the cookie was
+    // the other half of the same cost. Nothing between the fill and the last
+    // read of it calls out, so a single buffer on the owning thread is enough,
+    // and the verification path compares it against its own copy.
+    static uint8_t codes[kMaxVerts];
     ClassifySse2(codes, (const float*)((uintptr_t)model + kM_verts), n, bounds);
 
     bool verifying = (g_armed == 0) || ((g_calls & kResampleMask) == 0);

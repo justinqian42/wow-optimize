@@ -8652,7 +8652,10 @@ static DWORD WINAPI MainThread(LPVOID param) {
     CrashDumper::RegisterFeature("Vec3CrossSSE2");
     CrashDumper::RegisterFeature("IsSphereVisibleSSE2");
     CrashDumper::RegisterFeature("FromAngleAxisSSE2");
-    CrashDumper::RegisterFeature("QuatSlerpSSE2");
+    // QuatSlerpSSE2 was registered here. The detour on 0x00982460 is gone - it
+    // drifted from the client because the client's own slerp goes through the
+    // CRT's atan2 and sin - so a registration for it would name a feature that
+    // cannot run, which is what the feature table is meant to stop doing.
     CrashDumper::RegisterFeature("FrameAccessorFast");
     CrashDumper::RegisterFeature("LayoutAccessorFast");
 #else
