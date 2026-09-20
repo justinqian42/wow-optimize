@@ -674,6 +674,13 @@ namespace Config {
         bool OptSavedVarsBackup = false;
         bool OptSoundCoalescer = false;
         bool OptVertexBufferPrealloc = false;
+
+        // 5 Colossal Engine Optimizations
+        bool OptCollisionRayVerts = false;
+        bool OptFmodParamEq = false;
+        bool OptUIRectSubdivide = false;
+        bool OptSceneVisTraverse = false;
+        bool OptParticlePhysics = false;
     };
 
     extern Settings g_settings;

@@ -213,6 +213,11 @@ static const BoolSetting kBoolSettings[] = {
     { "General", "SavedVarsBackup", &Settings::OptSavedVarsBackup },
     { "Graphics_Sound", "SoundCoalescer", &Settings::OptSoundCoalescer },
     { "General", "VertexBufferPrealloc", &Settings::OptVertexBufferPrealloc },
+    { "Graphics_Sound", "CollisionRayVerts", &Settings::OptCollisionRayVerts },
+    { "Graphics_Sound", "FmodParamEq", &Settings::OptFmodParamEq },
+    { "UI_Lua", "UIRectSubdivide", &Settings::OptUIRectSubdivide },
+    { "Graphics_Sound", "SceneVisTraverse", &Settings::OptSceneVisTraverse },
+    { "Graphics_Sound", "ParticlePhysics", &Settings::OptParticlePhysics },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -808,6 +813,11 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
 
         g_loadedFrom = iniPath;
         g_settings.OptVertexBufferPrealloc = GetPrivateProfileIntA("General", "VertexBufferPrealloc", 0, iniPath.c_str()) != 0;
+        g_settings.OptCollisionRayVerts    = GetPrivateProfileIntA("Graphics_Sound", "CollisionRayVerts", 0, iniPath.c_str()) != 0;
+        g_settings.OptFmodParamEq          = GetPrivateProfileIntA("Graphics_Sound", "FmodParamEq", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIRectSubdivide      = GetPrivateProfileIntA("UI_Lua", "UIRectSubdivide", 0, iniPath.c_str()) != 0;
+        g_settings.OptSceneVisTraverse     = GetPrivateProfileIntA("Graphics_Sound", "SceneVisTraverse", 0, iniPath.c_str()) != 0;
+        g_settings.OptParticlePhysics      = GetPrivateProfileIntA("Graphics_Sound", "ParticlePhysics", 0, iniPath.c_str()) != 0;
     }
 }
 

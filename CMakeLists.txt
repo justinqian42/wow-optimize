@@ -522,6 +522,16 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/texture_unload_delay.h
     src/hooks_subsystems/spell_effect_culling.cpp
     src/hooks_subsystems/spell_effect_culling.h
+    src/simd_math/collision_ray_verts_sse2.cpp
+    src/simd_math/collision_ray_verts_sse2.h
+    src/hooks_subsystems/fmod_parameq_sse2.cpp
+    src/hooks_subsystems/fmod_parameq_sse2.h
+    src/hooks_subsystems/ui_rect_subdivide_sse2.cpp
+    src/hooks_subsystems/ui_rect_subdivide_sse2.h
+    src/hooks_subsystems/scene_vis_traverse_sse2.cpp
+    src/hooks_subsystems/scene_vis_traverse_sse2.h
+    src/simd_math/particle_physics_sse2.cpp
+    src/simd_math/particle_physics_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
