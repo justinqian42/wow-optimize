@@ -194,6 +194,8 @@ add_library(wow_optimize SHARED
     src/simd_math/m2_batch_matrix_sse2.h
     src/hooks_subsystems/m2_anim_stride.cpp
     src/hooks_subsystems/m2_anim_reuse.cpp
+    src/hooks_subsystems/world_vis_traverse_sse2.cpp
+    src/hooks_subsystems/world_vis_traverse_sse2.h
     src/allocators/mimalloc_high_arena.cpp
     src/allocators/high_placement.cpp
     src/hooks_subsystems/client_write_batch.cpp

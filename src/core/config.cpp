@@ -165,6 +165,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2BatchSort", &Settings::OptM2BatchSort },
     { "Graphics_Sound", "CollisionPolyClip", &Settings::OptCollisionPolyClip },
     { "Graphics_Sound", "SkyTextureReuse", &Settings::OptSkyTextureReuse },
+    { "Graphics_Sound", "WorldVisTraverse", &Settings::OptWorldVisTraverse },
     { "Graphics_Sound", "ParticleTrackEval", &Settings::OptParticleTrackEval },
     { "Graphics_Sound", "ShaderConstDedup", &Settings::OptShaderConstDedup },
     { "Graphics_Sound", "BatchColourConvert", &Settings::OptBatchColourConvert },
@@ -734,6 +735,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2BatchSort     = GetPrivateProfileIntA("Graphics_Sound", "M2BatchSort", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionPolyClip = GetPrivateProfileIntA("Graphics_Sound", "CollisionPolyClip", 0, iniPath.c_str()) != 0;
         g_settings.OptSkyTextureReuse  = GetPrivateProfileIntA("Graphics_Sound", "SkyTextureReuse", 0, iniPath.c_str()) != 0;
+        g_settings.OptWorldVisTraverse = GetPrivateProfileIntA("Graphics_Sound", "WorldVisTraverse", 0, iniPath.c_str()) != 0;
         g_settings.OptParticleTrackEval = GetPrivateProfileIntA("Graphics_Sound", "ParticleTrackEval", 0, iniPath.c_str()) != 0;
         g_settings.OptShaderConstDedup = GetPrivateProfileIntA("Graphics_Sound", "ShaderConstDedup", 0, iniPath.c_str()) != 0;
         g_settings.OptBatchColourConvert = GetPrivateProfileIntA("Graphics_Sound", "BatchColourConvert", 0, iniPath.c_str()) != 0;

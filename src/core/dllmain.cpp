@@ -82,6 +82,7 @@
 #include "floor_split_sse2.h"
 #include "frustum_aabb_sse2.h"
 #include "segment_aabb_sse2.h"
+#include "world_vis_traverse_sse2.h"
 #include "runtime_vm/lua_hget_dispatch.h"
 #include "runtime_vm/lua_pool_fast.h"
 #include "anim_census.h"
@@ -5729,6 +5730,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("M2BatchSort::LogStats", M2BatchSort::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
+    STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
     STAT_TIME("LuaErrorDiag::LogStats", LuaErrorDiagLogStats());
     STAT_TIME("ParticleTrackEval::LogStats", ParticleTrackEval::LogStats());
     STAT_TIME("ShaderConstDedup::LogStats", ShaderConstDedup::LogStats());
@@ -8546,6 +8548,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2BatchSort::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
+    WorldVisTraverse::Init();
     ParticleTrackEval::Init();
     ShaderConstDedup::Init();
     BatchColourConvert::Init();
@@ -11638,6 +11641,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             M2BatchSort::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
+            WorldVisTraverse::Shutdown();
             ParticleTrackEval::Shutdown();
             ShaderConstDedup::Shutdown();
             BatchColourConvert::Shutdown();

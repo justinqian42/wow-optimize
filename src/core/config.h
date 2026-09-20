@@ -508,6 +508,10 @@ namespace Config {
         // built the same rows, after proving on live data that the rebuild came
         // out byte for byte identical. Measures whether that ever happens.
         bool OptSkyTextureReuse = false;
+        // World visibility traversal: replaces terrain cell AABB overlap and
+        // candidate object distance culling in sub_7BCC00 and sub_7BCF20 with
+        // SSE2 vector operations, eliminating serialized x87 status-word stalls.
+        bool OptWorldVisTraverse = false;
         // The per-particle track evaluation: the same arithmetic in SSE2 doubles,
         // with the client's round-to-nearest converts. Compared byte for byte
         // against the client per call before it answers; opt-in until run.
