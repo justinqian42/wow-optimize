@@ -90,7 +90,6 @@ namespace QuatLerpSse2 {
 namespace {
 
 constexpr uintptr_t kQuatLerp = 0x00982630;
-constexpr uintptr_t kQuatSlerp = 0x00982460;
 
 // The client's constants, read out of sub_982570.
 // Read back out of the image as exact bit patterns rather than typed in:
@@ -104,9 +103,6 @@ constexpr double kT2 = 0.652119696140289307;  // flt_AA2E68, two above, three be
 
 typedef float* (__cdecl* QuatLerp_fn)(float* out, float t, const float* a, const float* b);
 QuatLerp_fn orig_QuatLerp = nullptr;
-
-typedef float* (__cdecl* QuatSlerp_fn)(float* out, float t, const float* a, const float* b);
-QuatSlerp_fn orig_QuatSlerp = nullptr;
 
 // No tolerance. Every operation here is the client's operation at the client's
 // width in the client's order, so the only correct outcome is the same four
@@ -131,12 +127,6 @@ volatile LONG g_armed      = 0;
 bool g_abSubject = false;
 volatile LONG g_dead       = 0;
 bool          g_installed  = false;
-
-unsigned long g_slerp_calls      = 0;
-unsigned long g_slerp_agreements = 0;
-volatile LONG g_slerp_armed      = 0;
-volatile LONG g_slerp_dead       = 0;
-bool          g_slerp_installed  = false;
 
 inline void LerpNormalise(float* out, float t, const float* a, const float* b) {
     // --- the lerp, sub_982630 ---
@@ -236,6 +226,8 @@ __declspec(noinline) static bool LerpGuarded(float* out, float t, const float* a
     }
 }
 
+__declspec(noinline) static float* VerifyQuatLerp(float* out, float t, const float* a, const float* b);
+
 float* __cdecl Hooked_QuatLerpBody(float* out, float t, const float* a, const float* b) {
     if (g_dead || !out || !a || !b) return orig_QuatLerp(out, t, a, b);
 
@@ -255,6 +247,10 @@ float* __cdecl Hooked_QuatLerpBody(float* out, float t, const float* a, const fl
         return out;
     }
 
+    return VerifyQuatLerp(out, t, a, b);
+}
+
+__declspec(noinline) static float* VerifyQuatLerp(float* out, float t, const float* a, const float* b) {
     // While verifying, let the client write its own answer through `out` and put
     // ours somewhere else, then compare. The caller keeps the client's result,
     // so a session spent verifying behaves exactly like an unhooked one.
@@ -319,114 +315,6 @@ float* __cdecl Hooked_QuatLerp(float* out, float t, const float* a, const float*
     return r;
 }
 
-inline void SlerpDouble(float* out, float t, const float* a, const float* b) {
-    const __m128 va = _mm_loadu_ps(a);
-    const __m128 vb = _mm_loadu_ps(b);
-
-    const __m128d a01 = _mm_cvtps_pd(va);
-    const __m128d a23 = _mm_cvtps_pd(_mm_movehl_ps(va, va));
-    const __m128d b01 = _mm_cvtps_pd(vb);
-    const __m128d b23 = _mm_cvtps_pd(_mm_movehl_ps(vb, vb));
-
-    const double p_x = (double)a[0] * (double)b[0];
-    const double p_y = (double)a[1] * (double)b[1];
-    const double p_z = (double)a[2] * (double)b[2];
-    const double p_w = (double)a[3] * (double)b[3];
-
-    double dot = (p_z + p_y) + p_x + p_w;
-    double sign = 1.0;
-    if (dot < 0.0) {
-        sign = -1.0;
-        dot = -dot;
-    }
-
-    const double diff = 1.0 - dot * dot;
-    const double sin_theta = sqrt(fabs(diff));
-
-    // Threshold from flt_AA2E58 (2^-21 = 4.76837158203125e-7)
-    constexpr double kThreshold = 4.76837158203125e-7;
-    if (fabs(sin_theta) >= kThreshold) {
-        const double theta = atan2(sin_theta, dot);
-        const double inv_sin_theta = 1.0 / sin_theta;
-        const double coeff1 = sin((1.0 - (double)t) * theta) * inv_sin_theta;
-        const double coeff2 = inv_sin_theta * sin((double)t * theta) * sign;
-
-        const __m128d c1 = _mm_set1_pd(coeff1);
-        const __m128d c2 = _mm_set1_pd(coeff2);
-
-        const __m128d res_lo = _mm_add_pd(_mm_mul_pd(a01, c1), _mm_mul_pd(b01, c2));
-        const __m128d res_hi = _mm_add_pd(_mm_mul_pd(a23, c1), _mm_mul_pd(b23, c2));
-
-        const __m128 res_single = _mm_movelh_ps(_mm_cvtpd_ps(res_lo), _mm_cvtpd_ps(res_hi));
-        _mm_storeu_ps(out, res_single);
-    } else {
-        _mm_storeu_ps(out, va);
-    }
-}
-
-float* __cdecl Hooked_QuatSlerpBody(float* out, float t, const float* a, const float* b) {
-    g_slerp_calls++;
-
-    if (g_slerp_dead != 0 || !out || !a || !b) {
-        return orig_QuatSlerp(out, t, a, b);
-    }
-
-    if (g_slerp_armed != 0 && (g_slerp_calls & kResampleMask) != 0) {
-        SlerpDouble(out, t, a, b);
-        return out;
-    }
-
-    float theirs[4];
-    float mine[4];
-    __try {
-        orig_QuatSlerp(out, t, a, b);
-        theirs[0] = out[0]; theirs[1] = out[1]; theirs[2] = out[2]; theirs[3] = out[3];
-        SlerpDouble(mine, t, a, b);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        InterlockedExchange(&g_slerp_dead, 1);
-        Log("[QuatLerp] QuatSlerp vector path faulted during verification, retiring hook");
-        return out;
-    }
-
-    bool same = true;
-    for (int i = 0; i < 4; i++) {
-        uint32_t bt, bm;
-        memcpy(&bt, &theirs[i], 4);
-        memcpy(&bm, &mine[i], 4);
-        if (bt != bm) { same = false; break; }
-    }
-
-    if (!same) {
-        Log("[QuatLerp] QuatSlerp differed from client at t=%.9g. "
-            "client=(%08X %08X %08X %08X) ours=(%08X %08X %08X %08X)",
-            t,
-            *(const uint32_t*)&theirs[0], *(const uint32_t*)&theirs[1],
-            *(const uint32_t*)&theirs[2], *(const uint32_t*)&theirs[3],
-            *(const uint32_t*)&mine[0], *(const uint32_t*)&mine[1],
-            *(const uint32_t*)&mine[2], *(const uint32_t*)&mine[3]);
-        InterlockedExchange(&g_slerp_dead, 1);
-        return out;
-    }
-
-    unsigned long ok = ++g_slerp_agreements;
-    if (g_slerp_armed == 0 && ok >= kLearnCalls) {
-        InterlockedExchange(&g_slerp_armed, 1);
-        Log("[QuatLerp] %lu QuatSlerp interpolations were bit-identical to the client. "
-            "Using the vector path from here; one call in %d stays checked.",
-            ok, (int)(kResampleMask + 1));
-    }
-    return out;
-}
-
-float* __cdecl Hooked_QuatSlerp(float* out, float t, const float* a, const float* b) {
-    if (!g_abSubject) return Hooked_QuatSlerpBody(out, t, a, b);
-    unsigned long long abTick = AbTest::TickIn();
-    float* r = AbTest::StandAside() ? orig_QuatSlerp(out, t, a, b)
-                    : Hooked_QuatSlerpBody(out, t, a, b);
-    AbTest::TickOut(abTick);
-    return r;
-}
-
 } // namespace
 
 bool Init() {
@@ -467,53 +355,26 @@ bool Init() {
         "that. A single differing bit disables it for the session.",
         kLearnCalls, (int)(kResampleMask + 1));
 
-    // push ebp / mov ebp,esp / mov ecx,[ebp+10h] / mov edx,[ebp+..]
-    static const unsigned char kSlerpPrologue[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x10, 0x8B, 0x55 };
-    const unsigned char* pSlerp = (const unsigned char*)kQuatSlerp;
-    if (IsBadReadPtr(pSlerp, sizeof(kSlerpPrologue)) ||
-        memcmp(pSlerp, kSlerpPrologue, sizeof(kSlerpPrologue)) != 0) {
-        Log("[QuatLerp] QuatSlerp NOT hooked: the bytes at 0x%08X are not the slerp "
-            "this was written against.", (unsigned)kQuatSlerp);
-    } else {
-        if (WineSafe_CreateHook((void*)kQuatSlerp, (void*)Hooked_QuatSlerp,
-                                (void**)&orig_QuatSlerp) == MH_OK) {
-            if (WO_EnableHook((void*)kQuatSlerp) == MH_OK) {
-                g_slerp_installed = true;
-                SamplingProfiler::RegisterSelfSymbol("QuatSlerp_SSE2", (const void*)&Hooked_QuatSlerp);
-                Log("[QuatLerp] ACTIVE on sub_982460 (CQuaternion::Slerp). "
-                    "Vectorized double-precision SSE2 quaternion slerp. First %ld results checked bit-for-bit.",
-                    kLearnCalls);
-            }
-        }
-    }
     return true;
 }
 
 void LogStats() {
     if (!Config::g_settings.OptQuatLerpSse2) return;
-    if (!g_installed && !g_slerp_installed) { Log("[QuatLerp] not installed - nothing measured"); return; }
-    if (g_calls == 0 && g_slerp_calls == 0) { Log("[QuatLerp] installed but never called"); return; }
-    if (g_calls > 0) {
-        Log("[QuatLerp] Lerp: %lu interpolations, %lu of them compared with the client "
-            "and bit-identical%s",
-            g_calls, g_agreements,
-            g_dead ? " - DISABLED" : (g_armed ? "" : " (still verifying)"));
-        // Three states, and the middle one is the interesting one: a session
-        // that ends still proving has not yet dropped the exception frame this
-        // pays on every one of those interpolations.
-        Log("[QuatLerp]   pointer guard: %lu call(s) ran under it, it caught %lu, "
-            "and it is %s.", g_lerpProved, g_lerpFaults,
-            g_lerpFaults ? "held on by a catch"
-                         : (g_lerpProved >= kLerpProve
-                                ? "off, so the vector path carries no exception frame"
-                                : "still proving"));
-    }
-    if (g_slerp_installed && g_slerp_calls > 0) {
-        Log("[QuatLerp] Slerp: %lu interpolations, %lu of them compared with the client "
-            "and bit-identical%s",
-            g_slerp_calls, g_slerp_agreements,
-            g_slerp_dead ? " - DISABLED" : (g_slerp_armed ? "" : " (still verifying)"));
-    }
+    if (!g_installed) { Log("[QuatLerp] not installed - nothing measured"); return; }
+    if (g_calls == 0) { Log("[QuatLerp] installed but never called"); return; }
+    Log("[QuatLerp] Lerp: %lu interpolations, %lu of them compared with the client "
+        "and bit-identical%s",
+        g_calls, g_agreements,
+        g_dead ? " - DISABLED" : (g_armed ? "" : " (still verifying)"));
+    // Three states, and the middle one is the interesting one: a session
+    // that ends still proving has not yet dropped the exception frame this
+    // pays on every one of those interpolations.
+    Log("[QuatLerp]   pointer guard: %lu call(s) ran under it, it caught %lu, "
+        "and it is %s.", g_lerpProved, g_lerpFaults,
+        g_lerpFaults ? "held on by a catch"
+                     : (g_lerpProved >= kLerpProve
+                            ? "off, so the vector path carries no exception frame"
+                            : "still proving"));
 }
 
 } // namespace QuatLerpSse2
