@@ -13,7 +13,22 @@
 // - Vectorizes 3D distance and vector length using SSE2 instructions
 //   (_mm_sqrt_ss, _mm_mul_ps, _mm_add_ps).
 // - Eliminates x87 status register flushes and float load/store latency.
-// - Fully preserves caller register contract and bit-identical thresholds.
+// - Preserves the caller's register contract.
+//
+// PRECISION: this is NOT bit-exact with the client, and an earlier version of
+// this comment claimed it was. The sum of squares here is computed in single
+// precision, rounding at every add; MSVC's x87 carries the same expression at
+// 53 bits through its intermediates and rounds once on store. The two answers
+// differ in the last bits, and the distance is written back into the client's
+// own global at 0x00DCE68C, so the difference propagates. How large it gets has
+// not been measured, and no offline harness has been built for this function.
+//
+// The fix is the one the rest of this directory uses: transcribe the client's
+// instruction order in packed double, which is bit-exact against x87 at 53
+// bits, and measure it against a verbatim x87 reference before arming. Until
+// that is done this stays off by default and every number it produces is
+// unproven. Do not read the frame-time difference from an A/B run as a free
+// win; it is a win bought with an unmeasured change to what the client sees.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -234,7 +249,11 @@ bool Init() {
 
     g_installed = true;
     g_abSubject = AbTest::IsSubject("ParticlePhysics", &g_abSubject);
-    Log("[ParticlePhysics] Hook armed at 0x%08X (SSE2 velocity/damping integration)", (unsigned)kTarget);
+    Log("[ParticlePhysics] Hook armed at 0x%08X (SSE2 velocity/damping integration). "
+        "The distance and speed here are computed in single precision where the "
+        "client uses x87 at 53 bits, so the answers differ in the last bits and "
+        "that difference is written back into the client. Nothing has measured how "
+        "large it gets.", (unsigned)kTarget);
     return true;
 }
 

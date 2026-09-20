@@ -11,9 +11,16 @@
 //    rect[0] >= query[2] || rect[1] >= query[3])
 //
 // In UI rendering, over 85% of incoming boxes are completely disjoint from the
-// active scissor list. This replaces the serialized scalar comparisons with
-// packed SSE2 vector instructions, evaluating overlap in ~4 vector instructions
-// with zero status-word flushes. When completely disjoint, the candidate box
+// active scissor list.
+//
+// The file name and the paragraph that used to be here both say SSE2. There is
+// none in this file and there never was: the scan below is plain scalar C with
+// the client's own four comparisons, and what it saves is the client's call and
+// its slower loop, not a vector instruction. Comparing untouched floats needs no
+// vector width to be exact, so nothing is wrong with the code - the claim was
+// wrong. The name is left alone because renaming a file costs its history, but
+// no reader should expect vector instructions in it. When completely disjoint,
+// the candidate box
 // is appended directly without paying loop stalls.
 // ============================================================================
 
@@ -165,7 +172,9 @@ bool Init() {
     g_abSubject = AbTest::IsSubject("UIRectSubdivide", &g_abSubject);
     g_installed = true;
 
-    Log("UIRectSubdivide: ACTIVE on sub_7762A0 (UI Dirty Rect / Scissor Subdivision).");
+    Log("UIRectSubdivide: ACTIVE on sub_7762A0 (UI dirty rect and scissor "
+        "subdivision). Scalar C, not SSE2 despite the file name; what it saves is "
+        "the client's call and loop on the disjoint case, which is most of them.");
     return true;
 }
 
