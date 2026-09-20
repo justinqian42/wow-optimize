@@ -440,6 +440,12 @@ namespace WowOptimizeLauncher {
         private FlowLayoutPanel uiLuaFlow;
         private FlowLayoutPanel combatNetFlow;
         private FlowLayoutPanel graphicsSoundFlow;
+        // Two tabs that collect by what a switch is rather than by which part of
+        // the game it touches. Everything the preset buttons deliberately leave
+        // off used to be scattered across the four section tabs, so "why is this
+        // one still off" had no place to be answered.
+        private FlowLayoutPanel triedFlow;
+        private FlowLayoutPanel diagFlow;
         private TextBox searchBox;
 
         // Background image
@@ -1292,17 +1298,23 @@ namespace WowOptimizeLauncher {
             TabPage tpUiLua = CreateTabPage("UI & LUA");
             TabPage tpCombatNet = CreateTabPage("COMBAT & NET");
             TabPage tpGraphicsSound = CreateTabPage("GRAPHICS & SOUND");
+            TabPage tpTried = CreateTabPage("TRIED, DIDN'T HELP");
+            TabPage tpDiag = CreateTabPage("DIAGNOSTICS");
 
             tabs.TabPages.Add(tpGeneral);
             tabs.TabPages.Add(tpUiLua);
             tabs.TabPages.Add(tpCombatNet);
             tabs.TabPages.Add(tpGraphicsSound);
+            tabs.TabPages.Add(tpTried);
+            tabs.TabPages.Add(tpDiag);
 
             // Get the scroll panels from each tab page
             generalFlow = (FlowLayoutPanel)((Panel)tpGeneral.Controls[0]).Controls[0];
             uiLuaFlow = (FlowLayoutPanel)((Panel)tpUiLua.Controls[0]).Controls[0];
             combatNetFlow = (FlowLayoutPanel)((Panel)tpCombatNet.Controls[0]).Controls[0];
             graphicsSoundFlow = (FlowLayoutPanel)((Panel)tpGraphicsSound.Controls[0]).Controls[0];
+            triedFlow = (FlowLayoutPanel)((Panel)tpTried.Controls[0]).Controls[0];
+            diagFlow = (FlowLayoutPanel)((Panel)tpDiag.Controls[0]).Controls[0];
 
 
 
@@ -1340,7 +1352,8 @@ namespace WowOptimizeLauncher {
         // is the same word twice.
         private void Rebuild(string query) {
             if (generalFlow == null || uiLuaFlow == null ||
-                combatNetFlow == null || graphicsSoundFlow == null) {
+                combatNetFlow == null || graphicsSoundFlow == null ||
+                triedFlow == null || diagFlow == null) {
                 return;
             }
 
@@ -1348,7 +1361,8 @@ namespace WowOptimizeLauncher {
             bool hasSearch = !string.IsNullOrEmpty(query);
 
             FlowLayoutPanel[] flows = new FlowLayoutPanel[] {
-                generalFlow, uiLuaFlow, combatNetFlow, graphicsSoundFlow
+                generalFlow, uiLuaFlow, combatNetFlow, graphicsSoundFlow,
+                triedFlow, diagFlow
             };
             // The checkboxes are made once and reused, so they are only removed.
             // The group headings are made fresh every time this runs, which is
@@ -1449,7 +1463,14 @@ namespace WowOptimizeLauncher {
         // where its name said it would be. Maturity is a property of a switch,
         // not a place to keep it, so it is a mark on the row instead - [!] for
         // what should help and has not been proven.
+        // What a switch is decides its tab before which part of the game it
+        // touches does. The two kinds below are the ones every preset button
+        // leaves off, and a tester who presses one and then looks for what is
+        // still unticked has one place to look instead of four.
         private FlowLayoutPanel FlowFor(SettingItem data) {
+            string kind = Kinds.Of(data.Key, data.Experimental);
+            if (kind == Kinds.Lost) return triedFlow;
+            if (kind == Kinds.Diag || kind == Kinds.Log) return diagFlow;
             switch (data.Section) {
                 case "General":        return generalFlow;
                 case "UI_Lua":         return uiLuaFlow;
@@ -1694,6 +1715,10 @@ namespace WowOptimizeLauncher {
         // and would move the very numbers this run is for.
         private void SetUpProvingRun() {
             int unproven = 0, on = 0, off = 0;
+            // Counted by reason, so the message can say what it left off and
+            // where to find it rather than leaving a tester to hunt for the
+            // boxes that are still unticked.
+            int diagOff = 0, lostOff = 0, tradeOff = 0;
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl == null) continue;
                 bool want;
@@ -1715,7 +1740,15 @@ namespace WowOptimizeLauncher {
                     want = Kinds.HelpsSpeed(item.Key);
                 }
                 item.Ctrl.Checked = want;
-                if (want) on++; else off++;
+                if (want) {
+                    on++;
+                } else {
+                    off++;
+                    string kind = Kinds.Of(item.Key, item.Experimental);
+                    if (kind == Kinds.Diag || kind == Kinds.Log) diagOff++;
+                    else if (kind == Kinds.Lost) lostOff++;
+                    else if (kind == Kinds.Trade) tradeOff++;
+                }
             }
             UpdateActiveModulesCount();
             SaveSettings();
@@ -1725,6 +1758,13 @@ namespace WowOptimizeLauncher {
                 + "Each one checks its answers against the game's before it answers "
                 + "anything, and switches itself off at the first disagreement. "
                 + "Nothing here changes how the game looks or sounds.\r\n\r\n"
+                + "Left off on purpose: " + diagOff.ToString() + " under the "
+                + "DIAGNOSTICS tab, which cost frames and would move the very numbers "
+                + "this run is for; " + lostOff.ToString() + " under TRIED, DIDN'T HELP, "
+                + "each measured against the game and beaten by it; " + tradeOff.ToString()
+                + " that buy frames by changing how the game looks or sounds, which is "
+                + "your call and not this button's; and the frame rate limiter, because a "
+                + "capped session measures nothing.\r\n\r\n"
                 + "Play normally for half an hour or more, then send "
                 + "Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT to put "
                 + "it back.\r\n\r\nSaved. Launch when ready.",
