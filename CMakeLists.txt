@@ -174,6 +174,7 @@ add_library(wow_optimize SHARED
     src/simd_math/particle_track_eval_sse2.cpp
     src/simd_math/shader_const_dedup_sse2.cpp
     src/simd_math/batch_colour_convert.cpp
+    src/simd_math/floor_split_sse2.cpp
     src/simd_math/frustum_aabb_sse2.cpp
     src/simd_math/segment_aabb_sse2.cpp
     src/runtime_vm/lua_hget_dispatch.cpp

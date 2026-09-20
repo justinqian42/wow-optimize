@@ -519,6 +519,10 @@ namespace Config {
         // converts with no x87 mode change. This one replaces client code by writing
         // into it rather than by a hook, so it verifies before it patches.
         bool OptBatchColourConvert = false;
+        // The float split at sub_5FE800: one truncate instead of two x87 control-word
+        // loads, on a leaf called from 26 sites. Compared bit for bit against the
+        // client per call before it answers; opt-in until run.
+        bool OptFloorSplit = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
