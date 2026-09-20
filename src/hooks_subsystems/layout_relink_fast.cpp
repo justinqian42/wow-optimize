@@ -410,150 +410,131 @@ void Retire(const char* why) {
         "runs from here on; nothing is left half-applied.", why);
 }
 
-uint32_t* __fastcall Hooked_RelinkBody(void* self, void* edx) {
-    (void)edx;
-    // Counted before anything can return, including after this module has
-    // retired, because every other counter here stops the moment it does.
-    //
-    // A session log read "5 calls" and it was taken - by me - as the call rate
-    // of the hottest function in the client's profile, which made no sense and
-    // led to the conclusion that the shortcut could never arm. The module had
-    // retired three seconds in; from then on the first line returned without
-    // counting, and the function went on being called for the rest of the
-    // session with nothing recording it. The number was not a rate, it was
-    // where the counting stopped.
-    //
-    // Plain increment, not interlocked: this is the client's layout relink and
-    // it runs on the main thread, and a lock-prefixed read-modify-write on a
-    // function that owns nine percent of executing time costs more than the
-    // diagnostic is worth.
-    g_invocations++;
-    if (g_dead || !self) return orig_Relink(self, edx);
+enum PredictResult {
+    kPredictFault,
+    kPredictEarlyOut,
+    kPredictNotFound,
+    kPredictDeferred
+};
 
-
-    uintptr_t This = (uintptr_t)self;
-    uint32_t* result;
-    bool predictNotFound;
-
+static __declspec(noinline) PredictResult PredictRelink(uintptr_t This, uint32_t*& outResult) {
     __try {
-        result = (uint32_t*)(This + Rd(kNodeOffsetVar));
-        // The whole body of the original is inside `if (!result[1])`. When that
-        // is false it does nothing at all, so there is nothing to be clever
-        // about and the original is the cheapest correct answer.
-        if (result[1] != 0) { g_earlyOut++; return orig_Relink(self, edx); }
+        outResult = (uint32_t*)(This + Rd(kNodeOffsetVar));
+        if (outResult[1] != 0) {
+            return kPredictEarlyOut;
+        }
         uint32_t head = Rd(This + kDependentsOff);
         if (IsEmptyLink(head)) {
-            predictNotFound = true;
-        } else {
-            // The list is not empty, which used to end the matter. Ask whether
-            // any of the frames it names could match instead.
-            DepScan ds = { 0, 0, 0 };
-            predictNotFound = NoDependantCanMatch(head, (uint32_t)This, &ds);
-            if (predictNotFound) {
-                ++g_rejectShortcut;
-                g_rejectWalked += (double)ds.entries;
-            } else if (ds.qualifying == 1) {
-                ++g_oneQualifier;
-                // Is that one frame in the list the client is about to walk?
-                //
-                // The client's own membership test is in this function's
-                // not-found tail: before unlinking itself it does `if (*result)`
-                // on `result = frame + dword_AC1018`, so a non-zero first link
-                // word is what "in the list" means here. It is one load.
-                //
-                // This is read-only and counts only. With exactly one frame in
-                // the index carrying an anchor the scan would accept, and that
-                // frame in the list, the client's loop must stop at it whatever
-                // order the list is in - which is the case a found-path shortcut
-                // would answer. Whether that case is common enough to be worth
-                // the pointer surgery is what this counts, and the surgery is
-                // not written until it says so: this module crashed the game on
-                // login once already, doing exactly that kind of work on a
-                // premise that had not been measured.
-                const uint32_t linkOff = Rd(kNodeOffsetVar);
-                if (Rd((uintptr_t)ds.only + linkOff) != 0) ++g_oneQualifierLinked;
-            } else {
-                ++g_manyQualifiers;
-            }
+            return kPredictNotFound;
         }
+        DepScan ds = { 0, 0, 0 };
+        if (NoDependantCanMatch(head, (uint32_t)This, &ds)) {
+            ++g_rejectShortcut;
+            g_rejectWalked += (double)ds.entries;
+            return kPredictNotFound;
+        }
+        if (ds.qualifying == 1) {
+            ++g_oneQualifier;
+            const uint32_t linkOff = Rd(kNodeOffsetVar);
+            if (Rd((uintptr_t)ds.only + linkOff) != 0) ++g_oneQualifierLinked;
+        } else {
+            ++g_manyQualifiers;
+        }
+        return kPredictDeferred;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return orig_Relink(self, edx);
+        return kPredictFault;
+    }
+}
+
+static __declspec(noinline) uint32_t* VerifyRelink(void* self, void* edx, uintptr_t This, uint32_t* result, bool predictNotFound) {
+    uint32_t rootBefore = 0;
+    __try { rootBefore = Rd(kListRoot); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return orig_Relink(self, edx); }
+
+    uint32_t* r = orig_Relink(self, edx);
+
+    bool actualNotFound = false;
+    __try {
+        uint32_t rootAfter = Rd(kListRoot);
+        actualNotFound = (rootAfter == (uint32_t)(uintptr_t)result)
+                      && (rootAfter != rootBefore);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Retire("the list root became unreadable during verification");
+        return r;
     }
 
-    LONG n = ++g_calls;
-    bool verifying = (g_armed == 0) || ((n & kResampleMask) == 0);
+    if (predictNotFound && !actualNotFound) {
+        ++g_disagreed;
+        Log("[LayoutRelink] Prediction was wrong: frame 0x%08X had nothing at "
+            "+0x38 but the client took the found path. An empty dependants "
+            "list does not imply the scan finds nothing, so this optimisation "
+            "is not valid.", (unsigned)This);
+        Retire("a prediction would have produced the wrong result");
+        return r;
+    }
 
-    if (verifying) {
-        uint32_t rootBefore = 0;
-        __try { rootBefore = Rd(kListRoot); }
-        __except (EXCEPTION_EXECUTE_HANDLER) { return orig_Relink(self, edx); }
-
-        uint32_t* r = orig_Relink(self, edx);
-
-        // The not-found tail ends with off_AC101C = result. Nothing else in this
-        // function writes that word, so this distinguishes the two paths.
-        bool actualNotFound = false;
-        __try {
-            uint32_t rootAfter = Rd(kListRoot);
-            actualNotFound = (rootAfter == (uint32_t)(uintptr_t)result)
-                          && (rootAfter != rootBefore);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Retire("the list root became unreadable during verification");
-            return r;
-        }
-
-        // The unsafe direction: we would have run the not-found tail on a frame
-        // the client found a match for. This is the only one that invalidates
-        // the optimisation.
-        if (predictNotFound && !actualNotFound) {
-            ++g_disagreed;
-            Log("[LayoutRelink] Prediction was wrong: frame 0x%08X had nothing at "
-                "+0x38 but the client took the found path. An empty dependants "
-                "list does not imply the scan finds nothing, so this optimisation "
-                "is not valid.", (unsigned)This);
-            Retire("a prediction would have produced the wrong result");
-            return r;
-        }
-
-        // The safe direction: a non-empty +0x38 where the client still found
-        // nothing. We defer on non-empty, so the original ran and the answer is
-        // correct - this is a skipped shortcut, not an error. Log the first one
-        // so the asymmetry is visible in a session log, then just count them.
-        if (!predictNotFound && actualNotFound) {
-            if (++g_pessimistic == 1) {
-                Log("[LayoutRelink] Frame 0x%08X had something at +0x38 but the "
-                    "client found nothing. Correct either way - we defer on "
-                    "non-empty - so this is a missed shortcut, not a divergence. "
-                    "Counting the rest.", (unsigned)This);
-            }
-            return r;
-        }
-
-        LONG ok = ++g_agreements;
-        if (g_armed == 0 && ok >= kLearnCalls) {
-            InterlockedExchange(&g_armed, 1);
-            Log("[LayoutRelink] %ld calls verified, no disagreement. Taking the "
-                "shortcut from here; one call in %d stays checked.",
-                (long)ok, (int)(kResampleMask + 1));
+    if (!predictNotFound && actualNotFound) {
+        if (++g_pessimistic == 1) {
+            Log("[LayoutRelink] Frame 0x%08X had something at +0x38 but the "
+                "client found nothing. Correct either way - we defer on "
+                "non-empty - so this is a missed shortcut, not a divergence. "
+                "Counting the rest.", (unsigned)This);
         }
         return r;
     }
 
+    LONG ok = ++g_agreements;
+    if (g_armed == 0 && ok >= kLearnCalls) {
+        InterlockedExchange(&g_armed, 1);
+        Log("[LayoutRelink] %ld calls verified, no disagreement. Taking the "
+            "shortcut from here; one call in %d stays checked.",
+            (long)ok, (int)(kResampleMask + 1));
+    }
+    return r;
+}
+
+static __declspec(noinline) bool ExecuteNotFoundTail(uint32_t* result, uintptr_t This) {
+    __try {
+        RunNotFoundTail(result, This);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Retire("the transcribed tail faulted");
+        return false;
+    }
+}
+
+uint32_t* __fastcall Hooked_RelinkBody(void* self, void* edx) {
+    (void)edx;
+    g_invocations++;
+    if (g_dead || !self) return orig_Relink(self, edx);
+
+    uintptr_t This = (uintptr_t)self;
+    uint32_t* result = nullptr;
+    PredictResult pr = PredictRelink(This, result);
+
+    if (pr == kPredictFault) {
+        return orig_Relink(self, edx);
+    }
+    if (pr == kPredictEarlyOut) {
+        g_earlyOut++;
+        return orig_Relink(self, edx);
+    }
+
+    const bool predictNotFound = (pr == kPredictNotFound);
+
+    LONG n = ++g_calls;
+    bool verifying = (g_armed == 0) || ((n & kResampleMask) == 0);
+    if (verifying) {
+        return VerifyRelink(self, edx, This, result, predictNotFound);
+    }
+
     if (!predictNotFound) {
         ++g_deferred;
-        // Nobody has measured the number the whole model rests on: how long the
-        // list the client scans actually is, and how far into it the match
-        // sits. If it is short, the scan cannot be where the time goes and this
-        // module is aimed at the wrong thing. Sampled, because measuring means
-        // walking the list a second time.
         if ((++g_scanSample & 255u) == 0) MeasureScan(This);
         return orig_Relink(self, edx);
     }
 
-    __try {
-        RunNotFoundTail(result, This);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Retire("the transcribed tail faulted");
+    if (!ExecuteNotFoundTail(result, This)) {
         return orig_Relink(self, edx);
     }
     ++g_fastTaken;
@@ -583,13 +564,10 @@ uint32_t* __fastcall Hooked_Relink(void* self, void* edx) {
 bool Init() {
     if (!Config::g_settings.OptLayoutRelinkFast) return true;
 
-    // The prologue is `test ecx, ecx` / `jz short`, not a frame setup - this
-    // function takes `this` in ecx and has no stack frame at all. Checking for
-    // the usual 55 8B EC would have rejected the right address.
-    unsigned char* p = (unsigned char*)kRelink;
-    if (p[0] != 0x85 || p[1] != 0xC9) {
-        Log("[LayoutRelink] Expected `test ecx,ecx` at 0x%08X and found %02X %02X "
-            "- not installing", (unsigned)kRelink, p[0], p[1]);
+    static const unsigned char kExp_Relink[8] = { 0x85, 0xC9, 0x74, 0x09, 0xA1, 0x18, 0x10, 0xAC };
+    if (IsBadReadPtr((void*)kRelink, 8) ||
+        memcmp((const void*)kRelink, kExp_Relink, 8) != 0) {
+        Log("[LayoutRelink] 0x%08X bad prologue or unreadable - not installing", (unsigned)kRelink);
         return false;
     }
 

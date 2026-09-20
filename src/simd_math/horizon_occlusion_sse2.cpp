@@ -526,6 +526,13 @@ static bool PatchScan() {
 bool Init() {
     if (!Config::g_settings.OptHorizonOcclusionSse2) return true;
 
+    static const unsigned char kExp_HorizonBuild[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C, 0xF6, 0x05 };
+    if (IsBadReadPtr((void*)ADDR_HorizonBuild, 8) ||
+        memcmp((const void*)ADDR_HorizonBuild, kExp_HorizonBuild, 8) != 0) {
+        Log("[Horizon] 0x%08X bad prologue or unreadable - not installing", (unsigned)ADDR_HorizonBuild);
+        return false;
+    }
+
     if (WineSafe_CreateHook((void*)ADDR_HorizonBuild, (void*)Hooked_HorizonBuild,
                             (void**)&orig_HorizonBuild) != MH_OK) {
         Log("[Horizon] Could not hook the horizon builder at 0x%08X",

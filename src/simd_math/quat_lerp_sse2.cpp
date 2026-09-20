@@ -320,9 +320,10 @@ float* __cdecl Hooked_QuatLerp(float* out, float t, const float* a, const float*
 bool Init() {
     if (!Config::g_settings.OptQuatLerpSse2) return true;
 
-    unsigned char* p = (unsigned char*)kQuatLerp;
-    if (IsBadReadPtr(p, 8)) {
-        Log("[QuatLerp] 0x%08X unreadable - not installing", (unsigned)kQuatLerp);
+    static const unsigned char kExp_QuatLerp[8] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x8B, 0x45 };
+    if (IsBadReadPtr((void*)kQuatLerp, 8) ||
+        memcmp((const void*)kQuatLerp, kExp_QuatLerp, 8) != 0) {
+        Log("[QuatLerp] 0x%08X bad prologue or unreadable - not installing", (unsigned)kQuatLerp);
         return false;
     }
 
