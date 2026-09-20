@@ -1699,6 +1699,13 @@ namespace WowOptimizeLauncher {
                 bool want;
                 if (item.Key == "SamplingProfiler") {
                     want = true;
+                } else if (item.Key == "FrameLimiter") {
+                    // A run that spends its frames waiting measures nothing: the
+                    // profile fills with the wait and every share in it is a
+                    // share of whatever is left. This one switch is the
+                    // difference between a log that answers the question and a
+                    // log that cannot.
+                    want = false;
                 } else if (item.Experimental) {
                     // Only the ones that are a replacement for something the
                     // client does. A census is experimental too and belongs off.
