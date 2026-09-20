@@ -196,6 +196,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/m2_anim_reuse.cpp
     src/hooks_subsystems/world_vis_traverse_sse2.cpp
     src/hooks_subsystems/world_vis_traverse_sse2.h
+    src/hooks_subsystems/ui_strata_opt.cpp
+    src/hooks_subsystems/ui_strata_opt.h
     src/allocators/mimalloc_high_arena.cpp
     src/allocators/high_placement.cpp
     src/hooks_subsystems/client_write_batch.cpp

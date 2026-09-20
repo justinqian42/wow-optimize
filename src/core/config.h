@@ -512,6 +512,10 @@ namespace Config {
         // candidate object distance culling in sub_7BCC00 and sub_7BCF20 with
         // SSE2 vector operations, eliminating serialized x87 status-word stalls.
         bool OptWorldVisTraverse = false;
+        // UI strata frame sorting and draw: caches sorted frame indices across
+        // frames when UI frame count and generation stay unchanged in sub_47AE20,
+        // avoiding repeated std::sort comparator calls on every rendered frame.
+        bool OptUIStrataOpt = false;
         // The per-particle track evaluation: the same arithmetic in SSE2 doubles,
         // with the client's round-to-nearest converts. Compared byte for byte
         // against the client per call before it answers; opt-in until run.
