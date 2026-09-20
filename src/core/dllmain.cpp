@@ -5681,6 +5681,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("M2BatchSort::LogStats", M2BatchSort::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
+    STAT_TIME("LuaErrorDiag::LogStats", LuaErrorDiagLogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());

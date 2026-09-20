@@ -5,3 +5,7 @@
 // NOT lua_error. The correct lua_error address must be found via disassembly before
 // re-enabling this hook. Gated by TEST_DISABLE_LUA_ERROR_DIAG in version.h.
 bool InstallLuaErrorDiag();
+
+// What was caught by a pcall this session, one line per distinct message.
+void LuaErrorDiagLogStats();
+

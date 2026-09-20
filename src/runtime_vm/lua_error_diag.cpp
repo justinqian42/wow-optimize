@@ -43,6 +43,63 @@ static const char* ReadLuaErrorString(uintptr_t L) {
 typedef int (__cdecl *lua_getstack_fn)(uintptr_t L, int level, void* ar);
 typedef int (__cdecl *lua_getinfo_fn)(uintptr_t L, const char* what, void* ar);
 
+// The innermost Lua frame that has a source, as "file:line". That is what names
+// the addon behind a caught error, and it is the one thing the message itself
+// never says.
+static void DescribeTop(uintptr_t L, char* out, int outSize) {
+    out[0] = 0;
+    if (!L) return;
+    __try {
+        lua_getstack_fn getstack = (lua_getstack_fn)0x0084FE40;
+        lua_getinfo_fn  getinfo  = (lua_getinfo_fn)0x00850A90;
+        char ar[100];
+        for (int level = 0; level < 4; ++level) {
+            memset(ar, 0, sizeof(ar));
+            if (getstack(L, level, ar) != 1) return;
+            getinfo(L, "Sl", ar);
+            const char* shortSrc = (const char*)(ar + 36);
+            const int line = *(int*)(ar + 20);
+            if (shortSrc[0] && shortSrc[0] != '?' && line > 0) {
+                wsprintfA(out, "%.*s:%d", outSize - 12, shortSrc, line);
+                return;
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        out[0] = 0;
+    }
+}
+
+// Caught errors, kept one line each however often they repeat.
+//
+// A caught error is one a pcall around it handles, so the game carries on. They
+// are almost all an addon asking whether an API exists by calling it: a tester
+// asked about "Usage: GetPlayerInfoByGUID(\"playerGUID\")" arriving over and
+// over, and the same logs carry "CreateFrame: Unknown frame type 'TextureBase'"
+// and "Couldn't find CVar named 'HelpTipEnabled'" - calls into a later client's
+// API that this one does not have.
+//
+// Nothing is wrong, but a line per occurrence buries the rest of the log and
+// gives the reader nothing to act on. So the first sighting of each message
+// carries the Lua file and line that raised it, which names the addon, and
+// every repeat after that is counted and printed once in the periodic report.
+struct CaughtError {
+    uint32_t hash;
+    uint32_t count;
+    char     msg[112];
+    char     where[72];
+};
+#define MAX_CAUGHT_KINDS 48
+static CaughtError g_caught[MAX_CAUGHT_KINDS];
+static int  g_caughtKinds = 0;
+static unsigned long g_caughtTotal = 0;
+static unsigned long g_caughtDropped = 0;
+
+static uint32_t HashMsg(const char* s) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; s[i] && i < 160; ++i) { h ^= (unsigned char)s[i]; h *= 16777619u; }
+    return h;
+}
+
 static void LogLuaTraceback(uintptr_t L) {
     if (!L) return;
     
@@ -112,10 +169,31 @@ static int __cdecl DiagLuaError(uintptr_t L) {
     if (!errMsg) errMsg = "<unable to read>";
 
     if (isCaught) {
-        // Caught errors are handled by the surrounding pcall - the game recovers on
-        // its own. Log a single INFO line (no synchronous disk flush) so an addon
-        // probing the API through pcall cannot stall the main thread.
-        LogEx(LOG_LEVEL_INFO, "LUA", "[LuaError] Caught exception: %s", errMsg);
+        // Handled by the surrounding pcall - the game recovers on its own. One
+        // INFO line per distinct message, with no synchronous disk flush, so an
+        // addon probing the API in a loop cannot stall the main thread.
+        ++g_caughtTotal;
+        const uint32_t h = HashMsg(errMsg);
+        for (int i = 0; i < g_caughtKinds; ++i) {
+            if (g_caught[i].hash == h) { ++g_caught[i].count; return s_origLuaError(L); }
+        }
+        if (g_caughtKinds >= MAX_CAUGHT_KINDS) {
+            ++g_caughtDropped;
+            return s_origLuaError(L);
+        }
+        CaughtError& e = g_caught[g_caughtKinds++];
+        e.hash = h;
+        e.count = 1;
+        lstrcpynA(e.msg, errMsg, sizeof(e.msg));
+        e.where[0] = 0;
+        // Only on a first sighting, so a message arriving thousands of times
+        // costs one walk and not thousands.
+        DescribeTop(useL, e.where, sizeof(e.where));
+        LogEx(LOG_LEVEL_INFO, "LUA",
+              "[LuaError] Caught exception: %s%s%s. A pcall around it handled it, so "
+              "nothing broke; later occurrences of this one are counted and reported "
+              "rather than repeated here.",
+              e.msg, e.where[0] ? " - raised from " : "", e.where);
         return s_origLuaError(L);
     }
 
@@ -171,6 +249,30 @@ static int __cdecl DiagLuaError(uintptr_t L) {
     LogEx(LOG_LEVEL_ERROR, "LUA", "=== END LUA ERROR #%d ===", (int)errNum);
 
     return s_origLuaError(L);
+}
+
+// Printed from the periodic report, so a session that never reaches Shutdown
+// still says what was caught and how often.
+void LuaErrorDiagLogStats() {
+    if (!s_origLuaError) {
+        Log("[LuaError] not measured: the hook is not installed.");
+        return;
+    }
+    if (g_caughtTotal == 0) {
+        Log("[LuaError] measured and zero: no Lua error was caught by a pcall this "
+            "session.");
+        return;
+    }
+    Log("[LuaError] %lu error(s) caught by a pcall, of %d distinct message(s). These "
+        "are handled where they are raised; the game carries on.",
+        g_caughtTotal, g_caughtKinds);
+    for (int i = 0; i < g_caughtKinds; ++i) {
+        Log("[LuaError]   %6u x  %s%s%s", g_caught[i].count, g_caught[i].msg,
+            g_caught[i].where[0] ? "  first raised from " : "", g_caught[i].where);
+    }
+    if (g_caughtDropped)
+        Log("[LuaError]   %lu further error(s) had a message this did not have room "
+            "to keep apart and are counted in the total only.", g_caughtDropped);
 }
 
 bool InstallLuaErrorDiag() {
