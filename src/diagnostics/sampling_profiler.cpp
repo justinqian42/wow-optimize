@@ -862,7 +862,12 @@ extern "C" void WowOpt_NoteDetour(uintptr_t target, const void* detour) {
 // admitting we do not know.
 static const char* ResolveSelfSymbol(uintptr_t addr, uintptr_t* outDelta = nullptr) {
     const char* best = nullptr;
-    uintptr_t bestDelta = 0x4000;   // 16 KB
+    // Was 16 KB. Nothing here knows a detour's size, so every byte of that
+    // distance is a chance to name an unregistered neighbour instead: a tester
+    // profile put "wowopt!hook@00875F80+0x1AD0" ninth in its top fifty, and
+    // 6.8 KB past an entry point is not that entry point. Four KB is still
+    // generous for one function and is as far as a guess is worth making.
+    uintptr_t bestDelta = 0x1000;   // 4 KB
     for (int i = 0; i < g_selfSymbolCount; i++) {
         if (g_selfSymbols[i].addr > addr) continue;
         uintptr_t d = addr - g_selfSymbols[i].addr;
@@ -1048,7 +1053,9 @@ static void DumpFineHistogram(const uint32_t* counts, int slots, int shift,
         const char* sym = (addrBase == 0)
                         ? ResolveSelfSymbol(g_selfBase + slotAddr, &delta) : nullptr;
         if (sym && delta < kSelfSymbolTrusted) wsprintfA(addr, "wowopt!%.20s", sym);
-        else if (sym) wsprintfA(addr, "wowopt!%.14s+0x%X", sym, (unsigned)delta);
+        // Past the trusted distance the address is the fact and the name is a
+        // neighbourhood, so the address leads and the name follows it.
+        else if (sym) wsprintfA(addr, "wowopt+0x%X after %.12s", (unsigned)slotAddr, sym);
         else          wsprintfA(addr, addrFormat, (unsigned)slotAddr);
         Log("[SamplingProfiler]   %-14s %8u samples (%5.2f%%)",
             addr, c, 100.0 * (double)c / (double)total);
@@ -1492,7 +1499,11 @@ static void DumpResults() {
     // came to be 0.17% in this table and 2.47 ms of a 23.4 ms frame in the
     // animation census on the same day. Neither instrument was wrong.
     Log("[SamplingProfiler] === TOP %d HOT FUNCTIONS/REGIONS - self time, whole "
-        "function; a +0xNNN suffix is where the weight sits, not a split "
+        "function; a +0xNNN suffix on a client function is where the weight sits "
+        "inside it, not a split, because those have known sizes. A line reading "
+        "\"wowopt+0xNNN after <name>\" is the other case: our own symbols are "
+        "entry points with no size, so that address is somewhere past that one "
+        "and may be in an unregistered neighbour "
         "(shares of the %llu most recent samples, %llu idle ticks during "
         "loading/warmup where the main thread was left alone) ===",
         TOP_N, (unsigned long long)n, (unsigned long long)g_skippedSamples);
@@ -1538,7 +1549,8 @@ static void DumpResults() {
             uintptr_t delta = 0;
             const char* sym = ResolveSelfSymbol(buckets[i].addr, &delta);
             if (sym && delta < kSelfSymbolTrusted) wsprintfA(label, "wowopt!%.24s", sym);
-            else if (sym) wsprintfA(label, "wowopt!%.16s+0x%X", sym, (unsigned)delta);
+            else if (sym) wsprintfA(label, "wowopt+0x%05X after %.14s",
+                                    (unsigned)(buckets[i].addr - g_selfBase), sym);
             else     wsprintfA(label, "wowopt+0x%05X", (unsigned)(buckets[i].addr - g_selfBase));
             name = label;
         } else {
