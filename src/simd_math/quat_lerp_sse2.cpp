@@ -199,6 +199,43 @@ void Retire(const char* why) {
     }
 }
 
+// The guard, and why it comes off.
+//
+// A field session takes 3002320120 interpolations through this hook. Each one
+// ran inside a __try, and a __try region on 32-bit MSVC costs a prologue on
+// every call whether anything faults or not - measured at 2.48 ns elsewhere in
+// this project, which is seven seconds of main thread across a session.
+//
+// What the guard buys is nothing, and that is an argument about memory rather
+// than probability: the three pointers are checked for null above, and when the
+// handler fires control falls through to the client's own routine with the same
+// pointers, which reads the same four floats from each and writes the same four.
+// It cannot succeed where ours faulted. The guard does not recover a fault, it
+// moves it a few instructions later into the client's code.
+//
+// So it is kept until it has proven that. Every call runs under it for the
+// first kLerpProve; if it ever catches anything, that is logged and this stays
+// guarded for the rest of the session.
+constexpr unsigned long kLerpProve = 200000;
+unsigned long g_lerpProved = 0;
+unsigned long g_lerpFaults = 0;
+volatile LONG g_lerpFaultLogged = 0;
+
+__declspec(noinline) static bool LerpGuarded(float* out, float t, const float* a,
+                                             const float* b) {
+    __try {
+        LerpNormalise(out, t, a, b);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_lerpFaults;
+        if (InterlockedCompareExchange(&g_lerpFaultLogged, 1, 0) == 0)
+            Log("[QuatLerp] the pointer guard caught a fault in the vector path. It "
+                "stays on for the rest of this session, and the reasoning that it "
+                "never fires is wrong - the module's own note says so.");
+        return false;
+    }
+}
+
 float* __cdecl Hooked_QuatLerpBody(float* out, float t, const float* a, const float* b) {
     if (g_dead || !out || !a || !b) return orig_QuatLerp(out, t, a, b);
 
@@ -206,12 +243,15 @@ float* __cdecl Hooked_QuatLerpBody(float* out, float t, const float* a, const fl
     bool verifying = (g_armed == 0) || ((n & kResampleMask) == 0);
 
     if (!verifying) {
-        __try {
-            LerpNormalise(out, t, a, b);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Retire("the vector path faulted");
-            return orig_QuatLerp(out, t, a, b);
+        if (g_lerpFaults || g_lerpProved < kLerpProve) {
+            ++g_lerpProved;
+            if (!LerpGuarded(out, t, a, b)) {
+                Retire("the vector path faulted");
+                return orig_QuatLerp(out, t, a, b);
+            }
+            return out;
         }
+        LerpNormalise(out, t, a, b);
         return out;
     }
 
@@ -458,6 +498,15 @@ void LogStats() {
             "and bit-identical%s",
             g_calls, g_agreements,
             g_dead ? " - DISABLED" : (g_armed ? "" : " (still verifying)"));
+        // Three states, and the middle one is the interesting one: a session
+        // that ends still proving has not yet dropped the exception frame this
+        // pays on every one of those interpolations.
+        Log("[QuatLerp]   pointer guard: %lu call(s) ran under it, it caught %lu, "
+            "and it is %s.", g_lerpProved, g_lerpFaults,
+            g_lerpFaults ? "held on by a catch"
+                         : (g_lerpProved >= kLerpProve
+                                ? "off, so the vector path carries no exception frame"
+                                : "still proving"));
     }
     if (g_slerp_installed && g_slerp_calls > 0) {
         Log("[QuatLerp] Slerp: %lu interpolations, %lu of them compared with the client "
