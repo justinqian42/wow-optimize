@@ -1068,24 +1068,7 @@ inline void Vec3Cross_Double(float* result, const float* a, const float* b) {
     result[2] = (float)rz;
 }
 
-static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
-    ++g_vec3cross_calls;
-    if (g_vec3cross_dead != 0 || !result || !a || !b) {
-        return orig_Vec3Cross(result, a, b);
-    }
-
-    uintptr_t pr = (uintptr_t)result, pa = (uintptr_t)a, pb = (uintptr_t)b;
-    if (pr < 0x10000 || pr > 0xFFE00000 ||
-        pa < 0x10000 || pa > 0xFFE00000 ||
-        pb < 0x10000 || pb > 0xFFE00000) {
-        return orig_Vec3Cross(result, a, b);
-    }
-
-    if (g_vec3cross_armed != 0 && (g_vec3cross_calls & 4095) != 0) {
-        Vec3Cross_Double(result, a, b);
-        return result;
-    }
-
+__declspec(noinline) static float* VerifyVec3Cross(float* result, float* a, float* b) {
     float client_res[3];
     float our_res[3];
     __try {
@@ -1124,20 +1107,29 @@ static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
     return result;
 }
 
+static float* __cdecl Hooked_Vec3Cross(float* result, float* a, float* b) {
+    ++g_vec3cross_calls;
+    if (g_vec3cross_dead != 0 || !result || !a || !b) {
+        return orig_Vec3Cross(result, a, b);
+    }
 
-// CFrustum::IsSphereVisible (0x00983D20) is owned and implemented by FrustumAabb
-// (frustum_aabb_sse2.cpp) with bit-exact double precision and dual-run verification.
+    uintptr_t pr = (uintptr_t)result, pa = (uintptr_t)a, pb = (uintptr_t)b;
+    if (pr < 0x10000 || pr > 0xFFE00000 ||
+        pa < 0x10000 || pa > 0xFFE00000 ||
+        pb < 0x10000 || pb > 0xFFE00000) {
+        return orig_Vec3Cross(result, a, b);
+    }
 
-// ================================================================
-// CQuaternion::FromAngleAxis Hook (0x00982400)
-// ================================================================
-typedef float* (__fastcall* FromAngleAxis_t)(float* self, void* edx, float angle, float* axis);
-static FromAngleAxis_t orig_FromAngleAxis = nullptr;
+    if (g_vec3cross_armed != 0 && (g_vec3cross_calls & 4095) != 0) {
+        Vec3Cross_Double(result, a, b);
+        return result;
+    }
 
-
-static float* __fastcall Hooked_FromAngleAxis(float* self, void* edx, float angle, float* axis) {
-    return orig_FromAngleAxis ? orig_FromAngleAxis(self, edx, angle, axis) : axis;
+    return VerifyVec3Cross(result, a, b);
 }
+
+// 0x00982400 (CQuaternion::FromAngleAxis) is not hooked: single engine caller (sub_4D5F20),
+// transcendental-bound (sin/cos), no performance gain to justify a hook.
 
 // CQuaternion::Slerp (0x00982460) is owned and implemented by QuatLerp
 // (quat_lerp_sse2.cpp) with bit-exact double precision and dual-run verification.
@@ -1327,7 +1319,12 @@ bool InstallSimdHooks(void) {
     if (ADDR_WOW_QUAT_NORMALIZE) {
         Log("[SimdHooks] Quaternion normalize hook target: 0x%08X", ADDR_WOW_QUAT_NORMALIZE);
 #if !TEST_DISABLE_QUAT_NORMALIZE
-        if (!Config::g_settings.OptQuatNormalizeSse2) {
+        static const unsigned char kQuatNormPrologue[8] = {
+            0xD9, 0x41, 0x0C, 0xD9, 0x41, 0x08, 0xD9, 0x41
+        };
+        if (memcmp((void*)ADDR_WOW_QUAT_NORMALIZE, kQuatNormPrologue, sizeof(kQuatNormPrologue)) != 0) {
+            Log("[SimdHooks] BAD PROLOGUE at 0x%08X (Quaternion normalize)", ADDR_WOW_QUAT_NORMALIZE);
+        } else if (!Config::g_settings.OptQuatNormalizeSse2) {
             Log("[SimdHooks] Quaternion normalize DISABLED via configuration");
         } else if (!SelfTestQuatNormalize()) {
             // The message came from the self-test; nothing to add.
@@ -1456,10 +1453,17 @@ bool InstallSimdHooks(void) {
 
     // Hooking 3D Vector Cross Product (0x005FEC70)
 #if !TEST_DISABLE_VEC3_CROSS_SSE2
-    if (WineSafe_CreateHook((void*)0x005FEC70, (void*)Hooked_Vec3Cross, (void**)&orig_Vec3Cross) == MH_OK) {
+    static const unsigned char kCrossPrologue[8] = {
+        0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x10, 0x8B, 0x4D
+    };
+    if (memcmp((void*)0x005FEC70, kCrossPrologue, sizeof(kCrossPrologue)) != 0) {
+        Log("[SimdHooks] BAD PROLOGUE at 0x005FEC70 (C3Vector::Cross)");
+    } else if (WineSafe_CreateHook((void*)0x005FEC70, (void*)Hooked_Vec3Cross, (void**)&orig_Vec3Cross) == MH_OK) {
         WO_EnableHook((void*)0x005FEC70);
         SamplingProfiler::RegisterSelfSymbol("Vec3Cross_SSE2", (const void*)&Hooked_Vec3Cross);
         Log("[SimdHooks] C3Vector::Cross hook ACTIVE");
+    } else {
+        Log("[SimdHooks] C3Vector::Cross hook FAILED");
     }
 #else
     Log("[SimdHooks] C3Vector::Cross DISABLED by TEST_DISABLE_VEC3_CROSS_SSE2");
@@ -1469,16 +1473,9 @@ bool InstallSimdHooks(void) {
     // implements it with double-precision SSE2 and shadow verification.
     Log("[SimdHooks] CFrustum::IsSphereVisible is owned by FrustumAabb - not hooked from here");
 
-    // Hooking CQuaternion::FromAngleAxis (0x00982400)
-#if !TEST_DISABLE_FROM_ANGLE_AXIS_SSE2
-    if (WineSafe_CreateHook((void*)0x00982400, (void*)Hooked_FromAngleAxis, (void**)&orig_FromAngleAxis) == MH_OK) {
-        WO_EnableHook((void*)0x00982400);
-        SamplingProfiler::RegisterSelfSymbol("QuatFromAngleAxis_SSE2", (const void*)&Hooked_FromAngleAxis);
-        Log("[SimdHooks] CQuaternion::FromAngleAxis hook ACTIVE");
-    }
-#else
-    Log("[SimdHooks] CQuaternion::FromAngleAxis DISABLED by TEST_DISABLE_FROM_ANGLE_AXIS_SSE2");
-#endif
+    // 0x00982400 (CQuaternion::FromAngleAxis) is not hooked: single engine caller (sub_4D5F20),
+    // transcendental-bound (sin/cos), no performance gain to justify a hook.
+    Log("[SimdHooks] CQuaternion::FromAngleAxis is not hooked: single caller, transcendental-bound");
 
     // 0x00982460 (CQuaternion::Slerp) belongs to quat_lerp_sse2.cpp, which
     // implements it with double-precision SSE2 and shadow verification.
@@ -1530,7 +1527,6 @@ void SimdHooks_LogStats(void) {
 
 void ShutdownSimdHooks(void) {
     MH_DisableHook((void*)0x005FEC70);
-    MH_DisableHook((void*)0x00982400);
     SimdHooks_LogStats();
 }
 

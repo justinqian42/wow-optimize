@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include <cstdint>
+#include <cstring>
 #include "MinHook.h"
 #include "crash_dumper.h"
 #include <intrin.h>
@@ -43,47 +44,44 @@ static void LogCrashAverted(uint32_t* a2, void* retAddr, const char* reason) {
 }
 
 // ----------------------------------------------------------------
-// Safe wrapper - validates TValue type before calling original
+// Safe wrapper - validates TValue type before calling original.
+// Direct pointer and type validation without __try on the hot path,
+// avoiding 32-bit MSVC SEH frame setup/teardown on every Lua lookup.
 // ----------------------------------------------------------------
 static void* __cdecl Safe_sub_85BC10(int a1, uint32_t* a2, int a3)
 {
     ++g_total_calls;
 
-    // Validate a2 pointer
-    if (!a2 || (uintptr_t)a2 < 0x10000 || (uintptr_t)a2 > 0xFFE00000) {
+    // Validate a2 pointer (must be in valid user-mode address space)
+    if (!a2 || (uintptr_t)a2 < 0x10000 || (uintptr_t)a2 >= 0xFFE00000) {
         ++g_blocked_calls;
         LogCrashAverted(a2, _ReturnAddress(), "Bad pointer");
         return g_nil_object;
     }
 
-    // Validate a2[2] (TValue type field) is within safe bounds
-    // The original code uses a2[2] as array index: node_array[a2[2]] + offset
-    // Valid Lua types are 0-8. Anything above 15 is definitely garbage.
-    __try {
-        uint32_t typeTag = a2[2];
-        
-        if (typeTag > MAX_VALID_TYPE) {
-            // Invalid type tag - would cause out-of-bounds access
-            ++g_blocked_calls;
-            LogCrashAverted(a2, _ReturnAddress(), "Invalid typeTag");
-            return g_nil_object;
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        // Can't even read a2[2] safely
+    // Validate a2[2] (TValue type field) is within safe bounds.
+    // The original code uses a2[2] as array index into G(L)->mt: node_array[a2[2]] + offset.
+    // Valid Lua types are 0-8. Types > 8 cause out-of-bounds read in global_State.
+    uint32_t typeTag = a2[2];
+    if (typeTag > MAX_VALID_TYPE) {
         ++g_blocked_calls;
-        LogCrashAverted(a2, _ReturnAddress(), "Exception reading typeTag");
+        LogCrashAverted(a2, _ReturnAddress(), "Invalid typeTag");
         return g_nil_object;
     }
 
-    // Type is valid, call original function
-    __try {
-        return g_orig_sub_85BC10(a1, a2, a3);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        // Original crashed despite valid-looking type - memory corruption elsewhere
-        ++g_blocked_calls;
-        LogCrashAverted(a2, _ReturnAddress(), "Exception in original function");
-        return g_nil_object;
+    // For table (5) and userdata (7), validate that the payload pointer *a2
+    // is in valid user address space before the engine dereferences *(*a2 + 12).
+    if (typeTag == 5 || typeTag == 7) {
+        uintptr_t obj = (uintptr_t)a2[0];
+        if (obj < 0x10000 || obj >= 0xFFE00000) {
+            ++g_blocked_calls;
+            LogCrashAverted(a2, _ReturnAddress(), "Invalid table/userdata pointer");
+            return g_nil_object;
+        }
     }
+
+    // Fast path: call original function directly without SEH overhead
+    return g_orig_sub_85BC10(a1, a2, a3);
 }
 
 // Install / Uninstall
@@ -91,11 +89,12 @@ bool InstallLuaGetTableSafety()
 {
     void* target = (void*)0x0085BC10;
 
-    // Verify prologue: push ebp; mov ebp, esp
-    unsigned char* p = (unsigned char*)target;
-    if (p[0] != 0x55 || p[1] != 0x8B) {
-        Log("[GetTableSafety] BAD PROLOGUE at 0x%08X (expected 55 8B, got %02X %02X)", 
-            (uintptr_t)target, p[0], p[1]);
+    // Verify prologue: push ebp; mov ebp, esp; mov edx, [ebp+arg_4]; mov eax, [edx+8]
+    static const unsigned char kExpectedPrologue[8] = {
+        0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x0C, 0x8B, 0x42
+    };
+    if (memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+        Log("[GetTableSafety] BAD PROLOGUE at 0x%08X", (uintptr_t)target);
         return false;
     }
 

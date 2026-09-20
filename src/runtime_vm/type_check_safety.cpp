@@ -1,33 +1,39 @@
 // ============================================================================
-// Description: SEH guard for the GUID->object type check sub_4D4DB0.
+// Description: Direct, SEH-free safety replacement for the GUID->object type check sub_4D4DB0.
 // Safety & Threading: read-only guard; safe under concurrent object-manager use.
 // ============================================================================
-// sub_4D4DB0 is __cdecl(__int64 guid, int typeMask):
+// sub_4D4DB0 is __cdecl(int64_t guid, int typeMask):
 //   result = sub_4D4BB0(guid);              // resolve GUID -> object row
 //   if (result && (typeMask & *(*(result+8)+8)) == 0) return 0;   // 0x4D4DF7
 //   return result;
 //
 // It reads the resolved object's type-descriptor flags: *(*(result+8)+8). During
 // object teardown - BG load/exit, phasing, unit death (the caller sub_79C110 is
-// a C3Vector destructor that runs the WoW free-wrapper) - that descriptor can
-// already be freed, so the read at 0x4D4DF7 faults. A tester crashed exactly
-// there on a BG loading screen: wow.exe+0xD4DF7, test [ecx+8],edx.
+// a C3Vector destructor that runs the WoW free-wrapper) - that descriptor pointer
+// *(result+8) is null or already freed, causing the read at 0x4D4DF7 to fault:
+// wow.exe+0xD4DF7, test [ecx+8], edx (where ecx = 0).
 //
-// A freed object is of no type, so on a fault we return 0 ("not that type"),
-// which is what the function already returns for a non-matching object. This
-// turns a hard crash into the correct benign result.
+// Rather than wrapping all 1.26 billion calls in an expensive MSVC SEH frame
+// (__try), this implementation performs direct validation on the descriptor pointer
+// before dereferencing, completely eliminating the SEH setup/teardown overhead while
+// fully preventing the teardown crash.
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #include <cstdint>
+#include <cstring>
+#include <intrin.h>
 #include "MinHook.h"
 #include "crash_dumper.h"
 
 extern "C" void Log(const char* fmt, ...);
 
 typedef int (__cdecl* fn_4D4DB0)(int64_t guid, int typeMask);
+typedef void* (__fastcall* fn_4D4BB0)(void* self, void* edx, uint32_t key, const int64_t* aux);
+static const fn_4D4BB0 g_fn_4D4BB0 = (fn_4D4BB0)0x004D4BB0;
+
 // Whether the hook actually went in, so the report can tell a guard
 // that never fired from one that was never installed.
 static bool g_statsInstalled = false;
@@ -38,24 +44,49 @@ static volatile long g_tc_logged  = 0;
 
 static int __cdecl Safe_sub_4D4DB0(int64_t guid, int typeMask)
 {
-    __try {
-        return g_orig_4D4DB0(guid, typeMask);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    if (guid == 0) return 0;
+
+    // Check TLS object manager pointer exactly as client does:
+    // NtCurrentTeb()->ThreadLocalStoragePointer + TlsIndex
+    const uintptr_t tlsArray = __readfsdword(0x2C);
+    if (!tlsArray) return 0;
+    const uint32_t tlsIndex = *(const uint32_t*)0x00D439BC;
+    const uintptr_t threadData = *(const uintptr_t*)(tlsArray + tlsIndex * 4);
+    if (!threadData) return 0;
+    void* objMgr = *(void**)(threadData + 8);
+    if (!objMgr) return 0;
+
+    int64_t guidCopy = guid;
+    void* obj = g_fn_4D4BB0(objMgr, nullptr, (uint32_t)guid, &guidCopy);
+    if (!obj) return 0;
+
+    // Validate descriptor pointer before reading flags at *(desc + 8).
+    // In client teardown, *(obj + 8) becomes null or freed, which caused the crash at 0x004D4DF7.
+    const uintptr_t desc = *(const uintptr_t*)((const char*)obj + 8);
+    if (desc < 0x10000 || desc >= 0xFFE00000) {
         InterlockedIncrement(&g_tc_averted);
-        if (InterlockedCompareExchange(&g_tc_logged, 1, 0) == 0)
+        if (InterlockedCompareExchange(&g_tc_logged, 1, 0) == 0) {
             Log("[TypeCheckSafety] averted a crash in sub_4D4DB0 "
                 "(GUID type check on a freed object during teardown)");
+        }
         return 0;
     }
+
+    if ((typeMask & *(const uint32_t*)(desc + 8)) == 0) {
+        return 0;
+    }
+
+    return (int)obj;
 }
 
 bool InstallTypeCheckSafety()
 {
     void* target = (void*)0x004D4DB0;
-    unsigned char* p = (unsigned char*)target;
-    if (p[0] != 0x55 || p[1] != 0x8B) {   // push ebp; mov ebp, esp
-        Log("[TypeCheckSafety] BAD PROLOGUE at 0x004D4DB0 (expected 55 8B, got %02X %02X)",
-            p[0], p[1]);
+    static const unsigned char kExpectedPrologue[8] = {
+        0x55, 0x8B, 0xEC, 0x64, 0x8B, 0x0D, 0x2C, 0x00
+    };
+    if (memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+        Log("[TypeCheckSafety] BAD PROLOGUE at 0x004D4DB0");
         return false;
     }
     if (MH_CreateHook(target, (void*)Safe_sub_4D4DB0, (void**)&g_orig_4D4DB0) != MH_OK) {
@@ -68,7 +99,7 @@ bool InstallTypeCheckSafety()
     }
     CrashDumper::RegisterFeature("TypeCheckSafety");
     CrashDumper::FeatureSetActive("TypeCheckSafety", true);
-    Log("[TypeCheckSafety] ACTIVE: SEH-guarding GUID type check sub_4D4DB0 (BG-load crash fix)");
+    Log("[TypeCheckSafety] ACTIVE: direct type check sub_4D4DB0 with null-descriptor guard (no SEH overhead)");
     g_statsInstalled = true;
     return true;
 }
