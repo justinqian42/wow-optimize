@@ -373,12 +373,9 @@ bool Init() {
         Log("[M2SortKey] 0x%08X unreadable - not installing", (unsigned)kCompare);
         return false;
     }
-    // push ebp / mov ebp, esp / mov eax, [ebp+arg_0]
-    const unsigned char* p = (const unsigned char*)kCompare;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC || p[3] != 0x8B) {
-        Log("[M2SortKey] 0x%08X does not start with the prologue this was read "
-            "from (%02X %02X %02X %02X) - not installing",
-            (unsigned)kCompare, p[0], p[1], p[2], p[3]);
+    static const unsigned char kExp_Compare[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x08, 0x8B, 0x01 };
+    if (memcmp((const void*)kCompare, kExp_Compare, 8) != 0) {
+        Log("[M2SortKey] 0x%08X bad prologue - not installing", (unsigned)kCompare);
         return false;
     }
     if (WineSafe_CreateHook((void*)kCompare, (void*)Hooked_Compare,
