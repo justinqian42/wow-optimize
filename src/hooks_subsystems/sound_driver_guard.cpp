@@ -24,28 +24,42 @@ static volatile LONG64 g_total_calls  = 0;
 static volatile LONG64 g_recovered    = 0;
 static volatile long   g_logged       = 0;
 
-static void __cdecl Safe_sub_508260(int a1, char a2)
+#include <cstring>
+
+__declspec(noinline) static void SafeInvokeSub508260(int a1, char a2, void* retAddr)
 {
-    ++g_total_calls;
     __try {
         g_orig_sub_508260(a1, a2);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ++g_recovered;
         if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
             Log("[SndDriver] ONE-SHOT DIAGNOSTIC: Caught crash in sub_508260! a1=%d a2=%d RetAddr=%p",
-                a1, (int)a2, _ReturnAddress());
+                a1, (int)a2, retAddr);
         }
     }
+}
+
+static void __cdecl Safe_sub_508260(int a1, char a2)
+{
+    ++g_total_calls;
+    SafeInvokeSub508260(a1, a2, _ReturnAddress());
 }
 
 bool InstallSoundDriverGuard()
 {
     void* target = (void*)0x00508260;
+    if (!WowOpt_ClientPatchAllowed(target)) {
+        Log("[SndDriver] NOT active: client patches disallowed at 0x%08X", (uintptr_t)target);
+        return false;
+    }
 
-    unsigned char* p = (unsigned char*)target;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC) {
-        Log("[SndDriver] BAD PROLOGUE at 0x%08X (got %02X %02X %02X)",
-            (uintptr_t)target, p[0], p[1], p[2]);
+    static const unsigned char kExpectedPrologue[8] = {
+        0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x39, 0x05
+    };
+    if (std::memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+        const unsigned char* p = (const unsigned char*)target;
+        Log("[SndDriver] BAD PROLOGUE at 0x%08X (got %02X %02X %02X %02X %02X %02X %02X %02X)",
+            (uintptr_t)target, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
         return false;
     }
 

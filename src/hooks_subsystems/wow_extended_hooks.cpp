@@ -169,6 +169,7 @@ namespace WowExtendedHooks {
 
         struct HookDef {
             void* addr; void* hook; void** orig; const char* name;
+            unsigned char expected[8];
         };
 
         HookDef hooks[] = {
@@ -176,7 +177,8 @@ namespace WowExtendedHooks {
             // {(void*)0x0076ED20, (void*)Hooked_WoWStrcpy,       (void**)&orig_WoWStrcpy,       "C1 strcpy SSE2 (890 xrefs)"},
             // C2 skipped - duplicate of W4
             // C3 skipped - __usercall convention
-            {(void*)0x0084E300, (void*)Hooked_PushStringImpl,  (void**)&orig_PushStringImpl,  "C4 pushstring impl (36 xrefs)"},
+            {(void*)0x0084E300, (void*)Hooked_PushStringImpl,  (void**)&orig_PushStringImpl,  "C4 pushstring impl (36 xrefs)",
+             { 0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0x8B }},
             // C5 table get hook disabled to prevent stale/wild pointer crashes when Lua tables modify/grow
             // {(void*)0x0085BC10, (void*)Hooked_TableGet,        (void**)&orig_TableGet,        "C5 table get (17 xrefs)"},
             // C7 skipped - __usercall convention
@@ -184,8 +186,16 @@ namespace WowExtendedHooks {
         };
 
         for (auto& h : hooks) {
+            if (!WowOpt_ClientPatchAllowed(h.addr)) {
+                Log("[EXTENDED] NOT active: client patches disallowed at %s (0x%08X)", h.name, (uintptr_t)h.addr);
+                continue;
+            }
+            if (std::memcmp(h.addr, h.expected, sizeof(h.expected)) != 0) {
+                Log("[EXTENDED] BAD PROLOGUE at %s (0x%08X)", h.name, (uintptr_t)h.addr);
+                continue;
+            }
             if (WineSafe_CreateHook(h.addr, h.hook, h.orig) == MH_OK) {
-                if (MH_EnableHook(h.addr) == MH_OK) {
+                if (WO_EnableHook(h.addr) == MH_OK) {
                     Log("[EXTENDED] %s: ACTIVE @ 0x%08X", h.name, (uintptr_t)h.addr);
                     installed++;
                 }

@@ -24,28 +24,42 @@ static volatile LONG64 g_total_calls  = 0;
 static volatile LONG64 g_recovered    = 0;
 static volatile long   g_logged       = 0;
 
-static void __cdecl Safe_sub_5093F0(void* emitter, int a2, int a3)
+#include <cstring>
+
+__declspec(noinline) static void SafeInvokeSub5093F0(void* emitter, int a2, int a3, void* retAddr)
 {
-    ++g_total_calls;
     __try {
         g_orig_sub_5093F0(emitter, a2, a3);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ++g_recovered;
         if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
             Log("[SndEmitter] ONE-SHOT DIAGNOSTIC: Caught crash in sub_5093F0! Emitter=0x%08X a2=%d a3=%d RetAddr=%p",
-                (uint32_t)(uintptr_t)emitter, a2, a3, _ReturnAddress());
+                (uint32_t)(uintptr_t)emitter, a2, a3, retAddr);
         }
     }
+}
+
+static void __cdecl Safe_sub_5093F0(void* emitter, int a2, int a3)
+{
+    ++g_total_calls;
+    SafeInvokeSub5093F0(emitter, a2, a3, _ReturnAddress());
 }
 
 bool InstallSoundEmitterGuard()
 {
     void* target = (void*)0x005093F0;
+    if (!WowOpt_ClientPatchAllowed(target)) {
+        Log("[SndEmitter] NOT active: client patches disallowed at 0x%08X", (uintptr_t)target);
+        return false;
+    }
 
-    unsigned char* p = (unsigned char*)target;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC) {
-        Log("[SndEmitter] BAD PROLOGUE at 0x%08X (got %02X %02X %02X)",
-            (uintptr_t)target, p[0], p[1], p[2]);
+    static const unsigned char kExpectedPrologue[8] = {
+        0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x81, 0xEC
+    };
+    if (std::memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+        const unsigned char* p = (const unsigned char*)target;
+        Log("[SndEmitter] BAD PROLOGUE at 0x%08X (got %02X %02X %02X %02X %02X %02X %02X %02X)",
+            (uintptr_t)target, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
         return false;
     }
 

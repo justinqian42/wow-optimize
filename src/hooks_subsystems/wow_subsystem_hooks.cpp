@@ -83,19 +83,31 @@ namespace WowSubsystemHooks {
 
         struct HookDef {
             void* addr; void* hook; void** orig; const char* name;
+            unsigned char expected[8];
         };
 
         HookDef hooks[] = {
-            {(void*)0x00424E80, (void*)Hooked_SFileDataRead,  (void**)&orig_SFileDataRead,  "U1 SFile2 data read (23 callers)"},
+            {(void*)0x00424E80, (void*)Hooked_SFileDataRead,  (void**)&orig_SFileDataRead,  "U1 SFile2 data read (23 callers)",
+             { 0x55, 0x8B, 0xEC, 0x8B, 0x4D, 0x1C, 0x8B, 0x55 }},
             // U2 skipped (__usercall)
             // U3 skipped (__usercall)
-            {(void*)0x004BBB20, (void*)Hooked_ModelBlobLoad,  (void**)&orig_ModelBlobLoad,  "U4 model blob load"},
-            {(void*)0x004052F0, (void*)Hooked_DBCLoader,      (void**)&orig_DBCLoader,      "U5 DBC file loader"},
+            {(void*)0x004BBB20, (void*)Hooked_ModelBlobLoad,  (void**)&orig_ModelBlobLoad,  "U4 model blob load",
+             { 0x55, 0x8B, 0xEC, 0x51, 0x56, 0x57, 0x6A, 0x00 }},
+            {(void*)0x004052F0, (void*)Hooked_DBCLoader,      (void**)&orig_DBCLoader,      "U5 DBC file loader",
+             { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x56, 0x8B }},
         };
 
         for (auto& h : hooks) {
+            if (!WowOpt_ClientPatchAllowed(h.addr)) {
+                Log("[SUBSYSTEM] NOT active: client patches disallowed at %s (0x%08X)", h.name, (uintptr_t)h.addr);
+                continue;
+            }
+            if (std::memcmp(h.addr, h.expected, sizeof(h.expected)) != 0) {
+                Log("[SUBSYSTEM] BAD PROLOGUE at %s (0x%08X)", h.name, (uintptr_t)h.addr);
+                continue;
+            }
             if (WineSafe_CreateHook(h.addr, h.hook, h.orig) == MH_OK) {
-                if (MH_EnableHook(h.addr) == MH_OK) {
+                if (WO_EnableHook(h.addr) == MH_OK) {
                     Log("[SUBSYSTEM] %s: ACTIVE @ 0x%08X", h.name, (uintptr_t)h.addr);
                     installed++;
                 }

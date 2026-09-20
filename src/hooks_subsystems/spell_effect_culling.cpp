@@ -4,6 +4,7 @@
 #include "config.h"
 #include <atomic>
 #include <cmath>
+#include <cstring>
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -58,6 +59,16 @@ namespace SpellEffectCulling {
 
         // Hook sub_980ED0 - particle density getter
         void* target_DensityGetter = (void*)0x00980ED0;
+        if (!WowOpt_ClientPatchAllowed(target_DensityGetter)) {
+            Log("[SpellEffectCulling] NOT active: client patches disallowed at 0x%08X", (uintptr_t)target_DensityGetter);
+            return false;
+        }
+        static const unsigned char kExpDensity[8] = { 0xD9, 0x05, 0x78, 0xD6, 0xB2, 0x00, 0xC3, 0xCC };
+        if (std::memcmp(target_DensityGetter, kExpDensity, sizeof(kExpDensity)) != 0) {
+            Log("[SpellEffectCulling] BAD PROLOGUE at 0x00980ED0");
+            return false;
+        }
+
         if (WineSafe_CreateHook(target_DensityGetter, (void*)Hooked_DensityGetter, (void**)&orig_DensityGetter) != MH_OK) {
             Log("[SpellEffectCulling] Failed to hook DensityGetter (0x980ED0)");
             return false;
@@ -69,6 +80,16 @@ namespace SpellEffectCulling {
 
         // Hook sub_97D820 - per-particle spawn function
         void* target_ParticleSpawn = (void*)0x0097D820;
+        if (!WowOpt_ClientPatchAllowed(target_ParticleSpawn)) {
+            Log("[SpellEffectCulling] NOT active: client patches disallowed at 0x%08X", (uintptr_t)target_ParticleSpawn);
+            return false;
+        }
+        static const unsigned char kExpParticle[8] = { 0x55, 0x8B, 0xEC, 0x51, 0x56, 0x57, 0x8B, 0xF9 };
+        if (std::memcmp(target_ParticleSpawn, kExpParticle, sizeof(kExpParticle)) != 0) {
+            Log("[SpellEffectCulling] BAD PROLOGUE at 0x0097D820");
+            return false;
+        }
+
         if (WineSafe_CreateHook(target_ParticleSpawn, (void*)Hooked_ParticleSpawn, (void**)&orig_ParticleSpawn) != MH_OK) {
             Log("[SpellEffectCulling] Failed to hook ParticleSpawn (0x97D820)");
             return false;

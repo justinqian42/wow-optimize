@@ -26,6 +26,22 @@ static volatile long   g_logged       = 0;
 
 static ULONGLONG g_lastSoundUpdateTime = 0;
 
+#include <cstring>
+
+__declspec(noinline) static int SafeInvokeSub508320(int a1, int a2, void* retAddr)
+{
+    __try {
+        return g_orig_sub_508320(a1, a2);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ++g_recovered;
+        if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
+            Log("[SndBuffer] ONE-SHOT DIAGNOSTIC: Caught crash in sub_508320! a1=%d a2=%d RetAddr=%p",
+                a1, a2, retAddr);
+        }
+        return 0;
+    }
+}
+
 static int __cdecl Safe_sub_508320(int a1, int a2)
 {
     ++g_total_calls;
@@ -38,16 +54,7 @@ static int __cdecl Safe_sub_508320(int a1, int a2)
     g_lastSoundUpdateTime = now;
     #endif
 
-    __try {
-        return g_orig_sub_508320(a1, a2);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        ++g_recovered;
-        if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
-            Log("[SndBuffer] ONE-SHOT DIAGNOSTIC: Caught crash in sub_508320! a1=%d a2=%d RetAddr=%p",
-                a1, a2, _ReturnAddress());
-        }
-        return 0;
-    }
+    return SafeInvokeSub508320(a1, a2, _ReturnAddress());
 }
 
 static bool g_soundBufferGuardInstalled = false;
@@ -57,11 +64,18 @@ bool InstallSoundBufferGuard()
     if (g_soundBufferGuardInstalled) return true;
 
     void* target = (void*)0x00508320;
+    if (!WowOpt_ClientPatchAllowed(target)) {
+        Log("[SndBuffer] NOT active: client patches disallowed at 0x%08X", (uintptr_t)target);
+        return false;
+    }
 
-    unsigned char* p = (unsigned char*)target;
-    if (p[0] != 0x55 || p[1] != 0x8B || p[2] != 0xEC) {
-        Log("[SndBuffer] BAD PROLOGUE at 0x%08X (got %02X %02X %02X)",
-            (uintptr_t)target, p[0], p[1], p[2]);
+    static const unsigned char kExpectedPrologue[8] = {
+        0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xB0, 0x03, 0x00
+    };
+    if (std::memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+        const unsigned char* p = (const unsigned char*)target;
+        Log("[SndBuffer] BAD PROLOGUE at 0x%08X (got %02X %02X %02X %02X %02X %02X %02X %02X)",
+            (uintptr_t)target, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
         return false;
     }
 

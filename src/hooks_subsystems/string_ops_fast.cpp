@@ -178,18 +178,28 @@ bool InitStringOpsFast() {
         void**      orig;
         const char* name;
         uint32_t    xrefs;
+        unsigned char expected[8];
     };
 
     // NOTE: sub_76E5A0 (free wrapper) and sub_76E780 (strnicmp) hooks removed -
     // see comment above. Jenkins lookup3 is a pure function, safe to replace.
     HookDef hooks[] = {
-        { (void*)0x0076F420, (void*)HookJenkinsHash,  (void**)&pOrigJenkins,  "JenkinsHash",    0  },
+        { (void*)0x0076F420, (void*)HookJenkinsHash,  (void**)&pOrigJenkins,  "JenkinsHash",    0,
+          { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x55, 0x0C, 0x83 } },
     };
 
     int installed = 0;
     for (auto& h : hooks) {
+        if (!WowOpt_ClientPatchAllowed(h.addr)) {
+            Log("[StringOps] NOT active: client patches disallowed at %s (0x%08X)", h.name, (DWORD)(uintptr_t)h.addr);
+            continue;
+        }
+        if (std::memcmp(h.addr, h.expected, sizeof(h.expected)) != 0) {
+            Log("[StringOps] BAD PROLOGUE at %s (0x%08X)", h.name, (DWORD)(uintptr_t)h.addr);
+            continue;
+        }
         if (WineSafe_CreateHook(h.addr, h.hook, h.orig) == MH_OK) {
-            if (MH_EnableHook(h.addr) == MH_OK) {
+            if (WO_EnableHook(h.addr) == MH_OK) {
                 installed++;
                 Log("[StringOps] Hooked %s at 0x%08X (%d xrefs)", h.name, (DWORD)(uintptr_t)h.addr, h.xrefs);
             }

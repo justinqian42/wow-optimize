@@ -264,20 +264,33 @@ namespace WowOptHooks {
 
         struct HookDef {
             void* addr; void* hook; void** orig; const char* name;
+            unsigned char expected[8];
         };
 
         HookDef hooks[] = {
-            {(void*)0x004CFBB0, (void*)Hooked_Memcpy680,      (void**)&orig_Memcpy680,      "W1 memcpy680 prefetch"},
-            {(void*)0x00422910, (void*)Hooked_ObjDestroy,      (void**)&orig_ObjDestroy,      "W2 obj destroy prefetch"},
-            {(void*)0x004B9DE0, (void*)Hooked_AsyncReadDestroy,(void**)&orig_AsyncReadDestroy,"W8 async destroy fast"},
-            {(void*)0x0047C0F0, (void*)Hooked_BufferValid,     (void**)&orig_BufferValid,     "W13 buffer valid inline"},
+            {(void*)0x004CFBB0, (void*)Hooked_Memcpy680,      (void**)&orig_Memcpy680,      "W1 memcpy680 prefetch",
+             { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x10, 0x8B, 0x4D }},
+            {(void*)0x00422910, (void*)Hooked_ObjDestroy,      (void**)&orig_ObjDestroy,      "W2 obj destroy prefetch",
+             { 0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0x85 }},
+            {(void*)0x004B9DE0, (void*)Hooked_AsyncReadDestroy,(void**)&orig_AsyncReadDestroy,"W8 async destroy fast",
+             { 0x55, 0x8B, 0xEC, 0x57, 0xB9, 0x40, 0xA2, 0xB4 }},
+            {(void*)0x0047C0F0, (void*)Hooked_BufferValid,     (void**)&orig_BufferValid,     "W13 buffer valid inline",
+             { 0x8B, 0x41, 0x0C, 0xA8, 0x01, 0x75, 0x04, 0x85 }},
             // W15 skipped - channel deallocator function (skipping it causes channel leak)
             // W20 skipped - 0x004C5990 is camera constructor, not SFX priority
         };
 
         for (auto& h : hooks) {
+            if (!WowOpt_ClientPatchAllowed(h.addr)) {
+                Log("[WowOpt] NOT active: client patches disallowed at %s (0x%08X)", h.name, (uintptr_t)h.addr);
+                continue;
+            }
+            if (std::memcmp(h.addr, h.expected, sizeof(h.expected)) != 0) {
+                Log("[WowOpt] BAD PROLOGUE at %s (0x%08X)", h.name, (uintptr_t)h.addr);
+                continue;
+            }
             if (WineSafe_CreateHook(h.addr, h.hook, h.orig) == MH_OK) {
-                if (MH_EnableHook(h.addr) == MH_OK) {
+                if (WO_EnableHook(h.addr) == MH_OK) {
                     Log("[WowOpt] %s: ACTIVE @ 0x%08X", h.name, (uintptr_t)h.addr);
                     installed++;
                 }
