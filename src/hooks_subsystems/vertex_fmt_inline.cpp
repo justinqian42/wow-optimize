@@ -56,19 +56,20 @@ namespace VertexFmtInline {
 
 namespace {
 
-// Where the sequence starts in each function, and the three bytes of the spill
-// instruction that has to be preserved (it differs between the two sites).
+// Where the sequence starts in each function, and the spill instruction
+// that has to be preserved (if present).
 struct Site {
     uintptr_t   addr;         // first byte of `mov ecx, dword_C5DF88`
+    uint8_t     len;          // total patch length (14 or 11)
+    uint8_t     spillLen;     // 3 if spill is present, 0 if not
     uint8_t     spill[3];     // the instruction between it and the call
     const char* what;
 };
 
-constexpr int kLen = 14;
-
 const Site kSites[] = {
-    { 0x00484F3F, { 0x89, 0x55, 0xDC }, "UI batcher (sub_484B00)" },
-    { 0x006C475F, { 0x89, 0x5D, 0x28 }, "particle vertices (sub_6C4440)" },
+    { 0x00484F3F, 14, 3, { 0x89, 0x55, 0xDC }, "UI batcher (sub_484B00)" },
+    { 0x006C475F, 14, 3, { 0x89, 0x5D, 0x28 }, "particle vertices (sub_6C4440)" },
+    { 0x0097BF4F, 11, 0, { 0x00, 0x00, 0x00 }, "particle update (sub_97BE80)" },
 };
 
 // mov ecx, dword_C5DF88
@@ -127,27 +128,32 @@ bool ReplacementAgrees() {
 bool PatchOne(const Site& s) {
     uint8_t* p = (uint8_t*)s.addr;
 
-    if (IsBadReadPtr(p, kLen)) {
+    if (IsBadReadPtr(p, s.len)) {
         Log("[VertexFmt] %s: address not readable, skipped", s.what);
         return false;
     }
 
-    // Verify byte for byte: the six-byte global load, the three-byte spill this
-    // site is expected to carry, and an E8 call opcode.
-    if (memcmp(p, kMovEcx, sizeof(kMovEcx)) != 0 ||
-        memcmp(p + 6, s.spill, 3) != 0 ||
-        p[9] != 0xE8) {
-        Log("[VertexFmt] %s: bytes do not match the expected sequence, left alone "
-            "(%02X %02X %02X %02X %02X %02X | %02X %02X %02X | %02X)",
-            s.what, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9]);
+    // Verify byte for byte: the six-byte global load, any spill this site carries,
+    // and an E8 call opcode.
+    bool match = (memcmp(p, kMovEcx, sizeof(kMovEcx)) == 0);
+    if (s.spillLen > 0) {
+        if (memcmp(p + 6, s.spill, s.spillLen) != 0) match = false;
+        if (p[6 + s.spillLen] != 0xE8) match = false;
+    } else {
+        if (p[6] != 0xE8) match = false;
+    }
+
+    if (!match) {
+        Log("[VertexFmt] %s: bytes do not match the expected sequence, left alone", s.what);
         g_rejected++;
         return false;
     }
 
     // And that the call really goes to sub_532AF0, rather than to whatever a
     // different build put at that offset.
-    int32_t rel = *(int32_t*)(p + 10);
-    uintptr_t target = s.addr + 9 + 5 + (uintptr_t)rel;
+    const uint8_t callOffset = 6 + s.spillLen;
+    int32_t rel = *(int32_t*)(p + callOffset + 1);
+    uintptr_t target = s.addr + callOffset + 5 + (uintptr_t)rel;
     if (target != 0x00532AF0) {
         Log("[VertexFmt] %s: the call goes to 0x%08X, not the accessor, left alone",
             s.what, (unsigned)target);
@@ -155,16 +161,16 @@ bool PatchOne(const Site& s) {
         return false;
     }
 
-    uint8_t repl[kLen];
+    uint8_t repl[16];
     int i = 0;
-    repl[i++] = s.spill[0];               // the spill, first now
-    repl[i++] = s.spill[1];
-    repl[i++] = s.spill[2];
+    for (int k = 0; k < s.spillLen; ++k) {
+        repl[i++] = s.spill[k];
+    }
     repl[i++] = 0xA1;                      // mov eax, [dword_C5DF88]
     repl[i++] = 0x88; repl[i++] = 0xDF; repl[i++] = 0xC5; repl[i++] = 0x00;
     repl[i++] = 0x05;                      // add eax, 214h
     repl[i++] = 0x14; repl[i++] = 0x02; repl[i++] = 0x00; repl[i++] = 0x00;
-    repl[i++] = 0x90;                      // nop, to fill the 14th byte
+    repl[i++] = 0x90;                      // nop, to fill the remaining byte
 
     if (!WowOpt_ClientPatchAllowed(p)) {
         Log("[VertexFmt] %s: site found and left alone (NoClientPatches)", s.what);
@@ -172,13 +178,13 @@ bool PatchOne(const Site& s) {
     }
 
     DWORD old = 0;
-    if (!VirtualProtect(p, kLen, PAGE_EXECUTE_READWRITE, &old)) {
+    if (!VirtualProtect(p, s.len, PAGE_EXECUTE_READWRITE, &old)) {
         Log("[VertexFmt] %s: VirtualProtect failed (%lu)", s.what, GetLastError());
         return false;
     }
-    memcpy(p, repl, kLen);
-    VirtualProtect(p, kLen, old, &old);
-    FlushInstructionCache(GetCurrentProcess(), p, kLen);
+    memcpy(p, repl, s.len);
+    VirtualProtect(p, s.len, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), p, s.len);
 
     g_patched++;
     return true;
@@ -204,7 +210,7 @@ bool Init() {
 
     Log("[VertexFmt] %d of %d vertex loops no longer call an accessor per vertex. "
         "The call computed a fixed offset from a global that cannot change "
-        "between vertices; it is now inline. Same 14 bytes, no branch.",
+        "between vertices; it is now inline. Direct pointer addition in place, no branch.",
         g_patched, (int)(sizeof(kSites) / sizeof(kSites[0])));
     return true;
 }

@@ -62,8 +62,20 @@
 //
 // Which models, and when:
 //
-//   - inside kNearYd, never. The player, whatever they are fighting and
-//     everything in melee range animate every frame, always.
+//   - crowd threshold: if distinct models evaluated per frame is under
+//     kQuietModelThreshold (24), nothing is held. Sparse scenes run at 100%
+//     animation quality.
+//   - bounding radius and extents guard: EBX at the cut point points directly
+//     to M2Data/M2Header. +0x0A4..0x0B8 are bounding box floats (minX, minY,
+//     minZ, maxX, maxY, maxZ) and +0x0BC is the bounding sphere radius. Any
+//     model with radius <= 0.0f, radius > 6.0f, or extents > 10.0f (or Z > 12.0f)
+//     is never held. This completely eliminates the previous stutter on Ironforge
+//     lava, Deeprun Tram tunnels, elevators, and large raid boss geometry.
+//   - apparent screen footprint guard: (radius * radius) > 0.0015f * distSq
+//     rejects holding. Only models whose projected angular size on screen is small
+//     are eligible for striding.
+//   - inside kNearYd (45 yards), never. The player, whatever they are fighting
+//     and everything in melee range animate every frame, always.
 //   - the phase comes from the model's own address, so models in the same band
 //     do not all update on the same frame and produce a sawtooth.
 //   - the first kWarmupFrames after install hold nothing, so a session that
@@ -137,6 +149,18 @@ constexpr float kNearYd = 45.0f;
 constexpr float kMidYd  = 90.0f;
 constexpr float kFarYd  = 160.0f;
 
+// Size limits: normal player character is radius ~1.5 yd, tauren ~2.0 yd.
+constexpr float kMaxHoldRadius = 6.0f;
+constexpr float kMaxExtentXY   = 10.0f;
+constexpr float kMaxExtentZ    = 12.0f;
+
+// Screen footprint limit: (r*r)/d^2. 0.0015f corresponds to ~40 yd for radius 1.5,
+// ~77 yd for radius 3.0, and ~130 yd for radius 5.0.
+constexpr float kMaxFootprintFactor = 0.0015f;
+
+// Crowd threshold: below 24 models in the frame, do not stride at all.
+constexpr unsigned long kQuietModelThreshold = 24;
+
 // One frame in N gets the bones, per band.
 constexpr unsigned kStrideMid = 2;
 constexpr unsigned kStrideFar = 3;
@@ -157,10 +181,17 @@ unsigned long g_cameraFrames = 0;
 // sessions being read the wrong way for exactly this reason.
 unsigned long g_frames       = 0;
 
+// Crowd tracking: models evaluated per frame.
+unsigned long g_modelsThisFrame = 0;
+unsigned long g_modelsPrevFrame = 0;
+
 // Plain, main thread only. Lower bounds if that ever stops being true.
 unsigned long g_calls = 0;
 unsigned long g_held  = 0;
 unsigned long g_nearKept = 0;
+unsigned long g_largeModelKept = 0;
+unsigned long g_screenKept = 0;
+unsigned long g_quietKept = 0;
 unsigned long g_noPos  = 0;
 unsigned long g_bandHeld[3] = {};
 
@@ -182,20 +213,61 @@ bool BytesMatch(uintptr_t addr, const unsigned char* want, int len) {
 
 }  // namespace
 
-// Called from the thunk with the model in ESI. Returns nothing; the answer goes
-// into the byte the thunk tests, because a naked thunk cannot read EAX across
-// the popad that protects the client's registers.
+// Called from the thunk with model in ESI and m2data in EBX. Returns nothing; the
+// answer goes into the byte the thunk tests, because a naked thunk cannot read EAX
+// across the popad that protects the client's registers.
 extern "C" unsigned char g_m2StrideHold = 0;
 
-extern "C" void __cdecl M2AnimStride_Decide(void* model) {
+extern "C" void __cdecl M2AnimStride_Decide(void* model, const void* m2data) {
     g_m2StrideHold = 0;
     ++g_calls;
+    ++g_modelsThisFrame;
 
     if (!g_cameraOk || g_cameraFrames < kWarmupFrames) return;
     if (g_abSubject && AbTest::StandAside()) return;
 
+    // Crowd guard: in sparse scenes, run at 100% animation fidelity.
+    if (g_modelsPrevFrame < kQuietModelThreshold) {
+        ++g_quietKept;
+        return;
+    }
+
     const uintptr_t m = (uintptr_t)model;
-    if (!Readable(m + kM_translation + 11)) { ++g_noPos; return; }
+    const uintptr_t d = (uintptr_t)m2data;
+
+    // Fast pointer sanitization (already dereferenced by client at 0x82F415/0x82F418).
+    // Avoids costly VirtualQuery syscalls on the per-call hot path.
+    if (m < 0x10000 || m > 0xFFE00000 || d < 0x10000 || d > 0xFFE00000) {
+        ++g_noPos;
+        return;
+    }
+
+    // Bounding radius & extents guard: M2Header offsets:
+    // +0x0A4..0x0B8: minX, minY, minZ, maxX, maxY, maxZ (6 floats)
+    // +0x0BC: bounding sphere radius (1 float)
+    const float radius = *(const float*)(d + 0xBC);
+    if (radius <= 0.0f || radius > kMaxHoldRadius) {
+        ++g_largeModelKept;
+        return;
+    }
+
+    const float minX = *(const float*)(d + 0xA4);
+    const float minY = *(const float*)(d + 0xA8);
+    const float minZ = *(const float*)(d + 0xAC);
+    const float maxX = *(const float*)(d + 0xB0);
+    const float maxY = *(const float*)(d + 0xB4);
+    const float maxZ = *(const float*)(d + 0xB8);
+
+    const float extX = maxX - minX;
+    const float extY = maxY - minY;
+    const float extZ = maxZ - minZ;
+
+    if (extX <= 0.0f || extX > kMaxExtentXY ||
+        extY <= 0.0f || extY > kMaxExtentXY ||
+        extZ <= 0.0f || extZ > kMaxExtentZ) {
+        ++g_largeModelKept;
+        return;
+    }
 
     const float* t = (const float*)(m + kM_translation);
     const float dx = t[0] - g_camera[0];
@@ -203,7 +275,16 @@ extern "C" void __cdecl M2AnimStride_Decide(void* model) {
     const float dz = t[2] - g_camera[2];
     const float d2 = dx * dx + dy * dy + dz * dz;
 
-    if (d2 <= kNearYd * kNearYd) { ++g_nearKept; return; }
+    if (d2 <= kNearYd * kNearYd) {
+        ++g_nearKept;
+        return;
+    }
+
+    // Apparent screen footprint guard: (r*r) > factor * d2
+    if ((radius * radius) > (kMaxFootprintFactor * d2)) {
+        ++g_screenKept;
+        return;
+    }
 
     unsigned stride;
     int band;
@@ -233,9 +314,10 @@ __declspec(naked) void Thunk() {
         and  ax, 3800h
         mov  word ptr [g_topBefore], ax
 
+        push ebx
         push esi
         call M2AnimStride_Decide
-        add  esp, 4
+        add  esp, 8
 
         // If the decision moved the x87 stack, the tail's fstp would pop the
         // wrong thing. Refuse to hold rather than hand back a frame of
@@ -329,7 +411,11 @@ void Shutdown() {
 }
 
 void OnPresent() {
-    if (g_patched) ++g_frame;
+    if (g_patched) {
+        ++g_frame;
+        g_modelsPrevFrame = g_modelsThisFrame;
+        g_modelsThisFrame = 0;
+    }
 }
 
 void OnFrame() {
@@ -378,6 +464,10 @@ void LogStats() {
         "yards and never eligible, %lu had no readable world position.",
         g_held, g_calls, 100.0 * (double)g_held / (double)g_calls,
         g_nearKept, kNearYd, g_noPos);
+    Log("[M2Stride]   guards: %lu kept for size (r > %.1f yd or ext > %.1f), %lu "
+        "kept for screen footprint ((r^2)/d2 > 0.0015), %lu kept for quiet scene (< %lu models).",
+        g_largeModelKept, kMaxHoldRadius, kMaxExtentXY,
+        g_screenKept, g_quietKept, kQuietModelThreshold);
     // Printed whether or not it fired, because zero is the answer that says the
     // decision path is still free of x87 and the hold is safe to take.
     Log("[M2Stride]   the x87 stack depth was unchanged across the decision on "
