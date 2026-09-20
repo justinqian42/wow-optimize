@@ -379,16 +379,30 @@ inline int Hooked_TestImpl(const void* ray, const void* verts, const void* tri,
     // path that was already doing twice the work.
     Out mine;
     int ours;
+    // Once armed with nothing caught, this takes the same route the armed path
+    // takes - no exception frame and no out-of-line call - because otherwise
+    // the pair below times code that never runs in anger. It did: a field
+    // session reported this module at 0.97x, slower than the client, while
+    // another reported 1.35x, and the difference was the guard the measurement
+    // was carrying and the armed path was not.
+    const bool unguarded = ch.armed && ch.caught == 0;
     const uint64_t tOursA = SelfBench::Now();
-    if (!TestGuardedCall<IndexT>(ray, verts, tri, outT != nullptr, outUV != nullptr,
-                                 tol, &mine, &ours, ch.caught)) {
+    if (unguarded) {
+        ours = Test<IndexT>((const float*)ray, (const float*)verts,
+                            (const IndexT*)tri, outT != nullptr, outUV != nullptr,
+                            tol, &mine);
+    } else if (!TestGuardedCall<IndexT>(ray, verts, tri, outT != nullptr,
+                                        outUV != nullptr, tol, &mine, &ours,
+                                        ch.caught)) {
         return orig(ray, verts, tri, outT, outUV, tol);
     }
 
     const uint64_t tOursB = SelfBench::Now();
     const int theirs = orig(ray, verts, tri, outT, outUV, tol);
     const uint64_t tTheirsB = SelfBench::Now();
-    SelfBench::Pair(ch.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
+    // Only the armed shape is filed, so the average is not half guarded calls
+    // from the learning phase and half the real thing.
+    if (unguarded) SelfBench::Pair(ch.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
     ++ch.verified;
     if (theirs & 0xFF) ++ch.hits;   // counted on both paths, or the rate lies
 
@@ -569,16 +583,23 @@ char __cdecl Hooked_RayPlane(const float* ray, const float* plane,
 
     RayPlaneOut mine;
     int ours;
+    // The armed shape, so the pair below times what actually runs. See the note
+    // in the triangle test above.
+    const bool unguarded = g_chPlane.armed && g_chPlane.caught == 0;
     const uint64_t tOursA = SelfBench::Now();
-    if (!RayPlaneGuardedCall(ray, plane, outT != nullptr, outPoint != nullptr,
-                             tol, &mine, &ours, g_chPlane.caught)) {
+    if (unguarded) {
+        ours = RayPlaneTest(ray, plane, outT != nullptr, outPoint != nullptr,
+                            tol, &mine);
+    } else if (!RayPlaneGuardedCall(ray, plane, outT != nullptr, outPoint != nullptr,
+                                    tol, &mine, &ours, g_chPlane.caught)) {
         return orig(ray, plane, outT, outPoint, tol);
     }
 
     const uint64_t tOursB = SelfBench::Now();
     const char theirs = orig(ray, plane, outT, outPoint, tol);
     const uint64_t tTheirsB = SelfBench::Now();
-    SelfBench::Pair(g_chPlane.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
+    if (unguarded)
+        SelfBench::Pair(g_chPlane.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
     ++g_chPlane.verified;
     if (theirs & 0xFF) ++g_chPlane.hits;
 
@@ -708,14 +729,18 @@ char __cdecl Hooked_PointInPoly(const float* pt, const float* verts,
     }
 
     int ours = 0;
+    const bool unguarded = g_chPoly.armed && g_chPoly.caught == 0;
     const uint64_t tOursA = SelfBench::Now();
-    if (!PointInPolyGuardedCall(pt, verts, count, axis, &ours, g_chPoly.caught)) {
+    if (unguarded) {
+        ours = PointInPolyTest(pt, verts, count, axis);
+    } else if (!PointInPolyGuardedCall(pt, verts, count, axis, &ours, g_chPoly.caught)) {
         return orig(pt, verts, count, axis);
     }
     const uint64_t tOursB = SelfBench::Now();
     const char theirs = orig(pt, verts, count, axis);
     const uint64_t tTheirsB = SelfBench::Now();
-    SelfBench::Pair(g_chPoly.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
+    if (unguarded)
+        SelfBench::Pair(g_chPoly.benchSlot, tOursB - tOursA, tTheirsB - tOursB);
     ++g_chPoly.verified;
     if (theirs & 0xFF) ++g_chPoly.hits;
 
