@@ -184,6 +184,9 @@ unsigned long g_oneQualifier   = 0;
 // is smaller than g_oneQualifier by however many frames hold an anchor while
 // unlinked.
 unsigned long g_oneQualifierLinked = 0;
+// Shortcuts the second rule took on its own: every dependant that anchors to
+// this frame is outside the list the scan walks.
+unsigned long g_unlinkedShortcut = 0;
 unsigned long g_manyQualifiers = 0;
 
 unsigned long g_scanSample   = 0;
@@ -319,6 +322,7 @@ inline bool FrameAnchorsTo(uint32_t frame, uint32_t self) {
 struct DepScan {
     unsigned entries;      // dependants examined
     unsigned qualifying;   // of those, frames that really do anchor to self
+    unsigned linked;       // of those, frames that are in the global list
     uint32_t only;         // that frame, when there was exactly one
 };
 
@@ -341,24 +345,38 @@ struct DepScan {
 // Read-only, bounded, and inside the caller's SEH. Anything unreadable or
 // longer than the cap answers false, which defers exactly as before.
 bool NoDependantCanMatch(uint32_t head, uint32_t self, DepScan* out) {
-    unsigned n = 0, q = 0;
+    unsigned n = 0, q = 0, linked = 0;
     uint32_t first = 0;
     uint32_t e = head;
+    // The offset of the link pair inside a frame, which is where the client's
+    // own not-found tail asks the same question.
+    const uint32_t linkOff = Rd(kNodeOffsetVar);
     while (!IsEmptyLink(e)) {
         if (++n > kMaxDependants) {
-            out->entries = n; out->qualifying = 2; out->only = 0;
+            out->entries = n; out->qualifying = 2; out->linked = 2; out->only = 0;
             return false;
         }
         const uint32_t d = Rd(e + kFN_frame);
         if (d && (d & 1) == 0 && FrameAnchorsTo(d, self)) {
             if (++q == 1) first = d;
+            // The scan walks the global list and looks at the frames in it. A
+            // frame that anchors to `self` but is not in that list is one the
+            // walk never reaches, so it cannot be the match. This is the
+            // client's own test for being in the list, from its not-found tail:
+            // the first word of the frame's link pair.
+            if (Rd((uintptr_t)d + linkOff) != 0) ++linked;
         }
         e = Rd(e + kFN_next);
     }
     out->entries    = n;
     out->qualifying = q;
+    out->linked     = linked;
     out->only       = (q == 1) ? first : 0;
-    return n > 0 && q == 0;
+    // Two ways to be sure the scan finds nothing: no dependant qualifies, or
+    // none of the ones that qualify is in the list the scan walks. The second
+    // is worth its extra read - a field session deferred 38703 calls on a
+    // non-empty index and the client found nothing in 7860 of them.
+    return n > 0 && linked == 0;
 }
 
 // The not-found tail of sub_489710, transcribed from 0x004897CE to 0x0048983D.
@@ -427,16 +445,16 @@ static __declspec(noinline) PredictResult PredictRelink(uintptr_t This, uint32_t
         if (IsEmptyLink(head)) {
             return kPredictNotFound;
         }
-        DepScan ds = { 0, 0, 0 };
+        DepScan ds = { 0, 0, 0, 0 };
         if (NoDependantCanMatch(head, (uint32_t)This, &ds)) {
             ++g_rejectShortcut;
+            if (ds.qualifying > 0) ++g_unlinkedShortcut;
             g_rejectWalked += (double)ds.entries;
             return kPredictNotFound;
         }
         if (ds.qualifying == 1) {
             ++g_oneQualifier;
-            const uint32_t linkOff = Rd(kNodeOffsetVar);
-            if (Rd((uintptr_t)ds.only + linkOff) != 0) ++g_oneQualifierLinked;
+            if (ds.linked) ++g_oneQualifierLinked;
         } else {
             ++g_manyQualifiers;
         }
@@ -634,6 +652,13 @@ void LogStats() {
         "client walked the whole global list for nothing.",
         g_rejectShortcut,
         g_rejectShortcut ? g_rejectWalked / (double)g_rejectShortcut : 0.0);
+    // The two rules split, because they are worth knowing apart: the first is
+    // about anchors, the second about whether the frame holding one is in the
+    // list at all. A session where the second earns nothing says the deferred
+    // calls are deferred for some other reason.
+    Log("[LayoutRelink]   %lu of those came from the second rule alone: every "
+        "dependant that anchors to the frame was outside the list the scan "
+        "walks, so the walk could not have reached it.", g_unlinkedShortcut);
     Log("[LayoutRelink] of the calls that still defer, %lu had exactly one frame "
         "in the index carrying an accepting anchor and %lu had more than one. A "
         "single candidate is the match whatever order the global list is in, so "
