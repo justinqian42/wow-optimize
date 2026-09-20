@@ -219,7 +219,7 @@ bool __cdecl Handle(const float* plane, float* poly, uint32_t value) {
     const Outcome mine = Decide(plane, poly, n);
     if (mine == kNoChange) { ++g_inside; return false; }
     if (mine == kEmpty) {
-        *(float*)((char*)poly + kCountOffset) = 0.0f;
+        *(int*)((char*)poly + kCountOffset) = 0;
         ++g_outside;
         return false;
     }
