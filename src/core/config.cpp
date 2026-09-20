@@ -467,7 +467,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
             WritePrivateProfileStringA("Graphics_Sound", "D3d9StateManager", "1", iniPath.c_str());
             WritePrivateProfileStringA("UI_Lua", "LayoutRelinkFast", "0", iniPath.c_str());
             WritePrivateProfileStringA("General", "FrameLimiter", "0", iniPath.c_str());
-            WritePrivateProfileStringA("General", "ObjVisCache", "1", iniPath.c_str());
+            WritePrivateProfileStringA("General", "ObjVisCache", "0", iniPath.c_str());
             WritePrivateProfileStringA("General", "DbcPreload", "0", iniPath.c_str());
             WritePrivateProfileStringA("General", "OomGovernor", "0", iniPath.c_str());
             WritePrivateProfileStringA("General", "HardwareCursor", "0", iniPath.c_str());
@@ -562,7 +562,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptLayoutRelinkFast    = GetPrivateProfileIntA("UI_Lua", "LayoutRelinkFast", 0, iniPath.c_str()) != 0;
         g_settings.OptTimingCvarPin       = GetPrivateProfileIntA("General", "TimingCvarPin", 1, iniPath.c_str()) != 0;
         g_settings.OptFrameLimiter        = GetPrivateProfileIntA("General", "FrameLimiter", 0, iniPath.c_str()) != 0;
-        g_settings.OptObjVisCache         = GetPrivateProfileIntA("General", "ObjVisCache", 1, iniPath.c_str()) != 0;
+        g_settings.OptObjVisCache         = GetPrivateProfileIntA("General", "ObjVisCache", 0, iniPath.c_str()) != 0;
         g_settings.OptOomGovernor         = GetPrivateProfileIntA("General", "OomGovernor", 0, iniPath.c_str()) != 0;
         g_settings.OptHardwareCursor      = GetPrivateProfileIntA("General", "HardwareCursor", 0, iniPath.c_str()) != 0;
         g_settings.OptSamplingProfiler    = GetPrivateProfileIntA("General", "SamplingProfiler", 0, iniPath.c_str()) != 0;
@@ -637,7 +637,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptUnitAuraFast        = GetPrivateProfileIntA("Combat_Net", "UnitAuraFast", 0, iniPath.c_str()) != 0;
         g_settings.OptNetworkGuidSse2     = GetPrivateProfileIntA("Combat_Net", "NetworkGuidSse2", 0, iniPath.c_str()) != 0;
         g_settings.OptApiCache   = GetPrivateProfileIntA("Combat_Net", "ApiCache", 1, iniPath.c_str()) != 0;
-        g_settings.OptGuidLookupCache   = GetPrivateProfileIntA("Combat_Net", "GuidLookupCache", 1, iniPath.c_str()) != 0;
+        g_settings.OptGuidLookupCache   = GetPrivateProfileIntA("Combat_Net", "GuidLookupCache", 0, iniPath.c_str()) != 0;
         g_settings.OptPacketOffload       = GetPrivateProfileIntA("Combat_Net", "PacketOffload", 0, iniPath.c_str()) != 0;
         g_settings.OptNameplateMT         = GetPrivateProfileIntA("Combat_Net", "NameplateMT", 0, iniPath.c_str()) != 0;
 

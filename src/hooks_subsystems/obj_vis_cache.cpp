@@ -184,29 +184,37 @@ extern "C" void InvalidateObjVisCacheFor(void* This) {
     }
 }
 
+MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
+MH_STATUS WO_EnableHook(void* target);
+
 namespace ObjVisCache {
 
 bool Init() {
     Log("[ObjVisCache] Init");
 
-    memset((void*)g_cachePool, 0, sizeof(g_cachePool));
-    InterlockedExchange(&g_poolInitDone, 1);
-
     void* target = (void*)0x4D4BB0;
     void* teardownTarget = (void*)0x5D9D90;
 
-    if (MH_CreateHook(target, (void*)hooked_HashLookup, (void**)&orig_HashLookup) != MH_OK) {
-        Log("[ObjVisCache] ERROR: MH_CreateHook failed at 0x4D4BB0");
+    if (!WowOpt_ClientPatchAllowed(target) || !WowOpt_ClientPatchAllowed(teardownTarget)) {
+        Log("[ObjVisCache] Client patches disallowed by policy - not hooking");
         return false;
     }
-    if (MH_EnableHook(target) != MH_OK) {
-        Log("[ObjVisCache] ERROR: MH_EnableHook failed");
+
+    memset((void*)g_cachePool, 0, sizeof(g_cachePool));
+    InterlockedExchange(&g_poolInitDone, 1);
+
+    if (WineSafe_CreateHook(target, (void*)hooked_HashLookup, (void**)&orig_HashLookup) != MH_OK) {
+        Log("[ObjVisCache] ERROR: WineSafe_CreateHook failed at 0x4D4BB0");
+        return false;
+    }
+    if (WO_EnableHook(target) != MH_OK) {
+        Log("[ObjVisCache] ERROR: WO_EnableHook failed");
         MH_RemoveHook(target);
         return false;
     }
 
-    if (MH_CreateHook(teardownTarget, (void*)hooked_sub_5D9D90, (void**)&orig_sub_5D9D90) == MH_OK) {
-        MH_EnableHook(teardownTarget);
+    if (WineSafe_CreateHook(teardownTarget, (void*)hooked_sub_5D9D90, (void**)&orig_sub_5D9D90) == MH_OK) {
+        WO_EnableHook(teardownTarget);
     }
 
     g_featureToken = CrashDumper::FeatureTokenForCounting("ObjVisCache");

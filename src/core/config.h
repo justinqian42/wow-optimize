@@ -110,7 +110,7 @@ namespace Config {
         // it used to have no switch at all and lived inside CvarNullGuard.
         bool OptTimingCvarPin = true;
         bool OptFrameLimiter = false;
-        bool OptObjVisCache = true;
+        bool OptObjVisCache = false;
         bool OptOomGovernor = false;
         bool OptHardwareCursor = false;
         bool OptSamplingProfiler = false;
@@ -221,7 +221,7 @@ namespace Config {
         // Lock-free GUID -> object lookup cache. On by default because it has
         // always been installed unconditionally - it had no setting at all - and
         // this only gives that behaviour a switch.
-        bool OptGuidLookupCache = true;
+        bool OptGuidLookupCache = false;
         bool OptPacketOffload = false;
         // Off, and it does not matter which way it is set: the module is compiled
         // out by TEST_DISABLE_NAMEPLATE_MT, in this build and in 3.18.0, and its
