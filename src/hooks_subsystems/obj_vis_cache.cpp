@@ -93,6 +93,16 @@ static inline bool IsTeardownState() {
     return (gL < 0x10000 || gL > 0xFFE00000);
 }
 
+__declspec(noinline) static bool ValidateCachedObject(const void* resObj, uint64_t expectedGuid) {
+    __try {
+        const uint64_t actualGuid = *(const uint64_t*)((const char*)resObj + 48);
+        return (actualGuid == expectedGuid);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 static void* __fastcall hooked_HashLookup(
     void* thisPtr, void* /*edx*/, uint32_t hashKey, void* guidPtr)
 {
@@ -100,18 +110,17 @@ static void* __fastcall hooked_HashLookup(
         return orig_HashLookup(thisPtr, hashKey, guidPtr);
     }
 
+    if ((uintptr_t)guidPtr < 0x10000 || (uintptr_t)guidPtr > 0x7FFE0000) {
+        return orig_HashLookup(thisPtr, hashKey, guidPtr);
+    }
+
     if (g_inWorldTeardown || IsTeardownState() || LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
         return orig_HashLookup(thisPtr, hashKey, guidPtr);
     }
 
-    uint32_t guidLow, guidHigh;
-    __try {
-        guidLow  = *(uint32_t*)guidPtr;
-        guidHigh = *((uint32_t*)guidPtr + 1);
-    }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        return orig_HashLookup(thisPtr, hashKey, guidPtr);
-    }
+    const uint32_t* gp = (const uint32_t*)guidPtr;
+    uint32_t guidLow  = gp[0];
+    uint32_t guidHigh = gp[1];
 
     ThreadCacheSlot* slot = GetThreadCacheSlot();
     if (!slot) {
@@ -129,18 +138,12 @@ static void* __fastcall hooked_HashLookup(
         entry->guidHigh == guidHigh)
     {
         void* resObj = entry->result;
-        if (resObj && (uintptr_t)resObj > 0x10000 && (uintptr_t)resObj < 0xFFE00000) {
-            __try {
-                uint64_t expectedGuid = ((uint64_t)guidHigh << 32) | guidLow;
-                uint64_t actualGuid = *(uint64_t*)((char*)resObj + 48);
-                if (actualGuid == expectedGuid) {
-                    InterlockedIncrement(&g_cacheHits);
-                    CrashDumper::FeatureHit(g_featureToken);
-                    return resObj;
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-                // Stale or unmapped pointer
+        if (resObj && (uintptr_t)resObj > 0x10000 && (uintptr_t)resObj < 0x7FFE0000) {
+            uint64_t expectedGuid = ((uint64_t)guidHigh << 32) | guidLow;
+            if (ValidateCachedObject(resObj, expectedGuid)) {
+                InterlockedIncrement(&g_cacheHits);
+                CrashDumper::FeatureHit(g_featureToken);
+                return resObj;
             }
         }
         entry->frameStamp = 0; // invalidate slot
@@ -159,28 +162,32 @@ static void* __fastcall hooked_HashLookup(
     return result;
 }
 
-// Public Invalidation API (called from Hooked_UnlinkNode in dllmain.cpp)
-extern "C" void InvalidateObjVisCacheFor(void* This) {
-    if (This && g_poolInitDone) {
-        uint32_t* j = (uint32_t*)This;
-        __try {
-            uint32_t hashKey = j[6];
-            uint32_t guidLow = j[12];
-            uint32_t guidHigh = j[13];
-            
-            // Invalidate the cache entry across all threads
-            uint32_t idx = HashKey(hashKey, guidLow, guidHigh) & CACHE_MASK;
-            for (int i = 0; i < MAX_THREADS; i++) {
-                CacheEntry* entry = &g_cachePool[i].entries[idx];
-                if (entry->hashKey == hashKey &&
-                    entry->guidLow == guidLow &&
-                    entry->guidHigh == guidHigh)
-                {
-                    entry->frameStamp = 0; // invalidate slot
-                }
+__declspec(noinline) static void InvalidateEntry(const void* This) {
+    __try {
+        const uint32_t* j = (const uint32_t*)This;
+        uint32_t hashKey = j[6];
+        uint32_t guidLow = j[12];
+        uint32_t guidHigh = j[13];
+        
+        // Invalidate the cache entry across all threads
+        uint32_t idx = HashKey(hashKey, guidLow, guidHigh) & CACHE_MASK;
+        for (int i = 0; i < MAX_THREADS; i++) {
+            CacheEntry* entry = &g_cachePool[i].entries[idx];
+            if (entry->hashKey == hashKey &&
+                entry->guidLow == guidLow &&
+                entry->guidHigh == guidHigh)
+            {
+                entry->frameStamp = 0; // invalidate slot
             }
         }
-        __except(EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+// Public Invalidation API (called from Hooked_UnlinkNode in dllmain.cpp)
+extern "C" void InvalidateObjVisCacheFor(void* This) {
+    if (This && g_poolInitDone && (uintptr_t)This >= 0x10000 && (uintptr_t)This <= 0x7FFE0000) {
+        InvalidateEntry(This);
     }
 }
 
@@ -197,6 +204,18 @@ bool Init() {
 
     if (!WowOpt_ClientPatchAllowed(target) || !WowOpt_ClientPatchAllowed(teardownTarget)) {
         Log("[ObjVisCache] Client patches disallowed by policy - not hooking");
+        return false;
+    }
+
+    static const unsigned char kExp_HashLookup[8] = { 0x55, 0x8B, 0xEC, 0x8B, 0x41, 0x24, 0x83, 0xF8 };
+    static const unsigned char kExp_Teardown[8]   = { 0x55, 0x8B, 0xEC, 0x51, 0x53, 0x56, 0x57, 0xBF };
+
+    if (IsBadReadPtr(target, 8) || memcmp(target, kExp_HashLookup, 8) != 0) {
+        Log("[ObjVisCache] 0x%08X bad prologue - not installing", (unsigned)target);
+        return false;
+    }
+    if (IsBadReadPtr(teardownTarget, 8) || memcmp(teardownTarget, kExp_Teardown, 8) != 0) {
+        Log("[ObjVisCache] 0x%08X bad prologue - not installing", (unsigned)teardownTarget);
         return false;
     }
 
