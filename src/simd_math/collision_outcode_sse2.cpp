@@ -222,74 +222,33 @@ void Retire(const char* why) {
 // flag bit it would have set without touching the client's byte array.
 static uint32_t g_shadow[65536 / 32];
 
-extern "C" char __fastcall CollisionOutcode_Hooked(void* thisPtr, void* /*edx*/,
-                                                   int a0, int a4) {
-    typedef char (__fastcall* orig_fn)(void*, void*, int, int);
-    orig_fn call_orig = (orig_fn)orig_Classify;
+typedef char (__fastcall* orig_fn)(void*, void*, int, int);
 
-    if (g_dead || !thisPtr) return call_orig(thisPtr, nullptr, a0, a4);
-    ++g_calls;
-
-    uintptr_t T = (uintptr_t)thisPtr;
-    uint8_t   codes[kMaxVerts];
-    uint8_t   ref[kMaxVerts];
-    int       n = 0;
-    int       model = 0;
-    bool      verifying = (g_armed == 0) || ((g_calls & kResampleMask) == 0);
-
+__declspec(noinline) static bool VerifyCollisionOutcode(
+    void* thisPtr, orig_fn call_orig, int a0, int a4,
+    uintptr_t T, int model, int n, const float* bounds,
+    const uint8_t* codes, char& outRc)
+{
     __try {
-        // The client's own first test. It reads as an enable flag and is really a
-        // null check on the model cache, which is also the object the lookup below
-        // runs against.
-        void* cache = *(void**)kEnabledFlg;
-        if (!cache) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
-
-        model = ((findModel_fn)kFindModel)(cache, nullptr, a0, a4,
-                    *(void**)(T + 4), *(void**)(T + 8), *(void**)(T + 12));
-        if (!model) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
-
-        n = (int)RD16((uintptr_t)model + kM_vertCount);
-        if (n <= 0 || n > kMaxVerts) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
-
-        const float* bounds = *(const float**)(T + kT_bounds);
-        if (!bounds) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
-
-        ClassifySse2(codes, (const float*)((uintptr_t)model + kM_verts), n, bounds);
-        if (verifying) {
-            ClassifyScalar(ref, (const float*)((uintptr_t)model + kM_verts), n, bounds);
-            if (memcmp(codes, ref, (size_t)n) != 0) {
-                Log("[CollisionOutcode] The vector classification disagreed with the "
-                    "scalar one over %d vertices.", n);
-                Retire("a vertex was classified differently by the two paths");
-                return call_orig(thisPtr, nullptr, a0, a4);
-            }
+        uint8_t ref[kMaxVerts];
+        ClassifyScalar(ref, (const float*)((uintptr_t)model + kM_verts), n, bounds);
+        if (memcmp(codes, ref, (size_t)n) != 0) {
+            Log("[CollisionOutcode] The vector classification disagreed with the "
+                "scalar one over %d vertices.", n);
+            Retire("a vertex was classified differently by the two paths");
+            outRc = call_orig(thisPtr, nullptr, a0, a4);
+            return false;
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Retire("classifying the vertices faulted");
-        return call_orig(thisPtr, nullptr, a0, a4);
-    }
 
-    g_verts += (unsigned long long)n;
+        uint32_t triCount = RD16((uintptr_t)model + kM_triCount);
+        uint16_t mask     = RD16(T + kT_mask);
+        uint8_t* flags    = *(uint8_t**)(T + kT_flags);
+        if (!flags) {
+            ++g_declined;
+            outRc = call_orig(thisPtr, nullptr, a0, a4);
+            return false;
+        }
 
-    // ---- the triangle pass -------------------------------------------------
-    uint32_t triCount = 0;
-    uint16_t mask     = 0;
-    uint8_t* flags    = nullptr;
-
-    __try {
-        triCount = RD16((uintptr_t)model + kM_triCount);
-        mask     = RD16(T + kT_mask);
-        flags    = *(uint8_t**)(T + kT_flags);
-        if (!flags) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Retire("reading the triangle block faulted");
-        return call_orig(thisPtr, nullptr, a0, a4);
-    }
-
-    if (verifying) {
-        // Predict, do not perform. Everything below reads the flag bytes as they
-        // are now and models its own writes in g_shadow, so the client's routine
-        // afterwards sees exactly the state it would have seen alone.
         static uint16_t predHit[kRingCap];
         static uint16_t predNear[kRingCap];
         uint32_t nHit = 0, nNear = 0;
@@ -297,58 +256,49 @@ extern "C" char __fastcall CollisionOutcode_Hooked(void* thisPtr, void* /*edx*/,
         uint32_t hitBefore  = RD32(kHitCount);
         uint32_t nearBefore = RD32(kNearCount);
 
-        __try {
-            memset(g_shadow, 0, sizeof(g_shadow));
-            uint32_t room = hitBefore;
-            for (uint32_t i = 0; i < triCount; ++i) {
-                uintptr_t tri = (uintptr_t)model + 6u * i;
-                uint16_t idx = RD16((uintptr_t)model + kM_triIndex + 2u * i);
-                if ((mask & RD16((uintptr_t)model + kM_triMask + 2u * i)) != 0) continue;
+        memset(g_shadow, 0, sizeof(g_shadow));
+        uint32_t room = hitBefore;
+        for (uint32_t i = 0; i < triCount; ++i) {
+            uintptr_t tri = (uintptr_t)model + 6u * i;
+            uint16_t idx = RD16((uintptr_t)model + kM_triIndex + 2u * i);
+            if ((mask & RD16((uintptr_t)model + kM_triMask + 2u * i)) != 0) continue;
 
-                uint8_t f = flags[2u * idx];
-                if (g_shadow[idx >> 5] & (1u << (idx & 31))) f |= 0x80u;
-                if (((uint8_t)mask & f) != 0) continue;
+            uint8_t f = flags[2u * idx];
+            if (g_shadow[idx >> 5] & (1u << (idx & 31))) f |= 0x80u;
+            if (((uint8_t)mask & f) != 0) continue;
 
-                if (room >= kRingCap) break;      // the client stops here too
-                if (nHit < kRingCap) predHit[nHit++] = idx;
-                ++room;
-                g_shadow[idx >> 5] |= (1u << (idx & 31));
+            if (room >= kRingCap) break;      // the client stops here too
+            if (nHit < kRingCap) predHit[nHit++] = idx;
+            ++room;
+            g_shadow[idx >> 5] |= (1u << (idx & 31));
 
-                uint8_t ca = codes[RD16(tri + kM_triVerts)];
-                uint8_t cb = codes[RD16(tri + kM_triVerts + 2)];
-                uint8_t cc = codes[RD16(tri + kM_triVerts + 4)];
-                if (((ca & cb & cc) & 0x3F) == 0 && nNear < kRingCap)
-                    predNear[nNear++] = idx;
-            }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Retire("predicting the triangle pass faulted");
-            return call_orig(thisPtr, nullptr, a0, a4);
+            uint8_t ca = codes[RD16(tri + kM_triVerts)];
+            uint8_t cb = codes[RD16(tri + kM_triVerts + 2)];
+            uint8_t cc = codes[RD16(tri + kM_triVerts + 4)];
+            if (((ca & cb & cc) & 0x3F) == 0 && nNear < kRingCap)
+                predNear[nNear++] = idx;
         }
 
         char rc = call_orig(thisPtr, nullptr, a0, a4);
 
-        __try {
-            uint32_t hitAfter  = RD32(kHitCount);
-            uint32_t nearAfter = RD32(kNearCount);
-            const uint16_t* hits  = (const uint16_t*)kHitArray;
-            const uint16_t* nears = (const uint16_t*)kNearArray;
+        uint32_t hitAfter  = RD32(kHitCount);
+        uint32_t nearAfter = RD32(kNearCount);
+        const uint16_t* hits  = (const uint16_t*)kHitArray;
+        const uint16_t* nears = (const uint16_t*)kNearArray;
 
-            bool ok = (hitAfter - hitBefore == nHit) && (nearAfter - nearBefore == nNear);
-            for (uint32_t i = 0; ok && i < nHit; ++i)
-                if (hits[hitBefore + i] != predHit[i]) ok = false;
-            for (uint32_t i = 0; ok && i < nNear; ++i)
-                if (nears[nearBefore + i] != predNear[i]) ok = false;
+        bool ok = (hitAfter - hitBefore == nHit) && (nearAfter - nearBefore == nNear);
+        for (uint32_t i = 0; ok && i < nHit; ++i)
+            if (hits[hitBefore + i] != predHit[i]) ok = false;
+        for (uint32_t i = 0; ok && i < nNear; ++i)
+            if (nears[nearBefore + i] != predNear[i]) ok = false;
 
-            if (!ok) {
-                Log("[CollisionOutcode] Prediction differed from the client: it "
-                    "queued %u/%u where this expected %u/%u, over %u triangles.",
-                    hitAfter - hitBefore, nearAfter - nearBefore, nHit, nNear, triCount);
-                Retire("the predicted triangle list did not match the client's");
-                return rc;
-            }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Retire("comparing against the client faulted");
-            return rc;
+        if (!ok) {
+            Log("[CollisionOutcode] Prediction differed from the client: it "
+                "queued %u/%u where this expected %u/%u, over %u triangles.",
+                hitAfter - hitBefore, nearAfter - nearBefore, nHit, nNear, triCount);
+            Retire("the predicted triangle list did not match the client's");
+            outRc = rc;
+            return false;
         }
 
         unsigned long okCount = ++g_verified;
@@ -359,49 +309,106 @@ extern "C" char __fastcall CollisionOutcode_Hooked(void* thisPtr, void* /*edx*/,
                 "one call in %d stays checked.",
                 okCount, (int)(kResampleMask + 1));
         }
-        return rc;
+        outRc = rc;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Retire("verifying against the client faulted");
+        outRc = call_orig(thisPtr, nullptr, a0, a4);
+        return false;
+    }
+}
+
+extern "C" char __fastcall CollisionOutcode_Hooked(void* thisPtr, void* /*edx*/,
+                                                   int a0, int a4) {
+    orig_fn call_orig = (orig_fn)orig_Classify;
+
+    if (g_dead || !thisPtr) return call_orig(thisPtr, nullptr, a0, a4);
+    ++g_calls;
+
+    uintptr_t T = (uintptr_t)thisPtr;
+
+    // The client's own first test. It reads as an enable flag and is really a
+    // null check on the model cache, which is also the object the lookup below
+    // runs against.
+    void* cache = *(void**)kEnabledFlg;
+    if (!cache) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
+
+    int model = ((findModel_fn)kFindModel)(cache, nullptr, a0, a4,
+                *(void**)(T + 4), *(void**)(T + 8), *(void**)(T + 12));
+    if (!model) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
+
+    int n = (int)RD16((uintptr_t)model + kM_vertCount);
+    if (n <= 0 || n > kMaxVerts) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
+
+    const float* bounds = *(const float**)(T + kT_bounds);
+    if (!bounds) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
+
+    uint8_t codes[kMaxVerts];
+    ClassifySse2(codes, (const float*)((uintptr_t)model + kM_verts), n, bounds);
+
+    bool verifying = (g_armed == 0) || ((g_calls & kResampleMask) == 0);
+    if (verifying) {
+        char outRc = 0;
+        if (!VerifyCollisionOutcode(thisPtr, call_orig, a0, a4, T, model, n, bounds, codes, outRc)) {
+            return outRc;
+        }
+        return outRc;
     }
 
     // ---- armed: do the work ------------------------------------------------
-    __try {
-        for (uint32_t i = 0; i < triCount; ++i) {
-            uintptr_t tri = (uintptr_t)model + 6u * i;
-            uint16_t idx = RD16((uintptr_t)model + kM_triIndex + 2u * i);
-            if ((mask & RD16((uintptr_t)model + kM_triMask + 2u * i)) != 0) continue;
-            if (((uint8_t)mask & flags[2u * idx]) != 0) continue;
+    g_verts += (unsigned long long)n;
 
-            uint32_t count = RD32(kHitCount);
-            if (count >= kRingCap) {
-                void* ov = *(void**)(T + kT_overflow);
-                if (ov) *(uint32_t*)ov |= 1u;
-                break;
-            }
-            ((uint16_t*)kHitArray)[count] = idx;
-            *(uint32_t*)kHitCount = count + 1;
-            flags[2u * idx] |= 0x80u;
+    uint32_t triCount = RD16((uintptr_t)model + kM_triCount);
+    uint16_t mask     = RD16(T + kT_mask);
+    uint8_t* flags    = *(uint8_t**)(T + kT_flags);
+    if (!flags) { ++g_declined; return call_orig(thisPtr, nullptr, a0, a4); }
 
-            uint8_t ca = codes[RD16(tri + kM_triVerts)];
-            uint8_t cb = codes[RD16(tri + kM_triVerts + 2)];
-            uint8_t cc = codes[RD16(tri + kM_triVerts + 4)];
-            if (((ca & cb & cc) & 0x3F) == 0) {
-                uint32_t nc = RD32(kNearCount);
-                ((uint16_t*)kNearArray)[nc] = idx;
-                *(uint32_t*)kNearCount = nc + 1;
-            }
+    for (uint32_t i = 0; i < triCount; ++i) {
+        uintptr_t tri = (uintptr_t)model + 6u * i;
+        uint16_t idx = RD16((uintptr_t)model + kM_triIndex + 2u * i);
+        if ((mask & RD16((uintptr_t)model + kM_triMask + 2u * i)) != 0) continue;
+        if (((uint8_t)mask & flags[2u * idx]) != 0) continue;
+
+        uint32_t count = RD32(kHitCount);
+        if (count >= kRingCap) {
+            void* ov = *(void**)(T + kT_overflow);
+            if (ov) *(uint32_t*)ov |= 1u;
+            break;
         }
-        g_tris += triCount;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Retire("the triangle pass faulted");
-        return call_orig(thisPtr, nullptr, a0, a4);
+        ((uint16_t*)kHitArray)[count] = idx;
+        *(uint32_t*)kHitCount = count + 1;
+        flags[2u * idx] |= 0x80u;
+
+        uint8_t ca = codes[RD16(tri + kM_triVerts)];
+        uint8_t cb = codes[RD16(tri + kM_triVerts + 2)];
+        uint8_t cc = codes[RD16(tri + kM_triVerts + 4)];
+        if (((ca & cb & cc) & 0x3F) == 0) {
+            uint32_t nc = RD32(kNearCount);
+            ((uint16_t*)kNearArray)[nc] = idx;
+            *(uint32_t*)kNearCount = nc + 1;
+        }
     }
+    g_tris += triCount;
     return 1;
 }
 
 bool Init() {
     if (!Config::g_settings.OptCollisionOutcode) return true;
 
-    if (IsBadReadPtr((void*)kClassify, 8) || IsBadReadPtr((void*)kFindModel, 8)) {
-        Log("[CollisionOutcode] 0x%08X unreadable - not installing", (unsigned)kClassify);
+    if (!WowOpt_ClientPatchAllowed((const void*)kClassify)) {
+        Log("[CollisionOutcode] Client patches disallowed by policy - not hooking");
+        return false;
+    }
+
+    static const unsigned char kExp_Classify[8]  = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xC8, 0x01, 0x00 };
+    static const unsigned char kExp_FindModel[8] = { 0x55, 0x8B, 0xEC, 0x53, 0x56, 0x57, 0x8B, 0x7D };
+
+    if (IsBadReadPtr((void*)kClassify, 8) || memcmp((const void*)kClassify, kExp_Classify, 8) != 0) {
+        Log("[CollisionOutcode] 0x%08X bad prologue or unreadable - not installing", (unsigned)kClassify);
+        return false;
+    }
+    if (IsBadReadPtr((void*)kFindModel, 8) || memcmp((const void*)kFindModel, kExp_FindModel, 8) != 0) {
+        Log("[CollisionOutcode] 0x%08X bad prologue or unreadable - not installing", (unsigned)kFindModel);
         return false;
     }
     if (WineSafe_CreateHook((void*)kClassify, (void*)CollisionOutcode_Hooked,
