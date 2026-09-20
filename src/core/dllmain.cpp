@@ -77,6 +77,7 @@
 #include "sky_texture_reuse.h"
 #include "particle_track_eval_sse2.h"
 #include "shader_const_dedup_sse2.h"
+#include "batch_colour_convert.h"
 #include "frustum_aabb_sse2.h"
 #include "segment_aabb_sse2.h"
 #include "runtime_vm/lua_hget_dispatch.h"
@@ -5686,6 +5687,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaErrorDiag::LogStats", LuaErrorDiagLogStats());
     STAT_TIME("ParticleTrackEval::LogStats", ParticleTrackEval::LogStats());
     STAT_TIME("ShaderConstDedup::LogStats", ShaderConstDedup::LogStats());
+    STAT_TIME("BatchColourConvert::LogStats", BatchColourConvert::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
@@ -8498,6 +8500,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     SkyTextureReuse::Init();
     ParticleTrackEval::Init();
     ShaderConstDedup::Init();
+    BatchColourConvert::Init();
     FrustumAabb::Init();
     SegmentAabb::Init();
     LuaHGetDispatch::Init();
@@ -11583,6 +11586,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             SkyTextureReuse::Shutdown();
             ParticleTrackEval::Shutdown();
             ShaderConstDedup::Shutdown();
+            BatchColourConvert::Shutdown();
             LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();

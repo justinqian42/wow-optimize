@@ -515,6 +515,10 @@ namespace Config {
         // of four x87 compares. No arithmetic in it, so the bits are the same by
         // construction; compared against the client per call before it answers.
         bool OptShaderConstDedup = false;
+        // The colour block inside the M2 batch state setup: three clamps and three
+        // converts with no x87 mode change. This one replaces client code by writing
+        // into it rather than by a hook, so it verifies before it patches.
+        bool OptBatchColourConvert = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
