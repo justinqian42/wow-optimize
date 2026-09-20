@@ -5728,6 +5728,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("ParticleTrackEval::LogStats", ParticleTrackEval::LogStats());
     STAT_TIME("ShaderConstDedup::LogStats", ShaderConstDedup::LogStats());
     STAT_TIME("BatchColourConvert::LogStats", BatchColourConvert::LogStats());
+    STAT_TIME("SpellEffectCulling::LogStats", SpellEffectCulling::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
     STAT_TIME("SegmentAabb::LogStats", SegmentAabb::LogStats());
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
