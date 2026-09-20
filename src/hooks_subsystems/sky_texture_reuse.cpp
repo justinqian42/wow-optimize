@@ -177,6 +177,21 @@ unsigned g_mismatches = 0;
 unsigned long long g_phaseChanges = 0;
 unsigned long long g_cycles = 0;
 
+// What the client's own build costs, in milliseconds.
+//
+// Two field sessions disagree about this function by a factor of ten: it is
+// 10.29% of executing main-thread time in one and 1.10% in the other, and the
+// first of those machines spends 39% of its main thread blocked at a frame time
+// pinned near 142 fps, so its shares are shares of a much smaller budget.
+// Moving this build to a worker thread means transcribing about 250
+// instructions of noise and lighting, and the number that decides whether that
+// is worth building is milliseconds a pass on a machine that is busy. Nothing
+// has measured that. The counter is a performance-counter pair around the call,
+// which costs tens of nanoseconds against a build measured in milliseconds.
+long long g_buildTicks = 0;
+unsigned long long g_buildTimed = 0;
+long long g_qpcFreq = 0;
+
 inline uint32_t RD32(const void* p, unsigned off) {
     return *(const uint32_t*)((const char*)p + off);
 }
@@ -417,7 +432,12 @@ void __fastcall Detour(void* self, void* edx) {
     }
 
     const uint64_t before = repeat ? HashRows(self, firstRow, rows) : 0;
+    LARGE_INTEGER tA, tB;
+    QueryPerformanceCounter(&tA);
     g_orig(self, edx);
+    QueryPerformanceCounter(&tB);
+    g_buildTicks += tB.QuadPart - tA.QuadPart;
+    ++g_buildTimed;
     ++g_built;
 
     if (!BookMatches(self, book)) {
@@ -477,6 +497,10 @@ bool Init() {
         return false;
     }
     g_installed = true;
+    {
+        LARGE_INTEGER f;
+        if (QueryPerformanceFrequency(&f)) g_qpcFreq = f.QuadPart;
+    }
     g_abSubject = AbTest::IsSubject("SkyTextureReuse", &g_abSubject);
     SamplingProfiler::RegisterSelfSymbol("SkyTextureReuse", (const void*)&Detour);
 
@@ -512,6 +536,26 @@ void LogStats() {
         Log("[SkyTextureReuse] hooked, and no cloud texture pass has been reached "
             "yet. That is a measurement: no sky has been drawn since it went in.");
         return;
+    }
+    if (g_buildTimed && g_qpcFreq > 0) {
+        const double totalMs = 1000.0 * (double)g_buildTicks / (double)g_qpcFreq;
+        const double perPass = totalMs / (double)g_buildTimed;
+        Log("[SkyTextureReuse] the client's own build took %.1f ms over %llu timed "
+            "pass(es), %.3f ms each. A pass runs at most once a frame, so that per-pass "
+            "figure is what moving this build off the main thread could be worth here; "
+            "read it against the frame time in the FrameBench report.",
+            totalMs, g_buildTimed, perPass);
+        if (g_skipped)
+            Log("[SkyTextureReuse]   the %llu skipped pass(es) are worth about %.1f ms "
+                "at that rate, which is an estimate from the timed passes and not a "
+                "measurement of the skips themselves.",
+                g_skipped, perPass * (double)g_skipped);
+    } else if (g_buildTimed) {
+        Log("[SkyTextureReuse] %llu build(s) ran but the performance counter frequency "
+            "was not readable, so there is no millisecond figure.", g_buildTimed);
+    } else {
+        Log("[SkyTextureReuse] no build was timed, so this session says nothing about "
+            "what the build costs.");
     }
     Log("[SkyTextureReuse] %llu pass(es): %llu built by the client, %llu skipped "
         "here. %llu full cycles, %llu of them changed the cloud phase. Plain "
