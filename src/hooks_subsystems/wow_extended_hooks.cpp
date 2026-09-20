@@ -6,6 +6,7 @@
 #include <cstring>
 #include <intrin.h>
 #include <emmintrin.h>
+#include "ab_test.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -83,16 +84,43 @@ static void* __stdcall Hooked_WoWStrcpy(void* dst, char* src, int maxLen) {
 typedef int (__cdecl *PushStringImpl_fn)(int L, int str, int len);
 static PushStringImpl_fn orig_PushStringImpl = nullptr;
 
+// The one hook this subsystem installs, and the only thing it does is issue two
+// prefetches before calling the function that reads those same addresses.
+//
+// A prefetch bought nothing it could not have got by waiting: the client
+// dereferences the string and the global state within a few instructions of
+// entry, so there is no latency for the hint to hide. What it costs is certain
+// - a five-byte detour, a trampoline and, until now, an exception frame - on
+// 137907905 calls in one field session.
+//
+// Two changes rather than a deletion. The exception frame is gone: prefetch is
+// architecturally a hint and cannot fault, and the only load here is L+20, which
+// the client's own routine performs immediately after, so a fault in this one is
+// a fault it would take anyway. And the hint is now something the A/B harness
+// can switch off, with the client's own function timed either way, so the next
+// session that names this subject answers whether it is worth anything at all
+// rather than leaving it to an argument about prefetch distance.
+bool g_abSubject = false;
+
 static int __cdecl Hooked_PushStringImpl(int L, int str, int len) {
     ++g_c[3];
-    if (L > 0x10000 && str > 0x10000) {
-        __try {
-            // Prefetch the string data and Lua state globals
+    if (g_abSubject) {
+        const unsigned long long t = AbTest::TickIn();
+        if (!AbTest::StandAside() && L > 0x10000 && str > 0x10000) {
             _mm_prefetch((const char*)str, _MM_HINT_T0);
-            void* globals = *(void**)(L + 20); // L->l_G
+            void* globals = *(void**)(L + 20);   // L->l_G
             if (globals) _mm_prefetch((const char*)globals, _MM_HINT_T0);
             ++g_h[3];
-        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        const int r = orig_PushStringImpl(L, str, len);
+        AbTest::TickOut(t);
+        return r;
+    }
+    if (L > 0x10000 && str > 0x10000) {
+        _mm_prefetch((const char*)str, _MM_HINT_T0);
+        void* globals = *(void**)(L + 20);       // L->l_G
+        if (globals) _mm_prefetch((const char*)globals, _MM_HINT_T0);
+        ++g_h[3];
     }
     return orig_PushStringImpl(L, str, len);
 }
@@ -167,7 +195,12 @@ namespace WowExtendedHooks {
         // The count used to read 34 of 40 because a loop added thirty-two to it
         // for what the source beside it called conceptual hooks. Those were
         // empty functions nothing referenced.
+        if (installed) g_abSubject = AbTest::IsSubject("WowExtendedHooks", &g_abSubject);
         Log("[EXTENDED] %d hooks installed", installed);
+        if (g_abSubject)
+            Log("[EXTENDED]   under A/B test: the OFF stints issue no prefetch and "
+                "the client's own function is timed either way, which is the only "
+                "way to find out whether the hint pays for the detour.");
         return installed > 0;
     }
 
