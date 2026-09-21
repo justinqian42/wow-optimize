@@ -682,6 +682,7 @@ namespace Config {
         bool OptUIRectSubdivide = false;
         bool OptSceneVisTraverse = false;
         bool OptParticlePhysics = false;
+        bool OptCollisionResetVisited = false;
     };
 
     extern Settings g_settings;

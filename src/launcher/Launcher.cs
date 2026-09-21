@@ -767,6 +767,7 @@ namespace WowOptimizeLauncher {
                 { "UI Scissor Rect Subdivision (SSE2)", new SettingItem("UI_Lua", "UIRectSubdivide", false, null, "Replaces serialized scalar comparisons in UI dirty rect subdivision and scissor clipping (sub_7762A0) with fast packed SSE2 disjoint bounding box tests.", true) },
                 { "Scene Graph Visibility Traversal (SSE2)", new SettingItem("Graphics_Sound", "SceneVisTraverse", false, null, "Vectorizes 6-float bounding box copies and accelerates visibility culling during scene graph traversal in sub_7A50C0.", true) },
                 { "M2 Particle Physics Integration (SSE2)", new SettingItem("Graphics_Sound", "ParticlePhysics", false, null, "Vectorizes 3D Euclidean distance calculations and velocity damping integration in M2 particle emitters (sub_97EB10) using SSE2 scalar and vector instructions.", true) },
+                { "Collision Query Reset Visited (sub_7C7610)", new SettingItem("Graphics_Sound", "CollisionResetVisited", false, null, "Replaces per-iteration global writes and pointer reloads with a hoisted 4-way unrolled clearing pass in sub_7C7610 (2.72% of executing time in field sessions).", true) },
             };
 
             // Window Setup

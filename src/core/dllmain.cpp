@@ -137,6 +137,7 @@
 #include "ui_rect_subdivide_sse2.h"
 #include "scene_vis_traverse_sse2.h"
 #include "particle_physics_sse2.h"
+#include "collision_reset_visited.h"
 
 // Forward declaration - Log() defined later in this file
 extern "C" void Log(const char* fmt, ...);
@@ -5763,6 +5764,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("UIRectSubdivide::LogStats", UIRectSubdivide::LogStats());
     STAT_TIME("SceneVisTraverse::LogStats", SceneVisTraverse::LogStats());
     STAT_TIME("ParticlePhysics::LogStats", ParticlePhysics::LogStats());
+    STAT_TIME("CollisionResetVisited::LogStats", CollisionResetVisited::LogStats());
     STAT_TIME("FloorSplit::LogStats", FloorSplit::LogStats());
     STAT_TIME("SkyCloudTexels::LogStats", SkyCloudTexels::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
@@ -8591,6 +8593,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     UIRectSubdivide::Init();
     SceneVisTraverse::Init();
     ParticlePhysics::Init();
+    CollisionResetVisited::Init();
 
     Log("--- UnitAura Fast Path ---");
 #if !TEST_DISABLE_UNIT_AURA_FAST
@@ -11686,6 +11689,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             UIRectSubdivide::Shutdown();
             SceneVisTraverse::Shutdown();
             ParticlePhysics::Shutdown();
+            CollisionResetVisited::Shutdown();
             LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();

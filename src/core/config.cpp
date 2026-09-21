@@ -219,6 +219,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "UIRectSubdivide", &Settings::OptUIRectSubdivide },
     { "Graphics_Sound", "SceneVisTraverse", &Settings::OptSceneVisTraverse },
     { "Graphics_Sound", "ParticlePhysics", &Settings::OptParticlePhysics },
+    { "Graphics_Sound", "CollisionResetVisited", &Settings::OptCollisionResetVisited },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -823,6 +824,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptUIRectSubdivide      = GetPrivateProfileIntA("UI_Lua", "UIRectSubdivide", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneVisTraverse     = GetPrivateProfileIntA("Graphics_Sound", "SceneVisTraverse", 0, iniPath.c_str()) != 0;
         g_settings.OptParticlePhysics      = GetPrivateProfileIntA("Graphics_Sound", "ParticlePhysics", 0, iniPath.c_str()) != 0;
+        g_settings.OptCollisionResetVisited = GetPrivateProfileIntA("Graphics_Sound", "CollisionResetVisited", 0, iniPath.c_str()) != 0;
     }
 }
 

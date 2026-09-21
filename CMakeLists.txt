@@ -532,6 +532,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/scene_vis_traverse_sse2.h
     src/simd_math/particle_physics_sse2.cpp
     src/simd_math/particle_physics_sse2.h
+    src/simd_math/collision_reset_visited.cpp
+    src/simd_math/collision_reset_visited.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
