@@ -594,6 +594,7 @@ namespace WowOptimizeLauncher {
             settingsMap = new Dictionary<string, SettingItem>() {
                 // General
                 { "Precise Sleep Frame Pacing", new SettingItem("General", "SleepPrecision", true, null, "Enforces millisecond-accurate frame-rate sleep pacing to reduce input lag and stabilize frame delivery.") },
+                { "Ask Windows For A Half-Millisecond Timer", new SettingItem("General", "TimerResolution", true, null, "Windows keeps one timer period for the whole machine and uses the shortest any running program asked for. This tool asks for half a millisecond, which is what makes frame pacing and the sleep hook accurate, and it is also why a timer tool shows 0.5000 while the game is open and why an idle laptop draws a little more. Until now there was no way to refuse it. Untick this and the tool leaves the system timer exactly as it found it; frames are paced more coarsely in exchange. It is on by default because it has always been on.") },
                 { "Keep a Log File per Session", new SettingItem("General", "SessionLogs", true, null, "Writes a separate timestamped log for every session, so two runs can be compared. Older ones are deleted automatically (SessionLogsToKeep in wow_opt.ini, default 10). Turn off to keep only the single overwritten wow_optimize.log.") },
                 { "Lua Allocation Census", new SettingItem("UI_Lua", "LuaAllocCensus", false, null, "Counts every object the Lua VM allocates and reports the size distribution at the end of your log. A measurement, not a speed-up: it decides whether giving Lua its own memory arena would be worth building. Turn it on for one session, send the log, turn it back off.", true) },
                 { "SSE2 Terrain Horizon", new SettingItem("Graphics_Sound", "HorizonOcclusionSse2", false, null, "Vectorises the terrain horizon builder, measured at 2.46% of main-thread time in a tester profile. It rasterises up to 384 screen columns one at a time; this does four per instruction. It checks itself: the first 512 calls run both this and the client's version and compare all 384 output values exactly, and any single difference hands every later call back to the client and names the column in your log.", true) },
@@ -1021,6 +1022,26 @@ namespace WowOptimizeLauncher {
                 + "send Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT "
                 + "afterwards to put it back.");
             leftPanel.Controls.Add(btnProve);
+            y += 40;
+
+            DarkButton btnMeasure = new DarkButton(Color.FromArgb(90, 160, 235), false);
+            btnMeasure.Text = "ANSWER THE OPEN QUESTIONS";
+            btnMeasure.Size = new Size(btnWidth, 32);
+            btnMeasure.Location = new Point(15, y);
+            btnMeasure.Click += delegate { SetUpMeasuringRun(); };
+            toolTip.SetToolTip(btnMeasure,
+                "Switches on the instruments that answer what is currently "
+                + "unknown, and leaves everything else exactly as you have it.\r\n\r\n"
+                + "Right now that is four things: what the Lua clean-up pacing "
+                + "costs in frames against what it saves in memory, what a freeze "
+                + "is doing while it freezes, what the cloud texture costs per "
+                + "frame, and whether our own cloud maths matches the game's byte "
+                + "for byte.\r\n\r\n"
+                + "These cost frames on purpose - that is the trade for numbers. "
+                + "Play half an hour including a city, some combat and some open "
+                + "ground under sky, then send Logs\\wow_optimize.log and press "
+                + "MAX PERFORMANCE or DEFAULT to put it back.");
+            leftPanel.Controls.Add(btnMeasure);
             y += 40;
 
             y += AddSectionLabel(leftPanel, "WHEN SOMETHING IS WRONG", y);
@@ -1710,6 +1731,85 @@ namespace WowOptimizeLauncher {
         
         
         
+
+        // The session that answers the questions already on the table.
+        //
+        // Different from the proving run above, and the difference is what each
+        // is allowed to cost. That one arms replacements and must not disturb the
+        // frame time it is judging, so every census stays off. This one exists to
+        // produce numbers, and the instruments that produce them cost frames on
+        // purpose.
+        //
+        // The 2026-09-20 session is why it exists. It ran for eighteen minutes
+        // with the sampling profiler on and answered none of three open questions,
+        // because the switches that would have answered them were at zero and
+        // nothing in this tool asked for them: the freeze catcher, during a
+        // twenty-four second stall at four frames a second; the A/B subject that
+        // weighs the Lua collector's pacing, which is the top two entries of that
+        // very profile; and the two that time the cloud texture. A tester cannot
+        // be expected to know that list, and the last time this happened the
+        // answer was a button.
+        //
+        // What the tester already chose is left alone. The thing being measured
+        // is their own configuration, not a preset nobody plays on.
+        private void SetUpMeasuringRun() {
+            string[] wanted = new string[] {
+                "SamplingProfiler",       // where the main thread went
+                "FreezeCatcher",          // what a stall was doing while it stalled
+                "AbTest",                 // frame times split by stint
+                "LuaGcPace",              // the collector's pacing, ours against the client's
+                "SkyTextureReuse",        // owns the hook the next one needs
+                "SkyCloudTexels",         // our cloud texel loops against the client's
+                "HorizonOcclusionSse2"    // written, never once run in a game
+            };
+            string[] unwanted = new string[] {
+                // A run that spends its frames waiting measures nothing.
+                "FrameLimiter",
+                // It rewrites the pause and step multiplier every frame, and
+                // LuaGcPace refuses to install while it does.
+                "LuaGcCoalesce"
+            };
+
+            int turnedOn = 0, alreadyOn = 0, missing = 0;
+            for (int i = 0; i < wanted.Length; i++) {
+                SettingItem it = FindByKey(wanted[i]);
+                if (it == null || it.Ctrl == null) { missing++; continue; }
+                if (it.Ctrl.Checked) alreadyOn++; else turnedOn++;
+                it.Ctrl.Checked = true;
+            }
+            for (int i = 0; i < unwanted.Length; i++) {
+                SettingItem it = FindByKey(unwanted[i]);
+                if (it != null && it.Ctrl != null) it.Ctrl.Checked = false;
+            }
+
+            unownedOverrides["AbTestSubject"] = new string[] { "General", "LuaGcPace" };
+
+            UpdateActiveModulesCount();
+            SaveSettings();
+
+            string note = turnedOn.ToString() + " instrument(s) switched on, "
+                + alreadyOn.ToString() + " already on";
+            if (missing > 0) {
+                note += ", and " + missing.ToString() + " asked for but not present "
+                    + "in this build - tell whoever sent you here";
+            }
+
+            MessageBox.Show(
+                note + ".\r\n\r\n"
+                + "The A/B subject is set to the Lua clean-up pacing, which is the "
+                + "largest single thing in the last profile. Everything else you "
+                + "had ticked is untouched, so what gets measured is your own "
+                + "setup.\r\n\r\n"
+                + "Play normally for at least half an hour. A city, some combat, "
+                + "and some flying or riding across open ground, because two of "
+                + "these only have something to say with the sky and the horizon "
+                + "in view. If the game freezes, keep playing afterwards rather "
+                + "than restarting - the log is written as you go.\r\n\r\n"
+                + "Then send Logs\\wow_optimize.log. These cost frames, so press "
+                + "MAX PERFORMANCE or DEFAULT when you are done.",
+                "Measuring Run", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         // The session that turns an unproven replacement into a proven one.
         //
         // Every [!] switch is one that was written against the disassembly,
@@ -1894,6 +1994,14 @@ namespace WowOptimizeLauncher {
             // branch and turns on nothing.
         }
 
+        // Values for keys this launcher has no tickbox for, to be written on the
+        // next save. AbTestSubject is the one that matters: it names the feature
+        // an A/B run measures, it has no control here, and its own tooltip used to
+        // tell a tester to edit the file by hand. Nobody does, so every A/B run
+        // measured whatever was in the file already.
+        private Dictionary<string, string[]> unownedOverrides =
+            new Dictionary<string, string[]>();
+
         private void SaveSettingsToPath(string path) {
             try {
                 string dir = Path.GetDirectoryName(path);
@@ -1941,6 +2049,9 @@ namespace WowOptimizeLauncher {
                             if (eq <= 0) continue;
                             string key = line.Substring(0, eq).Trim();
                             if (FindByKey(key) != null) continue;
+                            // Replaced below rather than carried, so a preset that
+                            // sets one of these wins over what the file had.
+                            if (unownedOverrides.ContainsKey(key)) continue;
                             if (!sections.ContainsKey(current)) continue;
                             sections[current].Add(key + "=" + line.Substring(eq + 1).Trim());
                         }
@@ -1949,6 +2060,11 @@ namespace WowOptimizeLauncher {
                     // An unreadable existing file must not stop the save. The owned
                     // keys are still written; only the carry-over is lost, which is
                     // what every save did before this.
+                }
+
+                foreach (KeyValuePair<string, string[]> ov in unownedOverrides) {
+                    if (!sections.ContainsKey(ov.Value[0])) continue;
+                    sections[ov.Value[0]].Add(ov.Key + "=" + ov.Value[1]);
                 }
 
                 using (StreamWriter sw = new StreamWriter(path, false, Encoding.UTF8)) {
