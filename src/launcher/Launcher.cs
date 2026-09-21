@@ -773,7 +773,7 @@ namespace WowOptimizeLauncher {
             Text = "WoW-Optimize Launcher";
             // The background is scaled to the client area and covered with a
             // near-opaque wash, so the height is free to change.
-            ClientSize = new Size(920, 700);
+            ClientSize = new Size(920, 772);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.None;
             BackColor = DarkBg;
@@ -1229,28 +1229,7 @@ namespace WowOptimizeLauncher {
             logHint.Location = new Point(17, y);
             logHint.BackColor = Color.Transparent;
             leftPanel.Controls.Add(logHint);
-
-            // ── Launch, pinned to the bottom ────────────────────
-            //
-            // Anchored rather than flowed, so the column can gain or lose a
-            // button above without Launch moving. It used to follow the flow
-            // and ended up halfway up the panel with a void underneath.
-            int bottom = leftPanel.Height - 10;
-
-            DarkButton btnExit = new DarkButton(Color.FromArgb(80, 88, 110), false);
-            btnExit.Text = "EXIT LAUNCHER";
-            btnExit.Size = new Size(btnWidth, 30);
-            btnExit.Location = new Point(15, bottom - 30);
-            btnExit.Click += delegate { Application.Exit(); };
-            leftPanel.Controls.Add(btnExit);
-
-            DarkButton btnLaunch = new DarkButton(CyanAccent, true);
-            btnLaunch.Text = "LAUNCH WOW";
-            btnLaunch.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
-            btnLaunch.Size = new Size(btnWidth, 46);
-            btnLaunch.Location = new Point(15, bottom - 30 - 8 - 46);
-            btnLaunch.Click += delegate { LaunchWow(); };
-            leftPanel.Controls.Add(btnLaunch);
+            y += 34;
 
             versionLabel = new Label();
             versionLabel.Text = "v" + APP_VERSION + "-Release";
@@ -1260,6 +1239,40 @@ namespace WowOptimizeLauncher {
             versionLabel.Location = new Point(17, y);
             versionLabel.BackColor = Color.Transparent;
             leftPanel.Controls.Add(versionLabel);
+            y += 18;
+
+            // ── Launch and exit ─────────────────────────────────
+            //
+            // Pinned to the foot of the column, but never on top of the rows
+            // above it. Anchoring alone was not enough: a preset added to the
+            // stack pushed the flow down past the anchor, WinForms paints a
+            // control added later underneath one added earlier, and LAUNCH WOW
+            // ended up behind the status card where nobody could see or press
+            // the one control the tool exists for. So the anchor is a floor, the
+            // flow wins when it runs lower, the panel scrolls if that leaves the
+            // pair off the bottom, and both are brought to the front.
+            int launchY = leftPanel.Height - 10 - 30 - 8 - 46;
+            if (launchY < y + 10) {
+                launchY = y + 10;
+                leftPanel.AutoScroll = true;
+            }
+
+            DarkButton btnLaunch = new DarkButton(CyanAccent, true);
+            btnLaunch.Text = "LAUNCH WOW";
+            btnLaunch.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+            btnLaunch.Size = new Size(btnWidth, 46);
+            btnLaunch.Location = new Point(15, launchY);
+            btnLaunch.Click += delegate { LaunchWow(); };
+            leftPanel.Controls.Add(btnLaunch);
+            btnLaunch.BringToFront();
+
+            DarkButton btnExit = new DarkButton(Color.FromArgb(80, 88, 110), false);
+            btnExit.Text = "EXIT LAUNCHER";
+            btnExit.Size = new Size(btnWidth, 30);
+            btnExit.Location = new Point(15, launchY + 46 + 8);
+            btnExit.Click += delegate { Application.Exit(); };
+            leftPanel.Controls.Add(btnExit);
+            btnExit.BringToFront();
 
             Controls.Add(leftPanel);
 
