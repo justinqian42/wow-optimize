@@ -898,7 +898,7 @@ static void LoadMapSymbols() {
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
-        wsprintfA(g_mapWhy, "no symbol file beside the DLL (%s)", path);
+        snprintf(g_mapWhy, sizeof(g_mapWhy), "no symbol file beside the DLL (%s)", path);
         return;
     }
     DWORD size = GetFileSize(h, nullptr);
@@ -1176,16 +1176,23 @@ static void DumpFineHistogram(const uint32_t* counts, int slots, int shift,
     Log("[SamplingProfiler] === %s ===", title);
     for (int i = 0; i < found; i++) {
         uint32_t c = SlotAt(counts, baseline, idx[i]);
-        char addr[32];
+        // 48, and bounded. It was 32 and written with wsprintfA, which takes no
+        // size: "wowopt+0x%X after %.12s" reaches 37 bytes with its terminator,
+        // so every label that took that branch ran five bytes past the end and
+        // over the stack cookie. The check at the return then failed and the CRT
+        // ended the process through __fastfail, which runs no exception filter
+        // and no exit hook - two tester sessions died thirty seconds in, inside
+        // the first report, with nothing in the log to say why.
+        char addr[48];
         uintptr_t slotAddr = addrBase + ((uintptr_t)idx[i] << shift);
         uintptr_t delta = 0;
         const char* sym = (addrBase == 0)
                         ? ResolveSelfSymbol(g_selfBase + slotAddr, &delta) : nullptr;
-        if (sym && delta < kSelfSymbolTrusted) wsprintfA(addr, "wowopt!%.20s", sym);
+        if (sym && delta < kSelfSymbolTrusted) snprintf(addr, sizeof(addr), "wowopt!%.20s", sym);
         // Past the trusted distance the address is the fact and the name is a
         // neighbourhood, so the address leads and the name follows it.
-        else if (sym) wsprintfA(addr, "wowopt+0x%X after %.12s", (unsigned)slotAddr, sym);
-        else          wsprintfA(addr, addrFormat, (unsigned)slotAddr);
+        else if (sym) snprintf(addr, sizeof(addr), "wowopt+0x%X after %.20s", (unsigned)slotAddr, sym);
+        else          snprintf(addr, sizeof(addr), addrFormat, (unsigned)slotAddr);
         Log("[SamplingProfiler]   %-14s %8u samples (%5.2f%%)",
             addr, c, 100.0 * (double)c / (double)total);
     }
@@ -1679,8 +1686,8 @@ static void DumpResults() {
             // a symbol whose samples are in its own prologue needs no comment.
             if (domIdx > 0 && histTotal > 0 &&
                 buckets[i].offHist[0] * 2u < histTotal) {
-                wsprintfA(label, "%.20s+0x%03X", buckets[i].name,
-                          (unsigned)(domIdx << 8));
+                snprintf(label, sizeof(label), "%.20s+0x%03X", buckets[i].name,
+                         (unsigned)(domIdx << 8));
                 name = label;
             }
         } else if (g_selfBase && buckets[i].addr >= g_selfBase && buckets[i].addr < g_selfEnd) {
@@ -1688,10 +1695,12 @@ static void DumpResults() {
             // maps directly to wow_optimize.map (which of our hooks costs time).
             uintptr_t delta = 0;
             const char* sym = ResolveSelfSymbol(buckets[i].addr, &delta);
-            if (sym && delta < kSelfSymbolTrusted) wsprintfA(label, "wowopt!%.24s", sym);
-            else if (sym) wsprintfA(label, "wowopt+0x%05X after %.14s",
-                                    (unsigned)(buckets[i].addr - g_selfBase), sym);
-            else     wsprintfA(label, "wowopt+0x%05X", (unsigned)(buckets[i].addr - g_selfBase));
+            // Bounded. The middle one reached 39 bytes into this 40 - correct
+            // by one byte, which is not the same as correct.
+            if (sym && delta < kSelfSymbolTrusted) snprintf(label, sizeof(label), "wowopt!%.24s", sym);
+            else if (sym) snprintf(label, sizeof(label), "wowopt+0x%05X after %.14s",
+                                   (unsigned)(buckets[i].addr - g_selfBase), sym);
+            else     snprintf(label, sizeof(label), "wowopt+0x%05X", (unsigned)(buckets[i].addr - g_selfBase));
             name = label;
         } else {
             // Unlisted WoW code region. Labelling it by page base alone was not
