@@ -1038,8 +1038,9 @@ namespace WowOptimizeLauncher {
                 + "frame, and whether our own cloud maths matches the game's byte "
                 + "for byte.\r\n\r\n"
                 + "These cost frames on purpose - that is the trade for numbers. "
-                + "Play half an hour including a city, some combat and some open "
-                + "ground under sky, then send Logs\\wow_optimize.log and press "
+                + "Play about ten minutes including a city, a fight and some open "
+                + "ground under sky - or until it crashes - then send "
+                + "Logs\\wow_optimize.log and press "
                 + "MAX PERFORMANCE or DEFAULT to put it back.");
             leftPanel.Controls.Add(btnMeasure);
             y += 40;
@@ -1813,11 +1814,10 @@ namespace WowOptimizeLauncher {
                 + "largest single thing in the last profile. Everything else you "
                 + "had ticked is untouched, so what gets measured is your own "
                 + "setup.\r\n\r\n"
-                + "Play normally for at least half an hour. A city, some combat, "
-                + "and some flying or riding across open ground, because two of "
-                + "these only have something to say with the sky and the horizon "
-                + "in view. If the game freezes, keep playing afterwards rather "
-                + "than restarting - the log is written as you go.\r\n\r\n"
+                + "Play for about ten minutes: a city, a fight, and some flying "
+                + "or riding in the open so the sky and the horizon are on "
+                + "screen. If the game crashes or freezes, that log is the most "
+                + "useful one there is - send it as it is.\r\n\r\n"
                 + "Then send Logs\\wow_optimize.log. These cost frames, so press "
                 + "MAX PERFORMANCE or DEFAULT when you are done.",
                 "Measuring Run", MessageBoxButtons.OK, MessageBoxIcon.Information);
