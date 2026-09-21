@@ -1,6 +1,7 @@
 #include "wow_opt_hooks.h"
 #include "MinHook.h"
 #include "version.h"
+#include "config.h"
 #include <mimalloc.h>
 #include <cstdint>
 #include <cstring>
@@ -281,6 +282,10 @@ namespace WowOptHooks {
         };
 
         for (auto& h : hooks) {
+            if (h.addr == (void*)0x004CFBB0 && Config::g_settings.OptDbcFastRle) {
+                Log("[WowOpt] %s stands aside for DbcFastRle", h.name);
+                continue;
+            }
             if (!WowOpt_ClientPatchAllowed(h.addr)) {
                 Log("[WowOpt] NOT active: client patches disallowed at %s (0x%08X)", h.name, (uintptr_t)h.addr);
                 continue;

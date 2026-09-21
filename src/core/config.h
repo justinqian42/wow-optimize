@@ -683,6 +683,10 @@ namespace Config {
         bool OptSceneVisTraverse = false;
         bool OptParticlePhysics = false;
         bool OptCollisionResetVisited = false;
+        bool OptUIStrataCompact = false;
+        bool OptDbcFastRle = false;
+        bool OptPixelFormatBlit = false;
+        bool OptUIFrameRemove = false;
     };
 
     extern Settings g_settings;

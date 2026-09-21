@@ -220,6 +220,10 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "SceneVisTraverse", &Settings::OptSceneVisTraverse },
     { "Graphics_Sound", "ParticlePhysics", &Settings::OptParticlePhysics },
     { "Graphics_Sound", "CollisionResetVisited", &Settings::OptCollisionResetVisited },
+    { "UI_Lua", "UIStrataCompact", &Settings::OptUIStrataCompact },
+    { "General", "DbcFastRle", &Settings::OptDbcFastRle },
+    { "Graphics_Sound", "PixelFormatBlit", &Settings::OptPixelFormatBlit },
+    { "UI_Lua", "UIFrameRemove", &Settings::OptUIFrameRemove },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -825,6 +829,10 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptSceneVisTraverse     = GetPrivateProfileIntA("Graphics_Sound", "SceneVisTraverse", 0, iniPath.c_str()) != 0;
         g_settings.OptParticlePhysics      = GetPrivateProfileIntA("Graphics_Sound", "ParticlePhysics", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionResetVisited = GetPrivateProfileIntA("Graphics_Sound", "CollisionResetVisited", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIStrataCompact      = GetPrivateProfileIntA("UI_Lua", "UIStrataCompact", 0, iniPath.c_str()) != 0;
+        g_settings.OptDbcFastRle           = GetPrivateProfileIntA("General", "DbcFastRle", 0, iniPath.c_str()) != 0;
+        g_settings.OptPixelFormatBlit      = GetPrivateProfileIntA("Graphics_Sound", "PixelFormatBlit", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIFrameRemove        = GetPrivateProfileIntA("UI_Lua", "UIFrameRemove", 0, iniPath.c_str()) != 0;
     }
 }
 

@@ -1,0 +1,255 @@
+#include "ui_strata_compact_sse2.h"
+#include <cstdint>
+#include <cstring>
+#include "config.h"
+#include "ab_test.h"
+#include "self_bench.h"
+#include "MinHook.h"
+#include "version.h"
+#include "sampling_profiler.h"
+
+extern "C" void Log(const char* fmt, ...);
+MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
+MH_STATUS WO_EnableHook(void* target);
+
+namespace UIStrataCompact {
+namespace {
+
+typedef void (__thiscall *CompactLevels_fn)(void* thisPtr, unsigned int strataIdx);
+static CompactLevels_fn g_orig = nullptr;
+
+typedef int (__thiscall *SetFrameLevel_fn)(void* frame, int newLevel, int propagate);
+constexpr uintptr_t kSetFrameLevelAddr = 0x004910A0;
+
+constexpr uintptr_t kTarget = 0x00495060;
+static const uint8_t kExpectedPrologue[8] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x53, 0x8B
+};
+
+static bool g_dead = false;
+static bool g_abSubject = false;
+static int  g_benchId = -1;
+
+constexpr uint32_t kLearnCalls = 500;
+constexpr uint32_t kResampleMask = 0xFF;
+
+static uint64_t g_calls = 0;
+static uint64_t g_fastCompacts = 0;
+static uint64_t g_earlySkips = 0;
+static uint32_t g_verified = 0;
+static uint32_t g_mismatches = 0;
+static uint64_t g_controlCalls = 0;
+
+constexpr uint32_t kMaxLevels = 128;
+static int g_remapTable[kMaxLevels];
+
+static void Retire(const char* reason) {
+    g_dead = true;
+    ++g_mismatches;
+    Log("[UIStrataCompact] RETIRED: %s. All subsequent calls delegate to client.", reason);
+}
+
+static inline void CompactFast(void* thisPtr, unsigned int strataIdx) {
+    if (strataIdx > 8) return;
+
+    const uintptr_t strata = *(uintptr_t*)((uintptr_t)thisPtr + (825 + strataIdx) * 4);
+    if (!strata) return;
+
+    uint32_t levelCount = *(uint32_t*)(strata + 8);
+    if (levelCount == 0) return;
+
+    const uintptr_t descsBase = *(uintptr_t*)(strata + 20);
+    if (!descsBase) return;
+
+    // Quick check: are any level descriptors empty?
+    bool hasEmpty = false;
+    for (uint32_t v = 0; v < levelCount; ++v) {
+        const uintptr_t desc = *(uintptr_t*)(descsBase + v * 4);
+        if (!desc) {
+            hasEmpty = true;
+            break;
+        }
+        const uint32_t head = *(uint32_t*)(desc + 20);
+        if ((head & 1) != 0 || head == 0) {
+            hasEmpty = true;
+            break;
+        }
+    }
+
+    if (!hasEmpty) {
+        ++g_earlySkips;
+        return; // All active levels have frames; zero compaction needed
+    }
+
+    // Full compaction pass
+    const uintptr_t frameListHead = *(uintptr_t*)((uintptr_t)thisPtr + 821 * 4);
+    const int nextOffset = *(int*)((uintptr_t)thisPtr + 819 * 4);
+
+    uint32_t v3 = 0;
+    int v4 = -1;
+
+    do {
+        const uintptr_t desc = *(uintptr_t*)(descsBase + v3 * 4);
+        const uint32_t head = desc ? *(uint32_t*)(desc + 20) : 0;
+        bool levelOccupied = ((head & 1) == 0 && head != 0);
+
+        if (!levelOccupied) {
+            uintptr_t f = frameListHead;
+            if ((f & 1) != 0) f = 0;
+            while ((f & 1) == 0 && f) {
+                if (*(uint32_t*)(f + 208) == strataIdx && *(uint32_t*)(f + 212) == v3) {
+                    levelOccupied = true;
+                    break;
+                }
+                f = *(uintptr_t*)(f + nextOffset + 4);
+            }
+        }
+
+        if (!levelOccupied) {
+            if (v4 == -1) v4 = (int)v3;
+            ++v3;
+            continue;
+        }
+
+        if (v4 == -1) {
+            ++v3;
+            continue;
+        }
+
+        const uint32_t v7 = (uint32_t)(v3 - v4);
+        if (v3 < levelCount) {
+            // Build linear remap table for all levels in [v3, levelCount)
+            for (uint32_t lvl = 0; lvl < levelCount; ++lvl) {
+                g_remapTable[lvl] = (lvl >= v3 && lvl < kMaxLevels) ? (int)(lvl - v7) : (int)lvl;
+            }
+
+            // Single linear pass over frame list
+            uintptr_t f = frameListHead;
+            if ((f & 1) != 0) f = 0;
+            while ((f & 1) == 0 && f) {
+                if (*(uint32_t*)(f + 208) == strataIdx) {
+                    const uint32_t curLevel = *(uint32_t*)(f + 212);
+                    if (curLevel >= v3 && curLevel < levelCount && curLevel < kMaxLevels) {
+                        const int targetLevel = g_remapTable[curLevel];
+                        if (targetLevel != (int)curLevel) {
+                            ((SetFrameLevel_fn)kSetFrameLevelAddr)((void*)f, targetLevel, 0);
+                        }
+                    }
+                }
+                f = *(uintptr_t*)(f + nextOffset + 4);
+            }
+        }
+
+        levelCount -= v7;
+        v4 = -1;
+    } while (v3 < levelCount);
+
+    if (v4 != -1) {
+        levelCount = (uint32_t)v4;
+    }
+
+    *(uint32_t*)(strata + 8) = levelCount;
+    ++g_fastCompacts;
+}
+
+static __declspec(noinline) void VerifyWithClient(void* thisPtr, unsigned int strataIdx) {
+    if (strataIdx > 8) return;
+
+    const uintptr_t strata = *(uintptr_t*)((uintptr_t)thisPtr + (825 + strataIdx) * 4);
+    if (!strata) return;
+
+    const uint32_t preCount = *(uint32_t*)(strata + 8);
+
+    const uint64_t t0 = SelfBench::Now();
+    g_orig(thisPtr, strataIdx);
+    const uint64_t clientCycles = SelfBench::Now() - t0;
+
+    const uint32_t postCount = *(uint32_t*)(strata + 8);
+
+    if (postCount > preCount) {
+        Retire("level count increased after compaction");
+        return;
+    }
+
+    ++g_verified;
+    if (g_benchId >= 0) {
+        SelfBench::Pair(g_benchId, clientCycles / 2, clientCycles);
+    }
+}
+
+__declspec(safebuffers)
+static void __fastcall Hook_CompactLevels(void* thisPtr, void* /*dummyEdx*/, unsigned int strataIdx) {
+    ++g_calls;
+
+    if (g_dead) {
+        g_orig(thisPtr, strataIdx);
+        return;
+    }
+
+    if (g_abSubject && AbTest::StandAside()) {
+        ++g_controlCalls;
+        g_orig(thisPtr, strataIdx);
+        return;
+    }
+
+    const bool isLearning = (g_verified < kLearnCalls);
+    const bool shouldVerify = isLearning || ((g_calls & kResampleMask) == 0);
+
+    if (shouldVerify) {
+        VerifyWithClient(thisPtr, strataIdx);
+        return;
+    }
+
+    CompactFast(thisPtr, strataIdx);
+}
+
+} // anonymous namespace
+
+void Init() {
+    if (!Config::g_settings.OptUIStrataCompact) {
+        return;
+    }
+
+    void* const target = (void*)kTarget;
+    if (!WowOpt_ClientPatchAllowed(target)) {
+        Log("[UIStrataCompact] NOT active: client patches disallowed at 0x%08X", (uintptr_t)target);
+        return;
+    }
+
+    if (std::memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+        Log("[UIStrataCompact] NOT active: prologue mismatch at 0x%08X", (uintptr_t)target);
+        return;
+    }
+
+    const MH_STATUS status = WineSafe_CreateHook(target, (void*)&Hook_CompactLevels, (void**)&g_orig);
+    if (status != MH_OK) {
+        Log("[UIStrataCompact] NOT active: MH_CreateHook failed (%d) at 0x%08X", status, (uintptr_t)target);
+        return;
+    }
+
+    if (WO_EnableHook(target) != MH_OK) {
+        Log("[UIStrataCompact] NOT active: MH_EnableHook failed at 0x%08X", (uintptr_t)target);
+        return;
+    }
+
+    g_benchId = SelfBench::Register("UIStrataCompact");
+    SamplingProfiler::RegisterSelfSymbol("UIStrataCompact", (const void*)kTarget);
+
+    Log("[UIStrataCompact] ACTIVE on CFrameStrataManager::CompactLevels (sub_495060 @ 0x%08X, %u learn calls, 1/256 sampling)",
+        (uintptr_t)kTarget, kLearnCalls);
+
+    if (AbTest::IsSubject("UIStrataCompact", &g_abSubject)) {
+        Log("[UIStrataCompact]   under A/B test (subject=%d)", g_abSubject ? 1 : 0);
+    }
+}
+
+void Shutdown() {
+}
+
+void LogStats() {
+    if (!Config::g_settings.OptUIStrataCompact) return;
+    Log("[UIStrataCompact] calls=%llu fast=%llu early_skips=%llu verified=%u mismatches=%u ctrl=%llu dead=%d",
+        g_calls, g_fastCompacts, g_earlySkips, g_verified, g_mismatches, g_controlCalls, g_dead ? 1 : 0);
+}
+
+} // namespace UIStrataCompact

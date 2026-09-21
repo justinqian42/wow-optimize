@@ -534,6 +534,14 @@ add_library(wow_optimize SHARED
     src/simd_math/particle_physics_sse2.h
     src/simd_math/collision_reset_visited.cpp
     src/simd_math/collision_reset_visited.h
+    src/hooks_subsystems/ui_strata_compact_sse2.cpp
+    src/hooks_subsystems/ui_strata_compact_sse2.h
+    src/simd_math/dbc_fast_rle.cpp
+    src/simd_math/dbc_fast_rle.h
+    src/simd_math/pixel_format_blit_sse2.cpp
+    src/simd_math/pixel_format_blit_sse2.h
+    src/hooks_subsystems/ui_frame_remove.cpp
+    src/hooks_subsystems/ui_frame_remove.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

@@ -768,6 +768,10 @@ namespace WowOptimizeLauncher {
                 { "Scene Graph Visibility Traversal (SSE2)", new SettingItem("Graphics_Sound", "SceneVisTraverse", false, null, "Vectorizes 6-float bounding box copies and accelerates visibility culling during scene graph traversal in sub_7A50C0.", true) },
                 { "M2 Particle Physics Integration (SSE2)", new SettingItem("Graphics_Sound", "ParticlePhysics", false, null, "Vectorizes 3D Euclidean distance calculations and velocity damping integration in M2 particle emitters (sub_97EB10) using SSE2 scalar and vector instructions.", true) },
                 { "Collision Query Reset Visited (sub_7C7610)", new SettingItem("Graphics_Sound", "CollisionResetVisited", false, null, "Replaces per-iteration global writes and pointer reloads with a hoisted 4-way unrolled clearing pass in sub_7C7610 (2.72% of executing time in field sessions).", true) },
+                { "UI Strata List Compaction (SSE2)", new SettingItem("UI_Lua", "UIStrataCompact", false, null, "Vectorizes UI strata frame pointer array compaction in sub_48A7B0, removing 4 pointers per SSE2 step with bitmask compression.", true) },
+                { "DBC Fast RLE / Copy Unpack", new SettingItem("UI_Lua", "DbcFastRle", false, null, "Optimizes DBC string and integer array unrolling in sub_479F60 with 16-byte aligned vector copies and precomputed offsets.", true) },
+                { "ARGB Pixel Format Blit Converter (SSE2)", new SettingItem("Graphics_Sound", "PixelFormatBlit", false, null, "Vectorizes 32-bpp ARGB and RGBA pixel format unpacking and color channel conversion in sub_739D80 using SSE2 shuffles.", true) },
+                { "UI Frame Removal Fast Scan", new SettingItem("UI_Lua", "UIFrameRemove", false, null, "Accelerates UI frame removal and parent unlinking in sub_48A6F0 using vectorized 16-byte pointer search and compact memmove.", true) },
             };
 
             // Window Setup

@@ -138,6 +138,10 @@
 #include "scene_vis_traverse_sse2.h"
 #include "particle_physics_sse2.h"
 #include "collision_reset_visited.h"
+#include "ui_strata_compact_sse2.h"
+#include "dbc_fast_rle.h"
+#include "pixel_format_blit_sse2.h"
+#include "ui_frame_remove.h"
 
 // Forward declaration - Log() defined later in this file
 extern "C" void Log(const char* fmt, ...);
@@ -5765,6 +5769,10 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("SceneVisTraverse::LogStats", SceneVisTraverse::LogStats());
     STAT_TIME("ParticlePhysics::LogStats", ParticlePhysics::LogStats());
     STAT_TIME("CollisionResetVisited::LogStats", CollisionResetVisited::LogStats());
+    STAT_TIME("UIStrataCompact::LogStats", UIStrataCompact::LogStats());
+    STAT_TIME("DbcFastRle::LogStats", DbcFastRle::LogStats());
+    STAT_TIME("PixelFormatBlit::LogStats", PixelFormatBlit::LogStats());
+    STAT_TIME("UIFrameRemove::LogStats", UIFrameRemove::LogStats());
     STAT_TIME("FloorSplit::LogStats", FloorSplit::LogStats());
     STAT_TIME("SkyCloudTexels::LogStats", SkyCloudTexels::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
@@ -8594,6 +8602,10 @@ static DWORD WINAPI MainThread(LPVOID param) {
     SceneVisTraverse::Init();
     ParticlePhysics::Init();
     CollisionResetVisited::Init();
+    UIStrataCompact::Init();
+    DbcFastRle::Init();
+    PixelFormatBlit::Init();
+    UIFrameRemove::Init();
 
     Log("--- UnitAura Fast Path ---");
 #if !TEST_DISABLE_UNIT_AURA_FAST
@@ -11690,6 +11702,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             SceneVisTraverse::Shutdown();
             ParticlePhysics::Shutdown();
             CollisionResetVisited::Shutdown();
+            UIStrataCompact::Shutdown();
+            DbcFastRle::Shutdown();
+            PixelFormatBlit::Shutdown();
+            UIFrameRemove::Shutdown();
             LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();
