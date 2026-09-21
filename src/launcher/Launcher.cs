@@ -1781,7 +1781,12 @@ namespace WowOptimizeLauncher {
                 "FrameLimiter",
                 // It rewrites the pause and step multiplier every frame, and
                 // LuaGcPace refuses to install while it does.
-                "LuaGcCoalesce"
+                "LuaGcCoalesce",
+                // It stops the automatic collector and steps it by hand, so
+                // the pause the A/B alternates has nothing to pace. A
+                // three-hour run with it on measured only the step
+                // multiplier and could not say so.
+                "LuaGcManual"
             };
 
             int turnedOn = 0, alreadyOn = 0, missing = 0;

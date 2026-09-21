@@ -218,7 +218,11 @@ void OnFrame() {
         Resolve();
     }
 
-    const int phase = (g_abSubject && !AbTest::FeatureOn()) ? 0 : 1;
+    // StandAside, not FeatureOn. Both read the phase, but only StandAside tells
+    // the harness the subject was reached. With FeatureOn a three-hour run of
+    // 279 stints each way was reported as never reached during an OFF stint,
+    // and the harness, correctly given what it could see, printed no result.
+    const int phase = (g_abSubject && AbTest::StandAside()) ? 0 : 1;
     if (phase != g_lastPhase) {
         g_lastPhase = phase;
         ++g_transitions;
@@ -299,9 +303,10 @@ void LogStats() {
     if (haveT && haveS) {
         Log("[LuaGcPace]   the collector itself, over the last %lu profiler "
             "sample(s): luaC_traversetable %.2f%%, luaC_sweeplist %.2f%%, %.2f%% "
-            "together. That figure covers the whole session and is not split by "
-            "half, so it says what the collector costs, not which pacing costs "
-            "less.", win, tp, sp, tp + sp);
+            "together. That is the most recent samples the ring still holds, "
+            "which on a long session is its last stretch and not all of it, and "
+            "it is not split by half - it says what the collector costs, not "
+            "which pacing costs less.", win, tp, sp, tp + sp);
     } else {
         Log("[LuaGcPace]   what the collector costs is not measured this session: "
             "the sampling profiler is off or has too few samples. That is a "
