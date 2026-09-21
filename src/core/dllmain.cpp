@@ -4758,7 +4758,22 @@ static void DetectMultiClient() {
 
 // 10. System timer resolution.
 //
+// This is the one setting here that reaches outside the game. Windows keeps a
+// single platform timer period and hands out the smallest anyone asked for, so
+// while this process is alive the whole machine ticks at the rate below, and
+// tools that display it show 0.5 ms with the game running. That costs idle
+// power, which a player on a laptop notices and has every right to refuse.
+//
+// It ran unconditionally and had no switch of any kind, so a tester who saw it
+// and did not want it had nothing to untick. It has one now, defaulting on
+// because that is what everyone has been running.
 static void SetHighTimerResolution() {
+    if (!Config::g_settings.OptTimerResolution) {
+        Log("Timer resolution: left alone - TimerResolution is off, so the system "
+            "timer keeps whatever period Windows or another process set. Frame "
+            "pacing and the sleep hook are coarser for it; that is the trade.");
+        return;
+    }
     typedef LONG (WINAPI* NtSetTimerRes_fn)(ULONG, BOOLEAN, PULONG);
     HMODULE h = GetModuleHandleA("ntdll.dll");
     if (!h) return;

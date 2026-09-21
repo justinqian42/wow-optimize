@@ -16,6 +16,7 @@ namespace Config {
     struct Settings {
         // General & Memory
         bool OptSleepPrecision = true;
+        bool OptTimerResolution = true;
         int SleepPrecisionValue = 8;
         // One log per session preserves earlier runs, which is the whole point
         // when a tester is comparing two configurations - a single overwritten

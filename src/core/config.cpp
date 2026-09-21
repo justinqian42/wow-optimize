@@ -31,6 +31,7 @@ struct BoolSetting {
 
 static const BoolSetting kBoolSettings[] = {
     { "General", "SleepPrecision", &Settings::OptSleepPrecision },
+    { "General", "TimerResolution", &Settings::OptTimerResolution },
     { "General", "SessionLogs", &Settings::OptSessionLogs },
     { "UI_Lua", "LuaStackFast", &Settings::OptLuaStackFast },
     { "Graphics_Sound", "QualityGovernor", &Settings::OptQualityGovernor },
@@ -544,6 +545,10 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         // Read all settings
         // General
         g_settings.OptSleepPrecision      = GetPrivateProfileIntA("General", "SleepPrecision", 1, iniPath.c_str()) != 0;
+        // Defaults on, because it already ran for everyone with no switch at
+        // all. A new key defaulting off would take a running feature away
+        // from every user who never wrote it, which is the 3.18.1 regression.
+        g_settings.OptTimerResolution     = GetPrivateProfileIntA("General", "TimerResolution", 1, iniPath.c_str()) != 0;
         g_settings.SleepPrecisionValue    = GetPrivateProfileIntA("General", "SleepPrecisionValue", 8, iniPath.c_str());
         g_settings.OptSessionLogs         = GetPrivateProfileIntA("General", "SessionLogs", 1, iniPath.c_str()) != 0;
         g_settings.OptLuaStackFast        = GetPrivateProfileIntA("UI_Lua", "LuaStackFast", 0, iniPath.c_str()) != 0;
