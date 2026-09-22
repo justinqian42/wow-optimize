@@ -848,6 +848,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptSStrHashFast         = GetPrivateProfileIntA("General", "SStrHashFast", 0, iniPath.c_str()) != 0;
         g_settings.OptReverbClearFast      = GetPrivateProfileIntA("Graphics_Sound", "ReverbClearFast", 0, iniPath.c_str()) != 0;
         g_settings.OptUILayoutRectFast     = GetPrivateProfileIntA("UI_Lua", "UILayoutRectFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIStrataOverlapFast  = GetPrivateProfileIntA("UI_Lua", "UIStrataOverlapFast", 0, iniPath.c_str()) != 0;
     }
 }
 

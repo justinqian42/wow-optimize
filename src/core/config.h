@@ -695,6 +695,7 @@ namespace Config {
         bool OptSStrHashFast = false;
         bool OptReverbClearFast = false;
         bool OptUILayoutRectFast = false;
+        bool OptUIStrataOverlapFast = false;
     };
 
     extern Settings g_settings;

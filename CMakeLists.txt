@@ -558,6 +558,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/reverb_clear_fast.h
     src/hooks_subsystems/ui_layout_rect_fast.cpp
     src/hooks_subsystems/ui_layout_rect_fast.h
+    src/hooks_subsystems/ui_strata_overlap_fast.cpp
+    src/hooks_subsystems/ui_strata_overlap_fast.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
