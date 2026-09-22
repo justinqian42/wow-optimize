@@ -542,6 +542,8 @@ add_library(wow_optimize SHARED
     src/simd_math/pixel_format_blit_sse2.h
     src/hooks_subsystems/ui_frame_remove.cpp
     src/hooks_subsystems/ui_frame_remove.h
+    src/hooks_subsystems/m2_batch_cmp_transparent.cpp
+    src/hooks_subsystems/m2_batch_cmp_transparent.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

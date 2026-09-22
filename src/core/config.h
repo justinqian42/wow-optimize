@@ -687,6 +687,7 @@ namespace Config {
         bool OptDbcFastRle = false;
         bool OptPixelFormatBlit = false;
         bool OptUIFrameRemove = false;
+        bool OptM2BatchCmpTransparent = false;
     };
 
     extern Settings g_settings;
