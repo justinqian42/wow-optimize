@@ -694,6 +694,7 @@ namespace Config {
         bool OptM2SkinProjection = false;
         bool OptSStrHashFast = false;
         bool OptReverbClearFast = false;
+        bool OptUILayoutRectFast = false;
     };
 
     extern Settings g_settings;

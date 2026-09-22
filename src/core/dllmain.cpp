@@ -79,6 +79,7 @@
 #include "m2_skin_proj_fast.h"
 #include "sstr_hash_fast.h"
 #include "reverb_clear_fast.h"
+#include "ui_layout_rect_fast.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5767,6 +5768,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("M2SkinProjFast::LogStats", M2SkinProjFast::LogStats());
     STAT_TIME("SStrHashFast::LogStats", SStrHashFast::LogStats());
     STAT_TIME("ReverbClearFast::LogStats", ReverbClearFast::LogStats());
+    STAT_TIME("UILayoutRectFast::LogStats", UILayoutRectFast::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8603,6 +8605,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2SkinProjFast::Init();
     SStrHashFast::Init();
     ReverbClearFast::Init();
+    UILayoutRectFast::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();
@@ -11714,6 +11717,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             M2SkinProjFast::Shutdown();
             SStrHashFast::Shutdown();
             ReverbClearFast::Shutdown();
+            UILayoutRectFast::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();
