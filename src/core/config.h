@@ -693,6 +693,7 @@ namespace Config {
         bool OptHorizonTestAABB = false;
         bool OptM2SkinProjection = false;
         bool OptSStrHashFast = false;
+        bool OptReverbClearFast = false;
     };
 
     extern Settings g_settings;

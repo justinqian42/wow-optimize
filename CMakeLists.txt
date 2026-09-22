@@ -554,6 +554,8 @@ add_library(wow_optimize SHARED
     src/simd_math/m2_skin_proj_fast.h
     src/hooks_subsystems/sstr_hash_fast.cpp
     src/hooks_subsystems/sstr_hash_fast.h
+    src/hooks_subsystems/reverb_clear_fast.cpp
+    src/hooks_subsystems/reverb_clear_fast.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
