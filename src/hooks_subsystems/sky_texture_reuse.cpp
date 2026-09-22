@@ -524,15 +524,14 @@ bool Init() {
     g_abSubject = AbTest::IsSubject("SkyTextureReuse", &g_abSubject);
     SamplingProfiler::RegisterSelfSymbol("SkyTextureReuse", (const void*)&Detour);
 
-    Log("[SkyTextureReuse] ACTIVE on the cloud texture build (sub_7EFD00 @ 0x%08X), "
-        "10.29%% of executing time in an uncapped tester session. The texture is "
-        "rebuilt a few rows a frame from a phase that only changes when a whole "
-        "cycle has gone by, so a cycle that repeats its phase rebuilds bytes that "
-        "are already in the buffer. Whether that happens depends on the cloud speed "
-        "and the frame rate, so it is measured: while learning nothing is skipped, "
-        "and the report says how many passes could have been. Arming needs %lu "
-        "rebuilds that came out byte for byte identical and %lu bookkeeping "
-        "predictions the client agreed with, and one pass in %lu is rechecked after.",
+    Log("[SkyTextureReuse] ACTIVE on the cloud texture build (sub_7EFD00 @ 0x%08X). "
+        "The skip this was written for does not work and is expected to retire: the "
+        "key cannot hold the light, which sub_7EFAE0 recomputes every pass and which "
+        "every lit texel multiplies into its colour bytes, so identical inputs are "
+        "allowed to write different bytes and in four sessions they did. What it is "
+        "here for now is the millisecond figure below and the hook SkyCloudTexels "
+        "reads. Arming would still need %lu identical rebuilds and %lu bookkeeping "
+        "predictions, and one pass in %lu is rechecked after.",
         (unsigned)kTarget, kProveRepeats, kProveBooks, kResampleMask + 1);
     if (g_abSubject)
         Log("[SkyTextureReuse]   under A/B test: the control half runs the client's "
