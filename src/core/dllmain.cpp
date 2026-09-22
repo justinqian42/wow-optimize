@@ -74,6 +74,7 @@
 #include "m2_sort_key_cache.h"
 #include "m2_batch_sort.h"
 #include "m2_batch_cmp_transparent.h"
+#include "m2_batch_cmp_solid.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5757,6 +5758,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("M2SortKey::LogStats", M2SortKey::LogStats());
     STAT_TIME("M2BatchSort::LogStats", M2BatchSort::LogStats());
     STAT_TIME("M2BatchCmpTransparent::LogStats", M2BatchCmpTransparent::LogStats());
+    STAT_TIME("M2BatchCmpSolid::LogStats", M2BatchCmpSolid::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8588,6 +8590,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2SortKey::Init();
     M2BatchSort::Init();
     M2BatchCmpTransparent::Init();
+    M2BatchCmpSolid::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();
@@ -11694,6 +11697,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             ParticleFill::Shutdown();
             M2BatchSort::Shutdown();
             M2BatchCmpTransparent::Shutdown();
+            M2BatchCmpSolid::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();
