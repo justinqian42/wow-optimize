@@ -691,6 +691,7 @@ namespace Config {
         bool OptM2BatchCmpSolid = false;
         bool OptParticleQuad = false;
         bool OptHorizonTestAABB = false;
+        bool OptM2SkinProjection = false;
     };
 
     extern Settings g_settings;

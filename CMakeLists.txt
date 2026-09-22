@@ -550,6 +550,8 @@ add_library(wow_optimize SHARED
     src/simd_math/particle_quad_sse2.h
     src/simd_math/horizon_test_sse2.cpp
     src/simd_math/horizon_test_sse2.h
+    src/simd_math/m2_skin_proj_fast.cpp
+    src/simd_math/m2_skin_proj_fast.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
