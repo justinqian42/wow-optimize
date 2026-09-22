@@ -562,6 +562,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/ui_strata_overlap_fast.h
     src/simd_math/particle_integrate_fast.cpp
     src/simd_math/particle_integrate_fast.h
+    src/simd_math/sincos_fast_sse2.cpp
+    src/simd_math/sincos_fast_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
