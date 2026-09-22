@@ -692,6 +692,7 @@ namespace Config {
         bool OptParticleQuad = false;
         bool OptHorizonTestAABB = false;
         bool OptM2SkinProjection = false;
+        bool OptSStrHashFast = false;
     };
 
     extern Settings g_settings;
