@@ -690,6 +690,7 @@ namespace Config {
         bool OptM2BatchCmpTransparent = false;
         bool OptM2BatchCmpSolid = false;
         bool OptParticleQuad = false;
+        bool OptHorizonTestAABB = false;
     };
 
     extern Settings g_settings;

@@ -227,6 +227,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2BatchCmpTransparent", &Settings::OptM2BatchCmpTransparent },
     { "Graphics_Sound", "M2BatchCmpSolid", &Settings::OptM2BatchCmpSolid },
     { "Graphics_Sound", "ParticleQuad", &Settings::OptParticleQuad },
+    { "Graphics_Sound", "HorizonTestAABB", &Settings::OptHorizonTestAABB },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -839,6 +840,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2BatchCmpTransparent = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpTransparent", 0, iniPath.c_str()) != 0;
         g_settings.OptM2BatchCmpSolid       = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpSolid", 0, iniPath.c_str()) != 0;
         g_settings.OptParticleQuad         = GetPrivateProfileIntA("Graphics_Sound", "ParticleQuad", 0, iniPath.c_str()) != 0;
+        g_settings.OptHorizonTestAABB      = GetPrivateProfileIntA("Graphics_Sound", "HorizonTestAABB", 0, iniPath.c_str()) != 0;
     }
 }
 
