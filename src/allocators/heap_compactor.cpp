@@ -203,6 +203,7 @@ static DWORD WINAPI MonitorThread(LPVOID) {
         SIZE_T largestLow = 0, lowTotal = 0;
         SIZE_T largestFree = GetLargestFreeBlock(&largestLow, &lowTotal);
         g_checksPerformed++;
+        HighPlacement::NotifyLowHalfFree(largestLow, lowTotal);
 
         // Published for the report, which used to walk the address space again on
         // the main thread to get the same two numbers. This thread has just paid

@@ -74,8 +74,11 @@
 #include "version.h"
 #include "config.h"
 #include "high_placement.h"
+#include "mimalloc_high_arena.h"
+#include <cstdio>
 
 extern "C" void Log(const char* fmt, ...);
+extern "C" bool mi_is_in_heap_region(const void* p);
 
 namespace HighPlacement {
 namespace {
@@ -663,16 +666,304 @@ void LogLiveByCaller(bool lowHalfOnly, const char* compareWith) {
     }
 }
 
+namespace {
+
+// One-off low-half address space census when the largest free block below 2GB
+// crosses under the critical threshold.
+static constexpr SIZE_T kCensusThreshold = 16 * 1024 * 1024; // 16 MB
+
+struct CensusRecord {
+    char          name[48];
+    char          category[12];
+    uint64_t      reservedBytes;
+    uint64_t      committedBytes;
+    uint32_t      regionCount;
+};
+
+struct CensusSnapshot {
+    bool          valid;
+    DWORD         timestampTick;
+    SIZE_T        triggerLargestLowMB;
+    uint64_t      totalReservedBytes;
+    uint64_t      totalCommittedBytes;
+    uint64_t      totalFreeBytes;
+    SIZE_T        largestFreeBlockBytes;
+    uint32_t      freeRegionCount;
+    uint32_t      occupiedRegionCount;
+    uint32_t      entryCount;
+    CensusRecord  entries[256];
+};
+
+static CensusSnapshot g_censusSnapshot = {};
+static bool   g_censusBelowThreshold = false;
+static SIZE_T g_censusLastObservedLow = 0;
+static SIZE_T g_censusLowestObservedLow = 0;
+static SRWLOCK g_censusLock = SRWLOCK_INIT;
+
+static void AddCensusReservation(CensusSnapshot& snap, uintptr_t allocBase,
+                                 uint64_t reserved, uint64_t committed, DWORD type) {
+    if (reserved == 0) return;
+    char name[48] = {};
+    char category[12] = {};
+
+    if (type == MEM_IMAGE) {
+        lstrcpynA(category, "image", sizeof(category));
+        char path[MAX_PATH];
+        if (GetModuleFileNameA((HMODULE)allocBase, path, MAX_PATH)) {
+            const char* leaf = strrchr(path, '\\');
+            lstrcpynA(name, leaf ? leaf + 1 : path, sizeof(name));
+        } else if (GetMappedFileNameA(GetCurrentProcess(), (LPVOID)allocBase, path, MAX_PATH)) {
+            const char* leaf = strrchr(path, '\\');
+            lstrcpynA(name, leaf ? leaf + 1 : path, sizeof(name));
+        } else {
+            snprintf(name, sizeof(name), "image@0x%08X", (unsigned)allocBase);
+        }
+    } else if (type == MEM_MAPPED) {
+        lstrcpynA(category, "mapped", sizeof(category));
+        char path[MAX_PATH];
+        if (GetMappedFileNameA(GetCurrentProcess(), (LPVOID)allocBase, path, MAX_PATH)) {
+            const char* leaf = strrchr(path, '\\');
+            lstrcpynA(name, (leaf && *(leaf + 1)) ? leaf + 1 : path, sizeof(name));
+        } else {
+            lstrcpynA(name, "mapped section", sizeof(name));
+        }
+    } else { // MEM_PRIVATE
+        lstrcpynA(category, "private", sizeof(category));
+        if (MimallocHighArena::Contains((const void*)allocBase)) {
+            lstrcpynA(name, "this tool's high arena", sizeof(name));
+        } else {
+            bool ours = false;
+            __try { ours = mi_is_in_heap_region((const void*)allocBase); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { ours = false; }
+            if (ours) {
+                lstrcpynA(name, "this tool's allocator (mimalloc)", sizeof(name));
+            } else if (g_live && (allocBase >> 16) < kLiveEntries && g_live[allocBase >> 16].sizeKB > 0) {
+                const LONG s = g_live[allocBase >> 16].slot;
+                if (s >= 0 && s < g_slotCount) {
+                    lstrcpynA(name, g_slots[s].name, sizeof(name));
+                } else {
+                    lstrcpynA(name, "private (unattributed)", sizeof(name));
+                }
+            } else if (allocBase == (uintptr_t)GetProcessHeap()) {
+                lstrcpynA(name, "client default heap", sizeof(name));
+            } else {
+                HANDLE heaps[32];
+                DWORD numHeaps = GetProcessHeaps(32, heaps);
+                bool isHeap = false;
+                for (DWORD i = 0; i < numHeaps; i++) {
+                    if (allocBase == (uintptr_t)heaps[i]) {
+                        isHeap = true;
+                        break;
+                    }
+                }
+                if (isHeap) {
+                    lstrcpynA(name, "process heap", sizeof(name));
+                } else {
+                    lstrcpynA(name, "private (client / other)", sizeof(name));
+                }
+            }
+        }
+    }
+
+    snap.totalReservedBytes += reserved;
+    snap.totalCommittedBytes += committed;
+    snap.occupiedRegionCount++;
+
+    for (uint32_t i = 0; i < snap.entryCount; i++) {
+        if (strcmp(snap.entries[i].name, name) == 0 &&
+            strcmp(snap.entries[i].category, category) == 0) {
+            snap.entries[i].reservedBytes += reserved;
+            snap.entries[i].committedBytes += committed;
+            snap.entries[i].regionCount++;
+            return;
+        }
+    }
+
+    if (snap.entryCount < 256) {
+        CensusRecord& rec = snap.entries[snap.entryCount++];
+        lstrcpynA(rec.name, name, sizeof(rec.name));
+        lstrcpynA(rec.category, category, sizeof(rec.category));
+        rec.reservedBytes = reserved;
+        rec.committedBytes = committed;
+        rec.regionCount = 1;
+    }
+}
+
+static void RunLowHalfCensus(SIZE_T triggerLargestLow) {
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
+
+    CensusSnapshot snap = {};
+    snap.triggerLargestLowMB = (triggerLargestLow + 1024 * 1024 - 1) / (1024 * 1024);
+
+    MEMORY_BASIC_INFORMATION mbi;
+    uintptr_t addr = 0x10000;
+    uintptr_t curAllocBase = 0;
+    uint64_t curReserved = 0;
+    uint64_t curCommitted = 0;
+    DWORD curType = 0;
+
+    while (addr < kLowHalfEnd && VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+        uintptr_t base = (uintptr_t)mbi.BaseAddress;
+        if (base >= kLowHalfEnd) break;
+
+        SIZE_T size = mbi.RegionSize;
+        if (base + size > kLowHalfEnd) size = (SIZE_T)(kLowHalfEnd - base);
+
+        if (mbi.State == MEM_FREE) {
+            snap.totalFreeBytes += size;
+            snap.freeRegionCount++;
+            if (size > snap.largestFreeBlockBytes) snap.largestFreeBlockBytes = size;
+            if (curAllocBase != 0) {
+                AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType);
+                curAllocBase = 0; curReserved = 0; curCommitted = 0; curType = 0;
+            }
+        } else {
+            uintptr_t allocBase = (uintptr_t)mbi.AllocationBase;
+            if (allocBase != curAllocBase) {
+                if (curAllocBase != 0) {
+                    AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType);
+                }
+                curAllocBase = allocBase;
+                curReserved = 0;
+                curCommitted = 0;
+                curType = mbi.Type;
+            }
+            curReserved += size;
+            if (mbi.State == MEM_COMMIT) {
+                curCommitted += size;
+            }
+        }
+
+        uintptr_t next = base + mbi.RegionSize;
+        if (mbi.RegionSize == 0) next += 0x10000;
+        if (next <= addr) break;
+        addr = next;
+    }
+    if (curAllocBase != 0) {
+        AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType);
+    }
+
+    // Sort descending by reservedBytes
+    for (uint32_t i = 1; i < snap.entryCount; i++) {
+        CensusRecord key = snap.entries[i];
+        int j = (int)i - 1;
+        while (j >= 0 && snap.entries[j].reservedBytes < key.reservedBytes) {
+            snap.entries[j + 1] = snap.entries[j];
+            j--;
+        }
+        snap.entries[j + 1] = key;
+    }
+
+    QueryPerformanceCounter(&t1);
+    double walkMs = freq.QuadPart
+                  ? (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)freq.QuadPart
+                  : 0.0;
+
+    snap.timestampTick = GetTickCount();
+    snap.valid = true;
+
+    AcquireSRWLockExclusive(&g_censusLock);
+    g_censusSnapshot = snap;
+    ReleaseSRWLockExclusive(&g_censusLock);
+
+    Log("[HighPlacement] low-half census walk complete (took %.1f ms on monitor thread): "
+        "%.1f MB reserved (%.1f MB committed) in %u region(s), %.1f MB free (largest block %.1f MB)",
+        walkMs, snap.totalReservedBytes / (1024.0 * 1024.0),
+        snap.totalCommittedBytes / (1024.0 * 1024.0),
+        snap.occupiedRegionCount,
+        snap.totalFreeBytes / (1024.0 * 1024.0),
+        snap.largestFreeBlockBytes / (1024.0 * 1024.0));
+}
+
+}  // namespace
+
+void NotifyLowHalfFree(SIZE_T largestLow, SIZE_T totalLow) {
+    (void)totalLow;
+    g_censusLastObservedLow = largestLow;
+    if (g_censusLowestObservedLow == 0 || largestLow < g_censusLowestObservedLow) {
+        g_censusLowestObservedLow = largestLow;
+    }
+
+    if (largestLow < kCensusThreshold) {
+        if (!g_censusBelowThreshold) {
+            g_censusBelowThreshold = true;
+            Log("[HighPlacement] largest free block below 2GB dropped to %.1f MB "
+                "(crossed under 16 MB threshold) - walking low-half census once",
+                largestLow / (1024.0 * 1024.0));
+            RunLowHalfCensus(largestLow);
+        }
+    } else {
+        if (g_censusBelowThreshold) {
+            g_censusBelowThreshold = false;
+            Log("[HighPlacement] largest free block below 2GB recovered to %.1f MB "
+                "(above 16 MB threshold)",
+                largestLow / (1024.0 * 1024.0));
+        }
+    }
+}
+
 void LogStats() {
+    CensusSnapshot snap;
+    AcquireSRWLockShared(&g_censusLock);
+    snap = g_censusSnapshot;
+    ReleaseSRWLockShared(&g_censusLock);
+
+    if (snap.valid) {
+        const DWORD ageSec = (GetTickCount() - snap.timestampTick) / 1000;
+        Log("[HighPlacement] === LOW-HALF ADDRESS SPACE CENSUS (below 2GB) ===");
+        Log("[HighPlacement] Walked once %lu s ago when largest free block dropped to %u MB (threshold 16 MB):",
+            (unsigned long)ageSec, (unsigned)snap.triggerLargestLowMB);
+        Log("[HighPlacement]   Total below 2GB: %.1f MB reserved (%.1f MB committed), %.1f MB free in %u region(s) (largest free block %.1f MB)",
+            snap.totalReservedBytes / (1024.0 * 1024.0),
+            snap.totalCommittedBytes / (1024.0 * 1024.0),
+            snap.totalFreeBytes / (1024.0 * 1024.0),
+            snap.freeRegionCount,
+            snap.largestFreeBlockBytes / (1024.0 * 1024.0));
+        Log("[HighPlacement]   Occupancy by module/mapping (largest first):");
+        const uint32_t maxPrint = 15;
+        uint64_t otherReserved = 0, otherCommitted = 0;
+        uint32_t otherRegions = 0;
+        for (uint32_t i = 0; i < snap.entryCount; i++) {
+            if (i < maxPrint) {
+                Log("[HighPlacement]     %-32s %-8s %7.1f MB reserved (%7.1f MB committed) in %u region(s)",
+                    snap.entries[i].name, snap.entries[i].category,
+                    snap.entries[i].reservedBytes / (1024.0 * 1024.0),
+                    snap.entries[i].committedBytes / (1024.0 * 1024.0),
+                    snap.entries[i].regionCount);
+            } else {
+                otherReserved += snap.entries[i].reservedBytes;
+                otherCommitted += snap.entries[i].committedBytes;
+                otherRegions += snap.entries[i].regionCount;
+            }
+        }
+        if (otherRegions > 0) {
+            Log("[HighPlacement]     %-32s %-8s %7.1f MB reserved (%7.1f MB committed) in %u region(s)",
+                "(other smaller regions)", "-",
+                otherReserved / (1024.0 * 1024.0),
+                otherCommitted / (1024.0 * 1024.0),
+                otherRegions);
+        }
+        Log("[HighPlacement] ==================================================");
+    } else {
+        if (g_censusLastObservedLow > 0) {
+            Log("[HighPlacement] low-half census did not run: largest free block below 2GB has remained above 16 MB (current: %.1f MB, lowest observed: %.1f MB)",
+                g_censusLastObservedLow / (1024.0 * 1024.0),
+                g_censusLowestObservedLow / (1024.0 * 1024.0));
+        } else {
+            Log("[HighPlacement] low-half census did not run: monitor thread has not evaluated free memory yet");
+        }
+    }
+
     const bool census       = Config::g_settings.OptVaCensus;
     const bool placeClient  = Config::g_settings.OptHighPlacementClient;
     const bool placeModules = Config::g_settings.OptHighPlacementModules;
     if (!census && !placeClient && !placeModules) {
-        Log("[HighPlacement] not measured: switched off");
         return;
     }
     if (!g_installed) {
-        Log("[HighPlacement] not active - the reason is at the top of this log");
+        Log("[HighPlacement] allocation hooks not active - the reason is at the top of this log");
         return;
     }
     if (GetTickCount() - g_lastRefreshTick > 60000) RefreshModules();
@@ -706,3 +997,4 @@ void LogStats() {
 }
 
 }  // namespace HighPlacement
+

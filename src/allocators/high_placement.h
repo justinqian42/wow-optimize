@@ -15,6 +15,10 @@ bool Init();
 // it, and the periodic report does when that thread is not running.
 void RefreshModules();
 
+// Called from the monitor thread whenever largest free block below 2GB is checked.
+// When largestLow crosses below 16 MB, triggers a one-off census walk of the low 2GB.
+void NotifyLowHalfFree(SIZE_T largestLow, SIZE_T totalLow);
+
 // Live private reservations by the module that made them. compareWith names a
 // figure the caller has just printed that the below-2GB total should roughly
 // match, or is null when there is none.
