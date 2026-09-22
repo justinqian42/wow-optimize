@@ -773,6 +773,7 @@ namespace WowOptimizeLauncher {
                 { "DBC Fast RLE / Copy Unpack", new SettingItem("UI_Lua", "DbcFastRle", false, null, "Optimizes DBC string and integer array unrolling in sub_479F60 with 16-byte aligned vector copies and precomputed offsets.", true) },
                 { "ARGB Pixel Format Blit Converter (SSE2)", new SettingItem("Graphics_Sound", "PixelFormatBlit", false, null, "Vectorizes 32-bpp ARGB and RGBA pixel format unpacking and color channel conversion in sub_739D80 using SSE2 shuffles.", true) },
                 { "UI Frame Removal Fast Scan", new SettingItem("UI_Lua", "UIFrameRemove", false, null, "Accelerates UI frame removal and parent unlinking in sub_48A6F0 using vectorized 16-byte pointer search and compact memmove.", true) },
+                { "Particle Billboard Quad (sub_97BE80)", new SettingItem("Graphics_Sound", "ParticleQuad", false, null, "Replaces 365 instructions of serialized x87 trigonometry and quad vertex generation in sub_97BE80 (billboard particle vertex calculations, hot in combat profiles) with bit-exact double precision quad generation and branchless AABB updates.", true) },
             };
 
             // Window Setup

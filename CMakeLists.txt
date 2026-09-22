@@ -544,6 +544,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/ui_frame_remove.h
     src/hooks_subsystems/m2_batch_cmp_transparent.cpp
     src/hooks_subsystems/m2_batch_cmp_transparent.h
+    src/simd_math/particle_quad_sse2.cpp
+    src/simd_math/particle_quad_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

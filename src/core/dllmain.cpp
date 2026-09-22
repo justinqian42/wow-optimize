@@ -78,6 +78,7 @@
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
 #include "particle_track_eval_sse2.h"
+#include "particle_quad_sse2.h"
 #include "shader_const_dedup_sse2.h"
 #include "batch_colour_convert.h"
 #include "floor_split_sse2.h"
@@ -5775,6 +5776,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("DbcFastRle::LogStats", DbcFastRle::LogStats());
     STAT_TIME("PixelFormatBlit::LogStats", PixelFormatBlit::LogStats());
     STAT_TIME("UIFrameRemove::LogStats", UIFrameRemove::LogStats());
+    STAT_TIME("ParticleQuad::LogStats", ParticleQuad::LogStats());
     STAT_TIME("FloorSplit::LogStats", FloorSplit::LogStats());
     STAT_TIME("SkyCloudTexels::LogStats", SkyCloudTexels::LogStats());
     STAT_TIME("FrustumAabb::LogStats", FrustumAabb::LogStats());
@@ -8609,6 +8611,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     DbcFastRle::Init();
     PixelFormatBlit::Init();
     UIFrameRemove::Init();
+    ParticleQuad::Init();
 
     Log("--- UnitAura Fast Path ---");
 #if !TEST_DISABLE_UNIT_AURA_FAST
@@ -11710,6 +11713,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             DbcFastRle::Shutdown();
             PixelFormatBlit::Shutdown();
             UIFrameRemove::Shutdown();
+            ParticleQuad::Shutdown();
             LuaVmFast::Shutdown();
             CollisionRayOutcode::Shutdown();
             RayTriangle::Shutdown();

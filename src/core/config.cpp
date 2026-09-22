@@ -225,6 +225,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "PixelFormatBlit", &Settings::OptPixelFormatBlit },
     { "UI_Lua", "UIFrameRemove", &Settings::OptUIFrameRemove },
     { "Graphics_Sound", "M2BatchCmpTransparent", &Settings::OptM2BatchCmpTransparent },
+    { "Graphics_Sound", "ParticleQuad", &Settings::OptParticleQuad },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -835,6 +836,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptPixelFormatBlit      = GetPrivateProfileIntA("Graphics_Sound", "PixelFormatBlit", 0, iniPath.c_str()) != 0;
         g_settings.OptUIFrameRemove        = GetPrivateProfileIntA("UI_Lua", "UIFrameRemove", 0, iniPath.c_str()) != 0;
         g_settings.OptM2BatchCmpTransparent = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpTransparent", 0, iniPath.c_str()) != 0;
+        g_settings.OptParticleQuad         = GetPrivateProfileIntA("Graphics_Sound", "ParticleQuad", 0, iniPath.c_str()) != 0;
     }
 }
 

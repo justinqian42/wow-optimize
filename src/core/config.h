@@ -688,6 +688,7 @@ namespace Config {
         bool OptPixelFormatBlit = false;
         bool OptUIFrameRemove = false;
         bool OptM2BatchCmpTransparent = false;
+        bool OptParticleQuad = false;
     };
 
     extern Settings g_settings;
