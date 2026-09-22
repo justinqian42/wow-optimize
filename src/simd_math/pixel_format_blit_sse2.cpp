@@ -1,3 +1,22 @@
+// ============================================================================
+// Module: pixel_format_blit_sse2.cpp
+//
+// sub_6ABC20, the client's repacker from 32-bit source pixels into a 16-bit
+// surface format by per-channel shifts. It is in every profile collected on
+// 2026-09-19 to 09-21, at 0.93% to 2.21% of executing main-thread time
+// (wow!0x006ABD1F and 0x006ABD21, inside this function).
+//
+// There is no SSE2 here, despite the file name and the commit that added it,
+// which describes "SSE2 128-bit vector repacking using shuffle masks for 4
+// pixels simultaneously". The file contains no vector intrinsic and no inline
+// assembly. What it does is the client's own shifts in scalar C, with one
+// real change: where the output is 16-bit, two pixels are assembled into one
+// 32-bit store instead of two 16-bit ones. Integer shifts leave nothing to
+// round, so the result is exact by construction and the comparison against
+// the client below is a check on the reading of the format, not on precision.
+// The name stays because renaming a file costs its history.
+// ============================================================================
+
 #include "pixel_format_blit_sse2.h"
 #include <cstdint>
 #include <cstring>
@@ -279,7 +298,8 @@ void Init() {
     g_benchId = SelfBench::Register("PixelFormatBlit");
     SamplingProfiler::RegisterSelfSymbol("PixelFormatBlit", (const void*)kTarget);
 
-    Log("[PixelFormatBlit] ACTIVE on pixel format repacker (sub_6ABC20 @ 0x%08X, %u learn calls, 1/256 sampling)",
+    Log("[PixelFormatBlit] ACTIVE on pixel format repacker (sub_6ABC20 @ 0x%08X, %u learn calls, 1/256 sampling). "
+        "Scalar shifts with two 16-bit pixels per 32-bit store - not SSE2, whatever the file is called.",
         (uintptr_t)kTarget, kLearnCalls);
 
     if (AbTest::IsSubject("PixelFormatBlit", &g_abSubject)) {

@@ -1,3 +1,16 @@
+// ============================================================================
+// Module: ui_strata_compact_sse2.cpp
+//
+// sub_495060, CFrameStrataManager::CompactLevels. In the 2026-09-21 session it
+// was 1.88% of executing time at wow!0x0049516E, from a window of only 183
+// samples, so the cost is real but thinly measured.
+//
+// The _sse2 in the name does not describe the code: there is no vector
+// instruction in this file. The change is algorithmic - an early exit when
+// every strata level is already occupied, and a single-pass remap table in
+// place of the client's nested rescans - and it needs no vector width.
+// ============================================================================
+
 #include "ui_strata_compact_sse2.h"
 #include <cstdint>
 #include <cstring>
