@@ -231,6 +231,9 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2SkinProjection", &Settings::OptM2SkinProjection },
     { "General", "SStrHashFast", &Settings::OptSStrHashFast },
     { "Graphics_Sound", "ReverbClearFast", &Settings::OptReverbClearFast },
+    { "UI_Lua", "UILayoutRectFast", &Settings::OptUILayoutRectFast },
+    { "UI_Lua", "UIStrataOverlapFast", &Settings::OptUIStrataOverlapFast },
+    { "Graphics_Sound", "ParticleIntegrateFast", &Settings::OptParticleIntegrateFast },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -849,6 +852,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptReverbClearFast      = GetPrivateProfileIntA("Graphics_Sound", "ReverbClearFast", 0, iniPath.c_str()) != 0;
         g_settings.OptUILayoutRectFast     = GetPrivateProfileIntA("UI_Lua", "UILayoutRectFast", 0, iniPath.c_str()) != 0;
         g_settings.OptUIStrataOverlapFast  = GetPrivateProfileIntA("UI_Lua", "UIStrataOverlapFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptParticleIntegrateFast = GetPrivateProfileIntA("Graphics_Sound", "ParticleIntegrateFast", 0, iniPath.c_str()) != 0;
     }
 }
 
