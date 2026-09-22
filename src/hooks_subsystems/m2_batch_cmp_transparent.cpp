@@ -33,13 +33,14 @@
 
 #include "m2_batch_cmp_transparent.h"
 #include "MinHook.h"
+// All three helpers below are static inline in version.h. Declaring them by
+// hand instead of including it gave them C++ linkage against definitions that
+// have none, and the link failed the moment anything referenced this module.
+#include "version.h"
 #include "config.h"
 #include "ab_test.h"
 
 extern "C" void Log(const char* fmt, ...);
-bool WowOpt_ClientPatchAllowed(const void* addr);
-MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
-MH_STATUS WO_EnableHook(void* target);
 
 namespace M2BatchCmpTransparent {
 
