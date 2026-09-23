@@ -703,6 +703,7 @@ namespace Config {
         bool OptCollisionFaceClip = false;
         bool OptCollisionPolyCopy = false;
         bool OptMat3RotAxis = false;
+        bool OptM2MeshPickFast = false;
     };
 
     extern Settings g_settings;

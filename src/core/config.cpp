@@ -240,6 +240,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "CollisionFaceClip", &Settings::OptCollisionFaceClip },
     { "Graphics_Sound", "CollisionPolyCopy", &Settings::OptCollisionPolyCopy },
     { "Graphics_Sound", "Mat3RotAxis", &Settings::OptMat3RotAxis },
+    { "Graphics_Sound", "M2MeshPickFast", &Settings::OptM2MeshPickFast },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -865,6 +866,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptCollisionFaceClip     = GetPrivateProfileIntA("Graphics_Sound", "CollisionFaceClip", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionPolyCopy     = GetPrivateProfileIntA("Graphics_Sound", "CollisionPolyCopy", 0, iniPath.c_str()) != 0;
         g_settings.OptMat3RotAxis           = GetPrivateProfileIntA("Graphics_Sound", "Mat3RotAxis", 0, iniPath.c_str()) != 0;
+        g_settings.OptM2MeshPickFast        = GetPrivateProfileIntA("Graphics_Sound", "M2MeshPickFast", 0, iniPath.c_str()) != 0;
     }
 }
 
