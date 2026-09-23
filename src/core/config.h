@@ -708,6 +708,7 @@ namespace Config {
         bool OptCollisionTriTest = false;
         bool OptCollisionBoxTri = false;
         bool OptM2RayHitSort = false;
+        bool OptTerrainPointOutcode = false;
     };
 
     extern Settings g_settings;
