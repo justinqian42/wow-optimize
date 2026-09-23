@@ -236,6 +236,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "ParticleIntegrateFast", &Settings::OptParticleIntegrateFast },
     { "Graphics_Sound", "FastSinCos", &Settings::OptFastSinCos },
     { "Graphics_Sound", "M2BatchCmpTop", &Settings::OptM2BatchCmpTop },
+    { "Graphics_Sound", "ParticleEmitterActive", &Settings::OptParticleEmitterActive },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -857,6 +858,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptParticleIntegrateFast = GetPrivateProfileIntA("Graphics_Sound", "ParticleIntegrateFast", 0, iniPath.c_str()) != 0;
         g_settings.OptFastSinCos            = GetPrivateProfileIntA("Graphics_Sound", "FastSinCos", 0, iniPath.c_str()) != 0;
         g_settings.OptM2BatchCmpTop         = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpTop", 0, iniPath.c_str()) != 0;
+        g_settings.OptParticleEmitterActive = GetPrivateProfileIntA("Graphics_Sound", "ParticleEmitterActive", 0, iniPath.c_str()) != 0;
     }
 }
 

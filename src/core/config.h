@@ -699,6 +699,7 @@ namespace Config {
         bool OptParticleIntegrateFast = false;
         bool OptFastSinCos = false;
         bool OptM2BatchCmpTop = false;
+        bool OptParticleEmitterActive = false;
     };
 
     extern Settings g_settings;

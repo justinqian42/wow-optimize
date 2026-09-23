@@ -566,6 +566,8 @@ add_library(wow_optimize SHARED
     src/simd_math/sincos_fast_sse2.h
     src/hooks_subsystems/m2_batch_cmp_top.cpp
     src/hooks_subsystems/m2_batch_cmp_top.h
+    src/hooks_subsystems/particle_emitter_active.cpp
+    src/hooks_subsystems/particle_emitter_active.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
