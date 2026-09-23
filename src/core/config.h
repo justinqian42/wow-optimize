@@ -700,6 +700,7 @@ namespace Config {
         bool OptFastSinCos = false;
         bool OptM2BatchCmpTop = false;
         bool OptParticleEmitterActive = false;
+        bool OptCollisionFaceClip = false;
     };
 
     extern Settings g_settings;
