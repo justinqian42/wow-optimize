@@ -586,6 +586,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/m2_ray_hit_sort.h
     src/simd_math/terrain_point_outcode_sse2.cpp
     src/simd_math/terrain_point_outcode_sse2.h
+    src/simd_math/collision_bsp_traverse_sse2.cpp
+    src/simd_math/collision_bsp_traverse_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
