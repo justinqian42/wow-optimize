@@ -576,6 +576,8 @@ add_library(wow_optimize SHARED
     src/simd_math/mat3_rot_axis_sse2.h
     src/simd_math/m2_mesh_pick_fast.cpp
     src/simd_math/m2_mesh_pick_fast.h
+    src/simd_math/m2_collision_outcode_sse2.cpp
+    src/simd_math/m2_collision_outcode_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

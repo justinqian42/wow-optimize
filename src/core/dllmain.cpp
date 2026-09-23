@@ -89,6 +89,7 @@
 #include "collision_poly_copy_sse2.h"
 #include "mat3_rot_axis_sse2.h"
 #include "m2_mesh_pick_fast.h"
+#include "m2_collision_outcode_sse2.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5787,6 +5788,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionPolyCopy::LogStats", CollisionPolyCopy::LogStats());
     STAT_TIME("Mat3RotAxis::LogStats", Mat3RotAxis::LogStats());
     STAT_TIME("M2MeshPickFast::LogStats", M2MeshPickFast::LogStats());
+    STAT_TIME("M2CollisionOutcode::LogStats", M2CollisionOutcode::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8633,6 +8635,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     CollisionPolyCopy::Init();
     Mat3RotAxis::Init();
     M2MeshPickFast::Init();
+    M2CollisionOutcode::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();
@@ -11754,6 +11757,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             CollisionPolyCopy::Shutdown();
             Mat3RotAxis::Shutdown();
             M2MeshPickFast::Shutdown();
+            M2CollisionOutcode::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();
