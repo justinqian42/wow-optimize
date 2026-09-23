@@ -592,6 +592,8 @@ add_library(wow_optimize SHARED
     src/simd_math/scene_light_grid_sse2.h
     src/simd_math/collision_swept_bsp_sse2.cpp
     src/simd_math/collision_swept_bsp_sse2.h
+    src/simd_math/collision_frustum_bsp_sse2.cpp
+    src/simd_math/collision_frustum_bsp_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

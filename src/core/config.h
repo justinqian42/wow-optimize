@@ -712,6 +712,7 @@ namespace Config {
         bool OptCollisionBspTraverse = false;
         bool OptSceneLightGrid = false;
         bool OptCollisionSweptBsp = false;
+        bool OptCollisionFrustumBsp = false;
     };
 
     extern Settings g_settings;
