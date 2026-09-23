@@ -702,6 +702,7 @@ namespace Config {
         bool OptParticleEmitterActive = false;
         bool OptCollisionFaceClip = false;
         bool OptCollisionPolyCopy = false;
+        bool OptMat3RotAxis = false;
     };
 
     extern Settings g_settings;

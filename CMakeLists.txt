@@ -572,6 +572,8 @@ add_library(wow_optimize SHARED
     src/simd_math/collision_face_clip_sse2.h
     src/simd_math/collision_poly_copy_sse2.cpp
     src/simd_math/collision_poly_copy_sse2.h
+    src/simd_math/mat3_rot_axis_sse2.cpp
+    src/simd_math/mat3_rot_axis_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

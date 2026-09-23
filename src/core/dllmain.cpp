@@ -87,6 +87,7 @@
 #include "particle_emitter_active.h"
 #include "collision_face_clip_sse2.h"
 #include "collision_poly_copy_sse2.h"
+#include "mat3_rot_axis_sse2.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5783,6 +5784,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("ParticleEmitterActive::LogStats", ParticleEmitterActive::LogStats());
     STAT_TIME("CollisionFaceClip::LogStats", CollisionFaceClip::LogStats());
     STAT_TIME("CollisionPolyCopy::LogStats", CollisionPolyCopy::LogStats());
+    STAT_TIME("Mat3RotAxis::LogStats", Mat3RotAxis::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8627,6 +8629,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     ParticleEmitterActive::Init();
     CollisionFaceClip::Init();
     CollisionPolyCopy::Init();
+    Mat3RotAxis::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();
@@ -11746,6 +11749,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             ParticleEmitterActive::Shutdown();
             CollisionFaceClip::Shutdown();
             CollisionPolyCopy::Shutdown();
+            Mat3RotAxis::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();
