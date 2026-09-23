@@ -247,6 +247,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2RayHitSort", &Settings::OptM2RayHitSort },
     { "Graphics_Sound", "TerrainPointOutcode", &Settings::OptTerrainPointOutcode },
     { "Graphics_Sound", "CollisionBspTraverse", &Settings::OptCollisionBspTraverse },
+    { "Graphics_Sound", "SceneLightGrid", &Settings::OptSceneLightGrid },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -879,6 +880,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2RayHitSort          = GetPrivateProfileIntA("Graphics_Sound", "M2RayHitSort", 0, iniPath.c_str()) != 0;
         g_settings.OptTerrainPointOutcode   = GetPrivateProfileIntA("Graphics_Sound", "TerrainPointOutcode", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionBspTraverse  = GetPrivateProfileIntA("Graphics_Sound", "CollisionBspTraverse", 0, iniPath.c_str()) != 0;
+        g_settings.OptSceneLightGrid        = GetPrivateProfileIntA("Graphics_Sound", "SceneLightGrid", 0, iniPath.c_str()) != 0;
     }
 }
 

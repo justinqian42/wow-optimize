@@ -710,6 +710,7 @@ namespace Config {
         bool OptM2RayHitSort = false;
         bool OptTerrainPointOutcode = false;
         bool OptCollisionBspTraverse = false;
+        bool OptSceneLightGrid = false;
     };
 
     extern Settings g_settings;
