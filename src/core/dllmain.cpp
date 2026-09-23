@@ -83,6 +83,7 @@
 #include "ui_strata_overlap_fast.h"
 #include "particle_integrate_fast.h"
 #include "sincos_fast_sse2.h"
+#include "m2_batch_cmp_top.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5775,6 +5776,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("UIStrataOverlapFast::LogStats", UIStrataOverlapFast::LogStats());
     STAT_TIME("ParticleIntegrateFast::LogStats", ParticleIntegrateFast::LogStats());
     STAT_TIME("FastSinCos::LogStats", FastSinCos::LogStats());
+    STAT_TIME("M2BatchCmpTop::LogStats", M2BatchCmpTop::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8615,6 +8617,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     UIStrataOverlapFast::Init();
     ParticleIntegrateFast::Init();
     FastSinCos::Init();
+    M2BatchCmpTop::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();
@@ -11730,6 +11733,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             UIStrataOverlapFast::Shutdown();
             ParticleIntegrateFast::Shutdown();
             FastSinCos::Shutdown();
+            M2BatchCmpTop::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

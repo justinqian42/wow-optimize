@@ -698,6 +698,7 @@ namespace Config {
         bool OptUIStrataOverlapFast = false;
         bool OptParticleIntegrateFast = false;
         bool OptFastSinCos = false;
+        bool OptM2BatchCmpTop = false;
     };
 
     extern Settings g_settings;
