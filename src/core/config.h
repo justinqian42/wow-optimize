@@ -711,6 +711,7 @@ namespace Config {
         bool OptTerrainPointOutcode = false;
         bool OptCollisionBspTraverse = false;
         bool OptSceneLightGrid = false;
+        bool OptCollisionSweptBsp = false;
     };
 
     extern Settings g_settings;

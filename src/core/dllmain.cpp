@@ -96,6 +96,7 @@
 #include "terrain_point_outcode_sse2.h"
 #include "collision_bsp_traverse_sse2.h"
 #include "scene_light_grid_sse2.h"
+#include "collision_swept_bsp_sse2.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5801,6 +5802,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("TerrainPointOutcode::LogStats", TerrainPointOutcode::LogStats());
     STAT_TIME("CollisionBspTraverse::LogStats", CollisionBspTraverse::LogStats());
     STAT_TIME("SceneLightGrid::LogStats", SceneLightGrid::LogStats());
+    STAT_TIME("CollisionSweptBsp::LogStats", CollisionSweptBsp::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8654,6 +8656,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     TerrainPointOutcode::Init();
     CollisionBspTraverse::Init();
     SceneLightGrid::Init();
+    CollisionSweptBsp::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();
@@ -11782,6 +11785,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             TerrainPointOutcode::Shutdown();
             CollisionBspTraverse::Shutdown();
             SceneLightGrid::Shutdown();
+            CollisionSweptBsp::Shutdown();
             CollisionPolyClip::Shutdown();
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

@@ -248,6 +248,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "TerrainPointOutcode", &Settings::OptTerrainPointOutcode },
     { "Graphics_Sound", "CollisionBspTraverse", &Settings::OptCollisionBspTraverse },
     { "Graphics_Sound", "SceneLightGrid", &Settings::OptSceneLightGrid },
+    { "Graphics_Sound", "CollisionSweptBsp", &Settings::OptCollisionSweptBsp },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -881,6 +882,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptTerrainPointOutcode   = GetPrivateProfileIntA("Graphics_Sound", "TerrainPointOutcode", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionBspTraverse  = GetPrivateProfileIntA("Graphics_Sound", "CollisionBspTraverse", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneLightGrid        = GetPrivateProfileIntA("Graphics_Sound", "SceneLightGrid", 0, iniPath.c_str()) != 0;
+        g_settings.OptCollisionSweptBsp     = GetPrivateProfileIntA("Graphics_Sound", "CollisionSweptBsp", 0, iniPath.c_str()) != 0;
     }
 }
 
