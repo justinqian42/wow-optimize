@@ -243,6 +243,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2MeshPickFast", &Settings::OptM2MeshPickFast },
     { "Graphics_Sound", "M2CollisionOutcode", &Settings::OptM2CollisionOutcode },
     { "Graphics_Sound", "CollisionTriTest", &Settings::OptCollisionTriTest },
+    { "Graphics_Sound", "CollisionBoxTri", &Settings::OptCollisionBoxTri },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -871,6 +872,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2MeshPickFast        = GetPrivateProfileIntA("Graphics_Sound", "M2MeshPickFast", 0, iniPath.c_str()) != 0;
         g_settings.OptM2CollisionOutcode    = GetPrivateProfileIntA("Graphics_Sound", "M2CollisionOutcode", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionTriTest      = GetPrivateProfileIntA("Graphics_Sound", "CollisionTriTest", 0, iniPath.c_str()) != 0;
+        g_settings.OptCollisionBoxTri       = GetPrivateProfileIntA("Graphics_Sound", "CollisionBoxTri", 0, iniPath.c_str()) != 0;
     }
 }
 

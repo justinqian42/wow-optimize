@@ -580,6 +580,8 @@ add_library(wow_optimize SHARED
     src/simd_math/m2_collision_outcode_sse2.h
     src/simd_math/collision_tri_test.cpp
     src/simd_math/collision_tri_test.h
+    src/simd_math/collision_box_tri.cpp
+    src/simd_math/collision_box_tri.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

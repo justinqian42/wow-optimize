@@ -706,6 +706,7 @@ namespace Config {
         bool OptM2MeshPickFast = false;
         bool OptM2CollisionOutcode = false;
         bool OptCollisionTriTest = false;
+        bool OptCollisionBoxTri = false;
     };
 
     extern Settings g_settings;
