@@ -701,6 +701,7 @@ namespace Config {
         bool OptM2BatchCmpTop = false;
         bool OptParticleEmitterActive = false;
         bool OptCollisionFaceClip = false;
+        bool OptCollisionPolyCopy = false;
     };
 
     extern Settings g_settings;
