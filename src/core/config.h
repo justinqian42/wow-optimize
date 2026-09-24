@@ -712,6 +712,7 @@ namespace Config {
         bool OptCollisionBspTraverse = false;
         bool OptSceneLightGrid = false;
         bool OptCollisionSweptBsp = false;
+        bool OptTerrainChunkSort = false;
         bool OptCollisionFrustumBsp = false;
         bool OptCollisionSweptTri = false;
         bool OptSceneEntityCollect = false;

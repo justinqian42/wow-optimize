@@ -97,6 +97,7 @@
 #include "collision_bsp_traverse_sse2.h"
 #include "scene_light_grid_sse2.h"
 #include "collision_swept_bsp_sse2.h"
+#include "terrain_chunk_sort_sse2.h"
 #include "collision_frustum_bsp_sse2.h"
 #include "collision_swept_tri_sse2.h"
 #include "scene_entity_collect_fast.h"
@@ -5811,6 +5812,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionBspTraverse::LogStats", CollisionBspTraverse::LogStats());
     STAT_TIME("SceneLightGrid::LogStats", SceneLightGrid::LogStats());
     STAT_TIME("CollisionSweptBsp::LogStats", CollisionSweptBsp::LogStats());
+    STAT_TIME("TerrainChunkSort::LogStats", TerrainChunkSort::LogStats());
     STAT_TIME("CollisionFrustumBsp::LogStats", CollisionFrustumBsp::LogStats());
     STAT_TIME("CollisionSweptTri::LogStats", CollisionSweptTri::LogStats());
     STAT_TIME("SceneEntityCollect::LogStats", SceneEntityCollect::LogStats());

@@ -249,6 +249,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "CollisionBspTraverse", &Settings::OptCollisionBspTraverse },
     { "Graphics_Sound", "SceneLightGrid", &Settings::OptSceneLightGrid },
     { "Graphics_Sound", "CollisionSweptBsp", &Settings::OptCollisionSweptBsp },
+    { "Graphics_Sound", "TerrainChunkSort", &Settings::OptTerrainChunkSort },
     { "Graphics_Sound", "CollisionFrustumBsp", &Settings::OptCollisionFrustumBsp },
     { "Graphics_Sound", "CollisionSweptTri", &Settings::OptCollisionSweptTri },
     { "Graphics_Sound", "SceneEntityCollect", &Settings::OptSceneEntityCollect },
@@ -891,6 +892,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptCollisionBspTraverse  = GetPrivateProfileIntA("Graphics_Sound", "CollisionBspTraverse", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneLightGrid        = GetPrivateProfileIntA("Graphics_Sound", "SceneLightGrid", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionSweptBsp     = GetPrivateProfileIntA("Graphics_Sound", "CollisionSweptBsp", 0, iniPath.c_str()) != 0;
+        g_settings.OptTerrainChunkSort      = GetPrivateProfileIntA("Graphics_Sound", "TerrainChunkSort", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionFrustumBsp   = GetPrivateProfileIntA("Graphics_Sound", "CollisionFrustumBsp", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionSweptTri     = GetPrivateProfileIntA("Graphics_Sound", "CollisionSweptTri", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneEntityCollect    = GetPrivateProfileIntA("Graphics_Sound", "SceneEntityCollect", 0, iniPath.c_str()) != 0;
