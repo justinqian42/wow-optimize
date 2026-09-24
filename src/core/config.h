@@ -717,6 +717,7 @@ namespace Config {
         bool OptSceneEntityCollect = false;
         bool OptM2BatchCmpSkin = false;
         bool OptCollisionBspLeaf = false;
+        bool OptCollisionSweptLeaf = false;
     };
 
     extern Settings g_settings;
