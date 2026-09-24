@@ -606,6 +606,8 @@ add_library(wow_optimize SHARED
     src/simd_math/collision_swept_leaf_sse2.h
     src/simd_math/collision_segment_bsp_sse2.cpp
     src/simd_math/collision_segment_bsp_sse2.h
+    src/simd_math/collision_segment_leaf_sse2.cpp
+    src/simd_math/collision_segment_leaf_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE

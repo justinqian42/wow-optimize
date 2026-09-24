@@ -104,6 +104,7 @@
 #include "collision_bsp_leaf_sse2.h"
 #include "collision_swept_leaf_sse2.h"
 #include "collision_segment_bsp_sse2.h"
+#include "collision_segment_leaf_sse2.h"
 #include "collision_poly_clip_sse2.h"
 #include "sky_texture_reuse.h"
 #include "sky_cloud_texels.h"
@@ -5817,6 +5818,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("CollisionBspLeaf::LogStats", CollisionBspLeaf::LogStats());
     STAT_TIME("CollisionSweptLeaf::LogStats", CollisionSweptLeaf::LogStats());
     STAT_TIME("CollisionSegmentBsp::LogStats", CollisionSegmentBsp::LogStats());
+    STAT_TIME("CollisionSegmentLeaf::LogStats", CollisionSegmentLeaf::LogStats());
     STAT_TIME("CollisionPolyClip::LogStats", CollisionPolyClip::LogStats());
     STAT_TIME("SkyTextureReuse::LogStats", SkyTextureReuse::LogStats());
     STAT_TIME("WorldVisTraverse::LogStats", WorldVisTraverse::LogStats());
@@ -8678,6 +8680,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     CollisionBspLeaf::Init();
     CollisionSweptLeaf::Init();
     CollisionSegmentBsp::Init();
+    CollisionSegmentLeaf::Init();
     CollisionPolyClip::Init();
     SkyTextureReuse::Init();
     WorldVisTraverse::Init();

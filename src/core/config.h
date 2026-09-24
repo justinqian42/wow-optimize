@@ -719,6 +719,7 @@ namespace Config {
         bool OptCollisionBspLeaf = false;
         bool OptCollisionSweptLeaf = false;
         bool OptCollisionSegmentBsp = false;
+        bool OptCollisionSegmentLeaf = false;
     };
 
     extern Settings g_settings;
