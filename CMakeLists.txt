@@ -600,6 +600,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/scene_entity_collect_fast.h
     src/hooks_subsystems/m2_batch_cmp_skin.cpp
     src/hooks_subsystems/m2_batch_cmp_skin.h
+    src/simd_math/collision_bsp_leaf_sse2.cpp
+    src/simd_math/collision_bsp_leaf_sse2.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
