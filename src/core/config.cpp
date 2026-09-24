@@ -252,6 +252,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "CollisionFrustumBsp", &Settings::OptCollisionFrustumBsp },
     { "Graphics_Sound", "CollisionSweptTri", &Settings::OptCollisionSweptTri },
     { "Graphics_Sound", "SceneEntityCollect", &Settings::OptSceneEntityCollect },
+    { "Graphics_Sound", "M2BatchCmpSkin", &Settings::OptM2BatchCmpSkin },
 };
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
@@ -889,6 +890,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptCollisionFrustumBsp   = GetPrivateProfileIntA("Graphics_Sound", "CollisionFrustumBsp", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionSweptTri     = GetPrivateProfileIntA("Graphics_Sound", "CollisionSweptTri", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneEntityCollect    = GetPrivateProfileIntA("Graphics_Sound", "SceneEntityCollect", 0, iniPath.c_str()) != 0;
+        g_settings.OptM2BatchCmpSkin        = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpSkin", 0, iniPath.c_str()) != 0;
     }
 }
 
