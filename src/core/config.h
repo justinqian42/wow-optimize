@@ -714,6 +714,7 @@ namespace Config {
         bool OptCollisionSweptBsp = false;
         bool OptCollisionFrustumBsp = false;
         bool OptCollisionSweptTri = false;
+        bool OptSceneEntityCollect = false;
     };
 
     extern Settings g_settings;

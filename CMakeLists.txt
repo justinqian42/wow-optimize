@@ -596,6 +596,8 @@ add_library(wow_optimize SHARED
     src/simd_math/collision_frustum_bsp_sse2.h
     src/simd_math/collision_swept_tri_sse2.cpp
     src/simd_math/collision_swept_tri_sse2.h
+    src/hooks_subsystems/scene_entity_collect_fast.cpp
+    src/hooks_subsystems/scene_entity_collect_fast.h
 )
 
 target_link_libraries(wow_optimize PRIVATE
