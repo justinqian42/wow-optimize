@@ -718,6 +718,7 @@ namespace Config {
         bool OptM2BatchCmpSkin = false;
         bool OptCollisionBspLeaf = false;
         bool OptCollisionSweptLeaf = false;
+        bool OptCollisionSegmentBsp = false;
     };
 
     extern Settings g_settings;
