@@ -39,7 +39,7 @@ static volatile long g_logged = 0;
 
 static void LogCrashAverted(uint32_t* a2, void* retAddr, const char* reason) {
     if (InterlockedCompareExchange(&g_logged, 1, 0) == 0) {
-        Log("[GetTableSafety] ONE-SHOT DIAGNOSTIC: %s! TValue=0x%08X, RetAddr=%p", reason, a2, retAddr);
+        Log("[GetTableSafety] ONE-SHOT DIAGNOSTIC: %s! TValue=0x%08X, RetAddr=%p", reason, (unsigned)(uintptr_t)a2, retAddr);
     }
 }
 

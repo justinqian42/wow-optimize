@@ -257,7 +257,7 @@ void Shutdown() {
 
 void LogStats() {
     if (!g_active && g_calls == 0) return;
-    Log("[ParticleIntegrate] calls=%llu (armed=%llu, verified=%llu, control=%lu) mismatches=%lu%s",
+    Log("[ParticleIntegrate] calls=%llu (armed=%llu, verified=%lu, control=%lu) mismatches=%lu%s",
         g_calls, g_armed, g_verified, g_control, g_mismatch,
         g_dead ? " [RETIRED]" : "");
 }
