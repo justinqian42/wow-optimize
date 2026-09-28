@@ -71,7 +71,7 @@ static MH_STATUS WowOpt_CreateHookGuarded(void* target, void* detour, void** ori
 // Detour for CSimpleFrame::OnUpdate (0x00490770 / UIFrame_OnUpdateTree)
 // Hot per-frame callback. NO __try here (preserves /GS omitted and zero SEH overhead).
 int __fastcall Hook_SimpleFrame_OnUpdate(void* this_ptr, void* /*edx*/, float elapsed) {
-    if (g_retired || g_abSubject) {
+    if (g_retired || (g_abSubject && AbTest::StandAside())) {
         return orig_SimpleFrameOnUpdate(this_ptr, elapsed);
     }
 
@@ -145,7 +145,7 @@ int __fastcall Hook_SimpleFrame_OnUpdate(void* this_ptr, void* /*edx*/, float el
 // Detour for CFrameStrataManager::OnUpdate (0x00495320)
 // Hot per-frame callback. NO __try here.
 void* __fastcall Hook_FrameStrataManager_OnUpdate(void* this_ptr, void* /*edx*/, float elapsed) {
-    if (g_retired || g_abSubject) {
+    if (g_retired || (g_abSubject && AbTest::StandAside())) {
         return orig_StrataOnUpdate(this_ptr, elapsed);
     }
 
@@ -286,7 +286,7 @@ bool Init() {
     Log("UIStrataOpt: ACTIVE on CFrameStrataManager::OnUpdate (0x%08X) and CSimpleFrame::OnUpdate (0x%08X).",
         kStrataOnUpdateAddr, kSimpleFrameOnUpdateAddr);
     if (g_abSubject) {
-        Log("UIStrataOpt: under A/B test: forwarding to original for baseline comparison.");
+        Log("UIStrataOpt: under A/B test: its OFF stints forward to the original.");
     }
     return true;
 }

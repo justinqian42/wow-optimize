@@ -79,7 +79,7 @@ static ParticleIntegrate_fn g_orig_ParticleIntegrate = nullptr;
 
 static bool g_active = false;
 static bool g_dead   = false;
-static bool g_abSubject = true;
+static bool g_abSubject = false;
 
 static unsigned long long g_calls    = 0;
 static unsigned long long g_armed    = 0;
@@ -185,7 +185,7 @@ __declspec(safebuffers) static BOOL __fastcall Hook_ParticleIntegrate(
         return g_orig_ParticleIntegrate(this_ptr, dummy_edx, p, dt);
     }
 
-    if (!g_abSubject) {
+    if (g_abSubject && AbTest::StandAside()) {
         g_control++;
         return g_orig_ParticleIntegrate(this_ptr, dummy_edx, p, dt);
     }

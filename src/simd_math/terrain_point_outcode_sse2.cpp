@@ -118,7 +118,7 @@ static int __cdecl Hook_TerrainPointOutcode(const float* box, const float* pt) {
         return g_orig(box, pt);
     }
 
-    if (g_abSubject) {
+    if (g_abSubject && AbTest::StandAside()) {
         ++g_controlCalls;
         return g_orig(box, pt);
     }
@@ -249,7 +249,7 @@ bool Init() {
 
     Log("[TerrainPointOutcode] ACTIVE on sub_7A61D0 (terrain vertex 3D Cohen-Sutherland outcode, 96 bytes, 128-bit SSE2).");
     if (g_abSubject) {
-        Log("[TerrainPointOutcode]   under A/B test: the control half runs the client's original function.");
+        Log("[TerrainPointOutcode]   under A/B test: its OFF stints run the client's original function.");
     }
     return true;
 }

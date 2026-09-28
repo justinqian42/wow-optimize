@@ -69,7 +69,7 @@ static SinCos_fn g_orig_SinCos = nullptr;
 
 static bool g_active = false;
 static bool g_dead   = false;
-static bool g_abSubject = true;
+static bool g_abSubject = false;
 
 static unsigned long long g_calls    = 0;
 static unsigned long long g_armed    = 0;
@@ -132,7 +132,7 @@ __declspec(safebuffers) static int __cdecl Hook_SinCos(float angle, float* outSi
         return g_orig_SinCos(angle, outSin, outCos);
     }
 
-    if (!g_abSubject) {
+    if (g_abSubject && AbTest::StandAside()) {
         g_control++;
         return g_orig_SinCos(angle, outSin, outCos);
     }

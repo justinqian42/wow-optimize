@@ -83,7 +83,7 @@ unsigned char g_saved[kPatchLen];
 uintptr_t g_rejoin = kRejoin;
 
 static bool g_dead   = false;
-static bool g_abSubject = true;
+static bool g_abSubject = false;
 
 static unsigned long long g_calls    = 0;
 static unsigned long long g_armed    = 0;
@@ -320,7 +320,7 @@ __declspec(safebuffers) static void __cdecl ProcessVertexOutcode(uintptr_t ebp_v
         return;
     }
 
-    if (!g_abSubject) {
+    if (g_abSubject && AbTest::StandAside()) {
         g_control++;
         Reference_BatchVertexOutcode(vertex_count, src_vertices, matrix, box, dst_vertices, dst_outcodes);
         return;
