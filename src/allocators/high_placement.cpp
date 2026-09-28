@@ -66,6 +66,7 @@
 #endif
 #include <windows.h>
 #include <psapi.h>
+#include <tlhelp32.h>
 #include <intrin.h>
 #include <cstdint>
 #include <cstring>
@@ -680,6 +681,31 @@ struct CensusRecord {
     uint32_t      regionCount;
 };
 
+// Free space by the size of the hole it sits in. Five classes, the same
+// boundaries the private reservations are split on below.
+static constexpr int kSizeClasses = 5;
+static const char* const kSizeClassName[kSizeClasses] = {
+    "64 KB or less", "64 KB - 1 MB", "1 - 4 MB", "4 - 16 MB", "over 16 MB"
+};
+
+static int SizeClass(uint64_t bytes) {
+    if (bytes <= 64ull * 1024) return 0;
+    if (bytes <= 1024ull * 1024) return 1;
+    if (bytes <= 4ull * 1024 * 1024) return 2;
+    if (bytes <= 16ull * 1024 * 1024) return 3;
+    return 4;
+}
+
+// One of the largest free holes, and the reservations either side of it.
+// Those two are what keep it from being part of something bigger.
+struct CensusHole {
+    uintptr_t     base;
+    uint64_t      bytes;
+    char          below[48];
+    char          above[48];
+};
+static constexpr int kHolesKept = 8;
+
 struct CensusSnapshot {
     bool          valid;
     DWORD         timestampTick;
@@ -692,6 +718,17 @@ struct CensusSnapshot {
     uint32_t      occupiedRegionCount;
     uint32_t      entryCount;
     CensusRecord  entries[256];
+
+    uint32_t      freeClassCount[kSizeClasses];
+    uint64_t      freeClassBytes[kSizeClasses];
+    CensusHole    holes[kHolesKept];
+    uint32_t      holeCount;
+
+    // How the thread stacks were found, or why they were not. Zero stacks
+    // with no reason would read as "none in the low half", which is not
+    // what a failed enumeration means.
+    uint32_t      stacksFound;
+    char          stacksWhyNot[64];
 };
 
 static CensusSnapshot g_censusSnapshot = {};
@@ -700,52 +737,134 @@ static SIZE_T g_censusLastObservedLow = 0;
 static SIZE_T g_censusLowestObservedLow = 0;
 static SRWLOCK g_censusLock = SRWLOCK_INIT;
 
-static void AddCensusReservation(CensusSnapshot& snap, uintptr_t allocBase,
-                                 uint64_t reserved, uint64_t committed, DWORD type) {
-    if (reserved == 0) return;
-    char name[48] = {};
-    char category[12] = {};
+// The reservation base of every thread stack in the process.
+//
+// Each thread reserves its stack in the low half, one reservation per thread,
+// and until now every one of them went into the unattributed private bucket.
+// A thread's stack limit is in its TEB, whose first member on x86 is the
+// documented NT_TIB; the reservation that contains that limit is the stack.
+// Everything here only reads - no thread is suspended and no lock is taken.
+struct StackSet {
+    uintptr_t base[1024];
+    uint32_t  count;
+};
+
+typedef LONG (NTAPI* NtQueryInformationThread_fn)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+
+struct ThreadBasicInfo {           // THREAD_BASIC_INFORMATION, class 0
+    LONG      ExitStatus;
+    PVOID     TebBaseAddress;
+    HANDLE    UniqueProcess;
+    HANDLE    UniqueThread;
+    ULONG_PTR AffinityMask;
+    LONG      Priority;
+    LONG      BasePriority;
+};
+
+static void CollectThreadStacks(StackSet& out, char* whyNot, size_t whyNotCap) {
+    out.count = 0;
+    whyNot[0] = 0;
+    NtQueryInformationThread_fn qit = (NtQueryInformationThread_fn)
+        GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread");
+    if (!qit) {
+        snprintf(whyNot, whyNotCap, "NtQueryInformationThread not found");
+        return;
+    }
+    HANDLE snapH = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snapH == INVALID_HANDLE_VALUE) {
+        snprintf(whyNot, whyNotCap, "thread snapshot failed (%lu)", GetLastError());
+        return;
+    }
+    const DWORD pid = GetCurrentProcessId();
+    THREADENTRY32 te;
+    te.dwSize = sizeof(te);
+    uint32_t seen = 0, unreadable = 0;
+    for (BOOL ok = Thread32First(snapH, &te); ok; ok = Thread32Next(snapH, &te)) {
+        if (te.th32OwnerProcessID != pid) continue;
+        ++seen;
+        HANDLE th = OpenThread(THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+        if (!th) { ++unreadable; continue; }
+        ThreadBasicInfo tbi = {};
+        const LONG st = qit(th, 0, &tbi, sizeof(tbi), nullptr);
+        CloseHandle(th);
+        if (st < 0 || !tbi.TebBaseAddress) { ++unreadable; continue; }
+        uintptr_t limit = 0;
+        __try {
+            limit = (uintptr_t)((NT_TIB*)tbi.TebBaseAddress)->StackLimit;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            limit = 0;
+        }
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!limit || !VirtualQuery((LPCVOID)limit, &mbi, sizeof(mbi))) { ++unreadable; continue; }
+        if (out.count < 1024) out.base[out.count++] = (uintptr_t)mbi.AllocationBase;
+    }
+    CloseHandle(snapH);
+    if (out.count == 0) {
+        snprintf(whyNot, whyNotCap, "%u thread(s) seen, none readable", seen);
+    } else if (unreadable) {
+        snprintf(whyNot, whyNotCap, "%u of %u thread(s) unreadable", unreadable, seen);
+    }
+}
+
+static const StackSet* g_censusStacks = nullptr;   // valid during one walk only
+
+static bool IsThreadStack(uintptr_t allocBase) {
+    if (!g_censusStacks) return false;
+    for (uint32_t i = 0; i < g_censusStacks->count; i++) {
+        if (g_censusStacks->base[i] == allocBase) return true;
+    }
+    return false;
+}
+
+// What a reservation is called in the table. Filled into the caller's buffers
+// so the walk can use the same name for the neighbours of a free hole.
+static void NameReservation(uintptr_t allocBase, uint64_t reserved, DWORD type,
+                            char* name, size_t nameCap, char* category, size_t catCap) {
+    name[0] = 0;
+    category[0] = 0;
 
     if (type == MEM_IMAGE) {
-        lstrcpynA(category, "image", sizeof(category));
+        lstrcpynA(category, "image", (int)catCap);
         char path[MAX_PATH];
         if (GetModuleFileNameA((HMODULE)allocBase, path, MAX_PATH)) {
             const char* leaf = strrchr(path, '\\');
-            lstrcpynA(name, leaf ? leaf + 1 : path, sizeof(name));
+            lstrcpynA(name, leaf ? leaf + 1 : path, (int)nameCap);
         } else if (GetMappedFileNameA(GetCurrentProcess(), (LPVOID)allocBase, path, MAX_PATH)) {
             const char* leaf = strrchr(path, '\\');
-            lstrcpynA(name, leaf ? leaf + 1 : path, sizeof(name));
+            lstrcpynA(name, leaf ? leaf + 1 : path, (int)nameCap);
         } else {
-            snprintf(name, sizeof(name), "image@0x%08X", (unsigned)allocBase);
+            snprintf(name, nameCap, "image@0x%08X", (unsigned)allocBase);
         }
     } else if (type == MEM_MAPPED) {
-        lstrcpynA(category, "mapped", sizeof(category));
+        lstrcpynA(category, "mapped", (int)catCap);
         char path[MAX_PATH];
         if (GetMappedFileNameA(GetCurrentProcess(), (LPVOID)allocBase, path, MAX_PATH)) {
             const char* leaf = strrchr(path, '\\');
-            lstrcpynA(name, (leaf && *(leaf + 1)) ? leaf + 1 : path, sizeof(name));
+            lstrcpynA(name, (leaf && *(leaf + 1)) ? leaf + 1 : path, (int)nameCap);
         } else {
-            lstrcpynA(name, "mapped section", sizeof(name));
+            lstrcpynA(name, "mapped section", (int)nameCap);
         }
     } else { // MEM_PRIVATE
-        lstrcpynA(category, "private", sizeof(category));
+        lstrcpynA(category, "private", (int)catCap);
         if (MimallocHighArena::Contains((const void*)allocBase)) {
-            lstrcpynA(name, "this tool's high arena", sizeof(name));
+            lstrcpynA(name, "this tool's high arena", (int)nameCap);
+        } else if (IsThreadStack(allocBase)) {
+            lstrcpynA(name, "thread stacks", (int)nameCap);
         } else {
             bool ours = false;
             __try { ours = mi_is_in_heap_region((const void*)allocBase); }
             __except (EXCEPTION_EXECUTE_HANDLER) { ours = false; }
             if (ours) {
-                lstrcpynA(name, "this tool's allocator (mimalloc)", sizeof(name));
+                lstrcpynA(name, "this tool's allocator (mimalloc)", (int)nameCap);
             } else if (g_live && (allocBase >> 16) < kLiveEntries && g_live[allocBase >> 16].sizeKB > 0) {
                 const LONG s = g_live[allocBase >> 16].slot;
                 if (s >= 0 && s < g_slotCount) {
-                    lstrcpynA(name, g_slots[s].name, sizeof(name));
+                    lstrcpynA(name, g_slots[s].name, (int)nameCap);
                 } else {
-                    lstrcpynA(name, "private (unattributed)", sizeof(name));
+                    lstrcpynA(name, "private (unattributed)", (int)nameCap);
                 }
             } else if (allocBase == (uintptr_t)GetProcessHeap()) {
-                lstrcpynA(name, "client default heap", sizeof(name));
+                lstrcpynA(name, "client default heap", (int)nameCap);
             } else {
                 HANDLE heaps[32];
                 DWORD numHeaps = GetProcessHeaps(32, heaps);
@@ -757,13 +876,37 @@ static void AddCensusReservation(CensusSnapshot& snap, uintptr_t allocBase,
                     }
                 }
                 if (isHeap) {
-                    lstrcpynA(name, "process heap", sizeof(name));
+                    lstrcpynA(name, "process heap", (int)nameCap);
                 } else {
-                    lstrcpynA(name, "private (client / other)", sizeof(name));
+                    // Split by reservation size. The single bucket this used
+                    // to be held 1519 MB of a 1916 MB low half in the first
+                    // session it ran in, and named nothing. The shape of it
+                    // does: hundreds of regions near 1 MB are heap segments,
+                    // a handful over 16 MB are arenas someone reserved whole.
+                    snprintf(name, nameCap, "unattributed, %s each",
+                             kSizeClassName[SizeClass(reserved)]);
                 }
             }
         }
     }
+}
+
+// A hole learns what sits above it only when the reservation after it has been
+// walked to its end, because only then is its size - and so its name - known.
+static void ResolveHole(CensusSnapshot& snap, int& pendingHole, const char* aboveName) {
+    if (pendingHole < 0) return;
+    lstrcpynA(snap.holes[pendingHole].above, aboveName, sizeof(snap.holes[pendingHole].above));
+    pendingHole = -1;
+}
+
+static void AddCensusReservation(CensusSnapshot& snap, uintptr_t allocBase,
+                                 uint64_t reserved, uint64_t committed, DWORD type,
+                                 char* nameOut, size_t nameOutCap) {
+    if (reserved == 0) return;
+    char name[48] = {};
+    char category[12] = {};
+    NameReservation(allocBase, reserved, type, name, sizeof(name), category, sizeof(category));
+    if (nameOut) lstrcpynA(nameOut, name, (int)nameOutCap);
 
     snap.totalReservedBytes += reserved;
     snap.totalCommittedBytes += committed;
@@ -794,8 +937,16 @@ static void RunLowHalfCensus(SIZE_T triggerLargestLow) {
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
 
-    CensusSnapshot snap = {};
+    // Static rather than on the stack: the snapshot is around 20 KB, and this
+    // runs once per crossing on the monitor thread, never concurrently.
+    static CensusSnapshot snap;
+    memset(&snap, 0, sizeof(snap));
     snap.triggerLargestLowMB = (triggerLargestLow + 1024 * 1024 - 1) / (1024 * 1024);
+
+    static StackSet stacks;
+    CollectThreadStacks(stacks, snap.stacksWhyNot, sizeof(snap.stacksWhyNot));
+    snap.stacksFound = stacks.count;
+    g_censusStacks = &stacks;
 
     MEMORY_BASIC_INFORMATION mbi;
     uintptr_t addr = 0x10000;
@@ -803,6 +954,11 @@ static void RunLowHalfCensus(SIZE_T triggerLargestLow) {
     uint64_t curReserved = 0;
     uint64_t curCommitted = 0;
     DWORD curType = 0;
+
+    // The name of the last reservation flushed, and the hole waiting to learn
+    // what sits above it.
+    char lastName[48] = "(start of address space)";
+    int  pendingHole = -1;
 
     while (addr < kLowHalfEnd && VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
         uintptr_t base = (uintptr_t)mbi.BaseAddress;
@@ -812,18 +968,45 @@ static void RunLowHalfCensus(SIZE_T triggerLargestLow) {
         if (base + size > kLowHalfEnd) size = (SIZE_T)(kLowHalfEnd - base);
 
         if (mbi.State == MEM_FREE) {
+            if (curAllocBase != 0) {
+                AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType,
+                                     lastName, sizeof(lastName));
+                curAllocBase = 0; curReserved = 0; curCommitted = 0; curType = 0;
+                ResolveHole(snap, pendingHole, lastName);
+            }
             snap.totalFreeBytes += size;
             snap.freeRegionCount++;
             if (size > snap.largestFreeBlockBytes) snap.largestFreeBlockBytes = size;
-            if (curAllocBase != 0) {
-                AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType);
-                curAllocBase = 0; curReserved = 0; curCommitted = 0; curType = 0;
+            const int c = SizeClass(size);
+            snap.freeClassCount[c]++;
+            snap.freeClassBytes[c] += size;
+
+            // Keep the largest holes, sorted descending.
+            int slot = -1;
+            if (snap.holeCount < (uint32_t)kHolesKept) {
+                slot = (int)snap.holeCount++;
+            } else if (size > snap.holes[kHolesKept - 1].bytes) {
+                slot = kHolesKept - 1;
+            }
+            if (slot >= 0) {
+                while (slot > 0 && snap.holes[slot - 1].bytes < size) {
+                    snap.holes[slot] = snap.holes[slot - 1];
+                    --slot;
+                }
+                CensusHole& h = snap.holes[slot];
+                h.base = base;
+                h.bytes = size;
+                lstrcpynA(h.below, lastName, sizeof(h.below));
+                lstrcpynA(h.above, "(end of the low half)", sizeof(h.above));
+                pendingHole = slot;
             }
         } else {
             uintptr_t allocBase = (uintptr_t)mbi.AllocationBase;
             if (allocBase != curAllocBase) {
                 if (curAllocBase != 0) {
-                    AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType);
+                    AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType,
+                                         lastName, sizeof(lastName));
+                    ResolveHole(snap, pendingHole, lastName);
                 }
                 curAllocBase = allocBase;
                 curReserved = 0;
@@ -842,8 +1025,11 @@ static void RunLowHalfCensus(SIZE_T triggerLargestLow) {
         addr = next;
     }
     if (curAllocBase != 0) {
-        AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType);
+        AddCensusReservation(snap, curAllocBase, curReserved, curCommitted, curType,
+                             lastName, sizeof(lastName));
+        ResolveHole(snap, pendingHole, lastName);
     }
+    g_censusStacks = nullptr;
 
     // Sort descending by reservedBytes
     for (uint32_t i = 1; i < snap.entryCount; i++) {
@@ -944,6 +1130,44 @@ void LogStats() {
                 otherReserved / (1024.0 * 1024.0),
                 otherCommitted / (1024.0 * 1024.0),
                 otherRegions);
+        }
+        if (snap.stacksFound > 0) {
+            Log("[HighPlacement]   thread stacks: %u identified%s%s",
+                snap.stacksFound, snap.stacksWhyNot[0] ? "; " : "", snap.stacksWhyNot);
+        } else {
+            Log("[HighPlacement]   thread stacks were not identified (%s), so they are "
+                "counted in the unattributed rows above rather than on their own.",
+                snap.stacksWhyNot[0] ? snap.stacksWhyNot : "no reason recorded");
+        }
+
+        Log("[HighPlacement]   Free space by the size of the hole it is in:");
+        for (int c = 0; c < kSizeClasses; c++) {
+            if (snap.freeClassCount[c] == 0) continue;
+            Log("[HighPlacement]     %-14s %4u hole(s), %7.1f MB",
+                kSizeClassName[c], snap.freeClassCount[c],
+                snap.freeClassBytes[c] / (1024.0 * 1024.0));
+        }
+        if (snap.holeCount > 0) {
+            Log("[HighPlacement]   Largest holes, and the reservations either side that keep "
+                "each from being bigger:");
+            for (uint32_t i = 0; i < snap.holeCount; i++) {
+                const CensusHole& h = snap.holes[i];
+                Log("[HighPlacement]     %6.1f MB at 0x%08X, between %s and %s",
+                    h.bytes / (1024.0 * 1024.0), (unsigned)h.base, h.below, h.above);
+            }
+        }
+
+        // Reserved and free together have to cover the low half from 64 KB,
+        // where the walk starts, to 2 GB. If they do not, something above is
+        // wrong and the table should not be trusted.
+        const double spanMB = (double)(kLowHalfEnd - 0x10000) / (1024.0 * 1024.0);
+        const double sumMB = (snap.totalReservedBytes + snap.totalFreeBytes) / (1024.0 * 1024.0);
+        if (sumMB > spanMB - 0.05 && sumMB < spanMB + 0.05) {
+            Log("[HighPlacement]   reserved and free add up to %.1f MB, the whole low half.", sumMB);
+        } else {
+            Log("[HighPlacement]   reserved and free add up to %.1f MB of %.1f MB. The walk "
+                "missed part of the low half, so the figures above are incomplete.",
+                sumMB, spanMB);
         }
         Log("[HighPlacement] ==================================================");
     } else {
