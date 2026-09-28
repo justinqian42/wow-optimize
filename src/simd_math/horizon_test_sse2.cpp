@@ -20,11 +20,17 @@
 //     packed horizon column buffer scanning.
 //   - Avoids all per-corner function call overhead and x87 status-word stalls.
 //
-// Verification:
-//   - Verified offline against verbatim client instructions over 1,000,000
-//     randomized test cases with 0 differences (harness only, not run in a game).
-//   - Verifies against the client for the first 10,000 calls and 1 in every 128
-//     calls thereafter, retiring immediately on the first mismatch.
+// Where it keeps more precision than the client: the client tracks the
+// minimum and maximum projections in floats and compares each new double
+// projection against them; this keeps doubles. Rounding to float is monotonic
+// and commutes with the exact scaling by 64 that follows, so the floats the
+// column bounds are built from come out the same. The horizon is compared
+// against the float maximum, as the client does.
+//
+// Verification: compared with the client on the first 10,000 calls and one
+// call in 128 after, retiring on the first difference. Before 2026-09-28 the
+// resampling keyed on the verified count, which stopped at 10,000, so no call
+// after the first 10,000 was ever compared.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -41,6 +47,7 @@
 #include "version.h"
 #include "config.h"
 #include "sampling_profiler.h"
+#include "ab_test.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -71,6 +78,7 @@ static HorizonTest_fn g_orig_HorizonTest = nullptr;
 
 static bool g_active = false;
 static bool g_dead   = false;
+static bool g_abSubject = false;
 
 static unsigned long long g_calls    = 0;
 static unsigned long      g_verified = 0;
@@ -102,9 +110,10 @@ static inline void TransformPoint(const float* M, float x, float y, float z, flo
 static inline int Fast_HorizonTest(const float* box, char flags) {
     if (!(*dword_CD774C & 0x20)) return 0;
 
+    // 0x0078FDDF test ah,5 jnp and 0x0078FDEE test ah,41h jz: only a pitch
+    // strictly outside [-0.9f, 0.9f] leaves; the bounds and a NaN carry on.
     const float pitch = *flt_CD8F7C;
-    // Client bounds: -0.8999999761581421f < pitch < 0.8999999761581421f
-    if (pitch <= -0.8999999761581421f || pitch >= 0.8999999761581421f) return 0;
+    if (pitch < -0.8999999761581421f || pitch > 0.8999999761581421f) return 0;
 
     const float* b_min = box;
     const float* b_max = box + 3;
@@ -175,13 +184,13 @@ static inline int Fast_HorizonTest(const float* box, char flags) {
 __declspec(safebuffers) static int __cdecl Hook_HorizonTest(const float* box, char flags) {
     ++g_calls;
 
-    if (g_dead) {
+    if (g_dead || (g_abSubject && AbTest::StandAside())) {
         return g_orig_HorizonTest(box, flags);
     }
 
     const int mine = Fast_HorizonTest(box, flags);
 
-    if (g_verified < kVerifyCount || ((g_verified & kVerifySampleMask) == 0)) {
+    if (g_verified < kVerifyCount || ((g_calls & kVerifySampleMask) == 0)) {
         const int theirs = g_orig_HorizonTest(box, flags);
         if (mine != theirs) {
             ++g_mismatch;
@@ -224,6 +233,7 @@ bool Init() {
     }
 
     g_active = true;
+    g_abSubject = AbTest::IsSubject("HorizonTestAABB", &g_abSubject);
     Log("[HorizonTest] ACTIVE on sub_78FDC0 (0x%08X). Verifying against client for first %lu calls.",
         (unsigned)kTarget, kVerifyCount);
     return true;
