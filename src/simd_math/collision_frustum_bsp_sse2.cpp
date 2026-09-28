@@ -28,11 +28,14 @@
 //     precision, eliminating all x87 status-word transfers and pipeline stalls.
 //   - Disassembly audit confirms 0 /GS security cookies and 0 SEH frames on the
 //     hot path via __declspec(safebuffers).
-//   - Verified offline against verbatim client instruction sequence over
-//     1,000,000 cases with 0 mismatches in leaf visitation order across 2,278,508
-//     visited leaves (harness only, not run in a game).
-//   - Runs 3 fixed test vectors through a synthetic tree on startup, asserting
-//     bit-exact leaf sequence and count before hooking.
+//   - At startup, before hooking, the shipped traversal is run against a
+//     recursive transcription of sub_7CA440 on 400 random trees and queries,
+//     and the full sequence of leaves must match, order included. One of
+//     the trees is deep enough to fill the 64-entry stack, so the hand-over
+//     to the client is exercised too. Any difference and nothing is hooked.
+//     The earlier self-test ran its own copy of the loop and compared leaf
+//     counts only; it could not see the ordering bug fixed on 2026-09-28,
+//     and this one fails on it. Not run in a game.
 //   - Off by default under experimental launcher switch CollisionFrustumBsp.
 // ============================================================================
 
@@ -109,13 +112,19 @@ unsigned long long g_calls    = 0;
 unsigned long long g_leaves   = 0;
 unsigned long long g_fallbacks = 0;
 
-__declspec(safebuffers)
-void Fast_TraverseFrustumBSP(void* this_ptr, uint32_t root_node_id, const float* root_query_box, const float* root_node_box) {
-    void* bsp_desc = *(void**)this_ptr;
-    if (!bsp_desc) return;
-    const uint8_t* bsp_nodes = *(const uint8_t**)((uint8_t*)bsp_desc + 4);
-    if (!bsp_nodes) return;
-
+// The traversal, written once. The hook passes the client's own leaf handler
+// and the client's own function for the case the stack cannot take; the
+// self-test passes a recorder and a reference. Before this the self-test ran a
+// copy of the loop, which proved only that the copy agreed with itself.
+//
+// Order is the contract. sub_7CA440 recurses into the child at +4 before the
+// child at +2 when the query straddles the split, and the leaf handler it calls
+// appends to a list the caller reads in that order. Pushing the +2 child and
+// continuing into the +4 child keeps the same depth-first order.
+template <typename Visit, typename Hand>
+__forceinline void Walk(const uint8_t* bsp_nodes, uint32_t root_node_id,
+                        const float* root_query_box, const float* root_node_box,
+                        Visit visit, Hand hand_to_client) {
     BspStackEntry stack[64];
     int top = 0;
 
@@ -132,8 +141,7 @@ void Fast_TraverseFrustumBSP(void* this_ptr, uint32_t root_node_id, const float*
             const WowBspNode* node = (const WowBspNode*)(bsp_nodes + 16 * cur.node_id);
 
             if (node->flags & 4) {
-                g_leaves++;
-                call_leaf(this_ptr, node);
+                visit(node);
                 break;
             }
 
@@ -165,8 +173,7 @@ void Fast_TraverseFrustumBSP(void* this_ptr, uint32_t root_node_id, const float*
                 cur.node_box[axis + 3] = split;
                 continue;
             } else {
-                // Straddle: Client executes RIGHT first, then LEFT.
-                // We push LEFT onto stack, and tail-recurse into RIGHT.
+                // Straddle: the client visits RIGHT first, then LEFT.
                 uint16_t left = node->left_child;
                 uint16_t right = node->right_child;
 
@@ -181,15 +188,13 @@ void Fast_TraverseFrustumBSP(void* this_ptr, uint32_t root_node_id, const float*
                         stack[top].query_box[axis + 3] = split;
                         stack[top].node_box[axis + 3] = split;
                     } else {
-                        g_fallbacks++;
-                        float l_qbox[6], l_nbox[6];
-                        for (int i = 0; i < 6; ++i) {
-                            l_qbox[i] = cur.query_box[i];
-                            l_nbox[i] = cur.node_box[i];
-                        }
-                        l_qbox[axis + 3] = split;
-                        l_nbox[axis + 3] = split;
-                        orig_TraverseFrustumBSP(this_ptr, nullptr, left, l_qbox, l_nbox);
+                        // Stack full. This used to walk LEFT through the
+                        // client at once and then carry on into RIGHT, which
+                        // is the reverse of the client's order. Neither child
+                        // has been visited yet, so the whole node goes to the
+                        // client, which walks both in its own order.
+                        hand_to_client(cur.node_id, cur.query_box, cur.node_box);
+                        break;
                     }
                 }
 
@@ -207,6 +212,24 @@ void Fast_TraverseFrustumBSP(void* this_ptr, uint32_t root_node_id, const float*
 }
 
 __declspec(safebuffers)
+void Fast_TraverseFrustumBSP(void* this_ptr, uint32_t root_node_id, const float* root_query_box, const float* root_node_box) {
+    void* bsp_desc = *(void**)this_ptr;
+    if (!bsp_desc) return;
+    const uint8_t* bsp_nodes = *(const uint8_t**)((uint8_t*)bsp_desc + 4);
+    if (!bsp_nodes) return;
+
+    Walk(bsp_nodes, root_node_id, root_query_box, root_node_box,
+         [this_ptr](const WowBspNode* leaf) {
+             g_leaves++;
+             call_leaf(this_ptr, leaf);
+         },
+         [this_ptr](uint32_t id, const float* q, const float* nb) {
+             g_fallbacks++;
+             orig_TraverseFrustumBSP(this_ptr, nullptr, id, q, nb);
+         });
+}
+
+__declspec(safebuffers)
 void __fastcall Hooked_TraverseFrustumBSP(void* this_ptr, void* dummy_edx,
                                           uint32_t node_id, const float* query_box, const float* node_box) {
     if (!this_ptr || !query_box || !node_box) return;
@@ -220,107 +243,128 @@ void __fastcall Hooked_TraverseFrustumBSP(void* this_ptr, void* dummy_edx,
     Fast_TraverseFrustumBSP(this_ptr, node_id, query_box, node_box);
 }
 
-// Startup self-test verifying traversal logic against fixed reference cases
-bool RunSelfTest() {
-    // 5-node test tree:
-    // Node 0: split X at 0.0 -> left: 1, right: 2
-    // Node 1: split Y at 0.0 -> left: 3 (leaf), right: 4 (leaf)
-    // Node 2: leaf
-    WowBspNode test_tree[5]{};
-    test_tree[0].flags = 0; // split X
-    test_tree[0].left_child = 1;
-    test_tree[0].right_child = 2;
-    test_tree[0].split_plane = 0.0f;
+// sub_7CA440 transcribed as it is written - recursive, from the decompiled
+// body at 0x007CA440. It has the same body as sub_7CA920 with a different
+// leaf handler - so that it shares nothing with Walk but the node
+// layout. Records leaf indices instead of calling the leaf handler.
+struct LeafLog {
+    uint32_t idx[512];
+    uint32_t count;
+    bool     overflow;
+};
 
-    test_tree[1].flags = 1; // split Y
-    test_tree[1].left_child = 3;
-    test_tree[1].right_child = 4;
-    test_tree[1].split_plane = 0.0f;
-
-    test_tree[2].flags = 4; // leaf
-    test_tree[3].flags = 4; // leaf
-    test_tree[4].flags = 4; // leaf
-
-    struct DummyDesc {
-        uint32_t dummy0;
-        const void* nodes;
-    } desc;
-    desc.dummy0 = 0;
-    desc.nodes = test_tree;
-
-    struct DummyThis {
-        DummyDesc* pDesc;
-        void* visitorContext;
-    } d_this;
-    d_this.pDesc = &desc;
-    d_this.visitorContext = nullptr;
-
-    const float world_box[6] = { -10.0f, -10.0f, -10.0f, 10.0f, 10.0f, 10.0f };
-
-    // Query 1: Positive X -> should visit only leaf 2
-    float q1[6] = { 1.0f, 1.0f, 1.0f, 5.0f, 5.0f, 5.0f };
-    // Query 2: Negative X, negative Y -> should visit only leaf 3
-    float q2[6] = { -5.0f, -5.0f, -5.0f, -1.0f, -1.0f, -1.0f };
-    // Query 3: Straddle X, straddle Y -> should visit leaf 2, then leaf 4, then leaf 3
-    float q3[6] = { -5.0f, -5.0f, -5.0f, 5.0f, 5.0f, 5.0f };
-
-    // Simulate traversal counts
-    auto CountLeaves = [&](const float* qbox) -> int {
-        int count = 0;
-        BspStackEntry stack[64];
-        int top = 0;
-        stack[0].node_id = 0;
-        for (int i = 0; i < 6; ++i) {
-            stack[0].query_box[i] = qbox[i];
-            stack[0].node_box[i] = world_box[i];
-        }
-        while (top >= 0) {
-            BspStackEntry cur = stack[top--];
-            while (true) {
-                const WowBspNode* n = &test_tree[cur.node_id];
-                if (n->flags & 4) { count++; break; }
-                uint32_t a = n->flags & 3;
-                if (cur.node_box[a] > cur.query_box[a + 3] || cur.node_box[a + 3] < cur.query_box[a]) break;
-                float sp = n->split_plane;
-                if (sp < cur.query_box[a]) {
-                    if (n->right_child == 0xFFFF) break;
-                    cur.node_id = n->right_child;
-                    cur.node_box[a] = sp;
-                    continue;
-                } else if (sp > cur.query_box[a + 3]) {
-                    if (n->left_child == 0xFFFF) break;
-                    cur.node_id = n->left_child;
-                    cur.node_box[a + 3] = sp;
-                    continue;
-                } else {
-                    if (n->left_child != 0xFFFF && top < 63) {
-                        ++top;
-                        stack[top].node_id = n->left_child;
-                        for (int i = 0; i < 6; ++i) {
-                            stack[top].query_box[i] = cur.query_box[i];
-                            stack[top].node_box[i] = cur.node_box[i];
-                        }
-                        stack[top].query_box[a + 3] = sp;
-                        stack[top].node_box[a + 3] = sp;
-                    }
-                    if (n->right_child != 0xFFFF) {
-                        cur.node_id = n->right_child;
-                        cur.query_box[a] = sp;
-                        cur.node_box[a] = sp;
-                        continue;
-                    } else {
-                        break;
-                    }
-                }
+void RefTraverse(const WowBspNode* nodes, uint32_t id, const float* a3, const float* a4,
+                 LeafLog& log) {
+    const WowBspNode* v4 = &nodes[id];
+    if (v4->flags & 4) {
+        if (log.count < 512) log.idx[log.count++] = id; else log.overflow = true;
+        return;
+    }
+    const uint32_t v5 = v4->flags & 3;
+    if (!(a4[v5] <= a3[v5 + 3] && a4[v5 + 3] >= a3[v5])) return;
+    float v41[6], v39[6];
+    for (int i = 0; i < 6; ++i) { v41[i] = a4[i]; v39[i] = a4[i]; }
+    v41[v5] = v4->split_plane;          // box for the child at +4
+    v39[v5 + 3] = v4->split_plane;      // box for the child at +2
+    if (v4->split_plane >= a3[v5]) {
+        if (v4->split_plane <= a3[v5 + 3]) {
+            if (v4->right_child != 0xFFFF) {
+                float q[6];
+                for (int i = 0; i < 6; ++i) q[i] = a3[i];
+                q[v5] = v4->split_plane;
+                RefTraverse(nodes, v4->right_child, q, v41, log);
             }
+            if (v4->left_child != 0xFFFF) {
+                float q[6];
+                for (int i = 0; i < 6; ++i) q[i] = a3[i];
+                q[v5 + 3] = v4->split_plane;
+                RefTraverse(nodes, v4->left_child, q, v39, log);
+            }
+        } else if (v4->left_child != 0xFFFF) {
+            RefTraverse(nodes, v4->left_child, a3, v39, log);
         }
-        return count;
-    };
+    } else if (v4->right_child != 0xFFFF) {
+        RefTraverse(nodes, v4->right_child, a3, v41, log);
+    }
+}
 
-    if (CountLeaves(q1) != 1) return false;
-    if (CountLeaves(q2) != 1) return false;
-    if (CountLeaves(q3) != 3) return false;
+// A random tree, children always at higher indices so it cannot loop. With
+// `chain` set, node i straddles into node i + 1 on its +4 side and a leaf on
+// its +2 side all the way down, deep enough to fill the 64-entry stack.
+uint32_t g_rng = 0x2545F491u;
+uint32_t Rng() { g_rng ^= g_rng << 13; g_rng ^= g_rng >> 17; g_rng ^= g_rng << 5; return g_rng; }
+float RngF(float lo, float hi) { return lo + (hi - lo) * (float)(Rng() & 0xFFFF) / 65535.0f; }
 
+uint32_t BuildTree(WowBspNode* t, uint32_t cap, bool chain) {
+    for (uint32_t i = 0; i < cap; ++i) t[i] = WowBspNode{};
+    if (chain) {
+        // 0..k-1 internal, each straddling on X at 0; odd leaves hang off +2.
+        const uint32_t k = (cap - 1) / 2;
+        for (uint32_t i = 0; i < k; ++i) {
+            t[i].flags = 0;
+            t[i].split_plane = 0.0f;
+            t[i].right_child = (uint16_t)(i + 1 < k ? i + 1 : k);
+            t[i].left_child  = (uint16_t)(k + 1 + i);
+        }
+        for (uint32_t i = k; i < cap; ++i) t[i].flags = 4;
+        return cap;
+    }
+    const uint32_t count = 8 + Rng() % (cap - 8);
+    for (uint32_t i = 0; i < count; ++i) {
+        const bool leaf = (i * 2 + 1 >= count) || (Rng() % 5 == 0);
+        if (leaf) { t[i].flags = 4; continue; }
+        t[i].flags = (uint16_t)(Rng() % 3);
+        t[i].split_plane = RngF(-10.0f, 10.0f);
+        const uint32_t span = count - (i + 1);
+        t[i].left_child  = (Rng() % 7 == 0) ? 0xFFFF : (uint16_t)(i + 1 + Rng() % span);
+        t[i].right_child = (Rng() % 7 == 0) ? 0xFFFF : (uint16_t)(i + 1 + Rng() % span);
+    }
+    return count;
+}
+
+// Walk against the transcription on random trees and queries, comparing the
+// full sequence of leaves, plus one tree deep enough to reach the stack limit,
+// where Walk hands a node to the "client" - here the transcription itself.
+bool RunSelfTest() {
+    static WowBspNode tree[200];
+    static LeafLog want, got;
+    for (int c = 0; c < 400; ++c) {
+        const bool chain = (c == 0);
+        BuildTree(tree, chain ? 199 : 200, chain);
+        float q[6], nb[6];
+        for (int i = 0; i < 3; ++i) {
+            const float x = RngF(-12.0f, 12.0f), y = RngF(-12.0f, 12.0f);
+            q[i] = x < y ? x : y;  q[i + 3] = x < y ? y : x;
+            nb[i] = -10.0f;        nb[i + 3] = 10.0f;
+        }
+        if (chain) { q[0] = -5.0f; q[3] = 5.0f; }
+
+        want.count = 0; want.overflow = false;
+        RefTraverse(tree, 0, q, nb, want);
+        got.count = 0; got.overflow = false;
+        int handed = 0;
+        Walk((const uint8_t*)tree, 0, q, nb,
+             [&](const WowBspNode* leaf) {
+                 const uint32_t id = (uint32_t)(leaf - tree);
+                 if (got.count < 512) got.idx[got.count++] = id; else got.overflow = true;
+             },
+             [&](uint32_t id, const float* qq, const float* nn) {
+                 ++handed;
+                 RefTraverse(tree, id, qq, nn, got);
+             });
+        if (want.overflow || got.overflow || want.count != got.count ||
+            memcmp(want.idx, got.idx, want.count * sizeof(uint32_t)) != 0) {
+            Log("[CollisionFrustumBsp] NOT active: case %d visited %u leaves where the "
+                "transcription of the client visits %u, or in a different order.",
+                c, got.count, want.count);
+            return false;
+        }
+        if (chain && handed == 0) {
+            Log("[CollisionFrustumBsp] NOT active: the deep test tree never reached the "
+                "stack limit, so the hand-over to the client went untested.");
+            return false;
+        }
+    }
     return true;
 }
 
