@@ -1490,10 +1490,18 @@ namespace WowOptimizeLauncher {
                 for (int h = 0; h < headings.Count; h++) headings[h].Dispose();
             }
 
+            // A switch is found by the name on its row or by its ini key, with or
+            // without spaces: "parallel particle", "ParallelParticles" and
+            // "parallelparticle" all find Parallel Particle Fill.
+            string squeezed = query.Replace(" ", "");
             foreach (KeyValuePair<string, SettingItem> pair in settingsMap) {
                 if (pair.Value.Ctrl == null) continue;
-                pair.Value.Ctrl.Visible =
-                    !hasSearch || pair.Key.ToLower().Contains(query);
+                string name = pair.Key.ToLower();
+                string ini = (pair.Value.Key ?? "").ToLower();
+                pair.Value.Ctrl.Visible = !hasSearch ||
+                    name.Contains(query) ||
+                    name.Replace(" ", "").Contains(squeezed) ||
+                    ini.Contains(squeezed);
             }
 
             // Headings stay while searching. They used to be dropped and each
@@ -1524,6 +1532,46 @@ namespace WowOptimizeLauncher {
                 }
             }
             for (int i = 0; i < flows.Length; i++) flows[i].ResumeLayout(true);
+
+            // The search filters every tab but shows one. A match on another tab
+            // used to leave the open one empty, which reads as "not found"; the
+            // first tab that has a match is opened instead.
+            // And each tab says how many matches it holds while a search is on,
+            // so a match on a tab that is not open is still seen.
+            if (tabs != null) {
+                for (int t = 0; t < tabs.TabPages.Count; t++) {
+                    TabPage tp = tabs.TabPages[t];
+                    string title = tp.Tag as string;
+                    if (title == null) continue;
+                    int hits = hasSearch ? CountRows(TabFlow(tp)) : 0;
+                    tp.Text = hits > 0 ? title + " (" + hits + ")" : title;
+                }
+                tabs.Invalidate();
+            }
+            if (hasSearch && tabs != null && CountRows(TabFlow(tabs.SelectedTab)) == 0) {
+                for (int t = 0; t < tabs.TabPages.Count; t++) {
+                    if (CountRows(TabFlow(tabs.TabPages[t])) > 0) {
+                        tabs.SelectedIndex = t;
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static FlowLayoutPanel TabFlow(TabPage tp) {
+            if (tp == null || tp.Controls.Count == 0) return null;
+            Panel scroll = tp.Controls[0] as Panel;
+            if (scroll == null || scroll.Controls.Count == 0) return null;
+            return scroll.Controls[0] as FlowLayoutPanel;
+        }
+
+        private static int CountRows(FlowLayoutPanel flow) {
+            if (flow == null) return 0;
+            int n = 0;
+            foreach (Control c in flow.Controls) {
+                if (c is CheckBox) n++;
+            }
+            return n;
         }
 
         // The order areas are listed in on the NOT PROVEN tab, and what each
@@ -1571,6 +1619,7 @@ namespace WowOptimizeLauncher {
 
         private TabPage CreateTabPage(string title) {
             TabPage tp = new TabPage(title);
+            tp.Tag = title;     // the title without a search's match count
             tp.BackColor = DarkBg;
             tp.ForeColor = Color.White;
             tp.Padding = new Padding(0);
