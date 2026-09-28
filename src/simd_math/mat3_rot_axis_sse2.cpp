@@ -180,7 +180,7 @@ __declspec(safebuffers) static float* __cdecl Hook_sub_4C5820(float* out_mat, fl
         ++g_controlCalls;
         return g_orig(out_mat, angle, axis, is_normalized);
     }
-    if (g_verifiedCalls < kVerifyCalls || ((g_verifiedCalls & kVerifyMask) == 0)) {
+    if (g_verifiedCalls < kVerifyCalls || ((g_calls & kVerifyMask) == 0)) {
         return Verify_sub_4C5820(out_mat, angle, axis, is_normalized);
     }
     ++g_armedCalls;

@@ -270,7 +270,7 @@ __declspec(safebuffers) static unsigned int __fastcall Hook_M2SkinProj(
         return g_orig_M2SkinProj(this_ptr, dummy_edx, m2Instance, skinData, skinSection, extrudeNormals, planeNormal, planeDist);
     }
 
-    if (g_verified < kVerifyCount || ((g_verified & kVerifySampleMask) == 0)) {
+    if (g_verified < kVerifyCount || ((g_calls & kVerifySampleMask) == 0)) {
         return Verify_M2SkinProj(this_ptr, dummy_edx, m2Instance, skinData, skinSection, extrudeNormals, planeNormal, planeDist, vertexCount);
     }
 

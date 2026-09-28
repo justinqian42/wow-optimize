@@ -182,7 +182,7 @@ __declspec(safebuffers) static void* __fastcall Hook_sub_75B610(void* dst, void*
         ++g_controlCalls;
         return g_orig(dst, dummyEdx, src);
     }
-    if (g_verifiedCalls < kVerifyCalls || ((g_verifiedCalls & kVerifyMask) == 0)) {
+    if (g_verifiedCalls < kVerifyCalls || ((g_calls & kVerifyMask) == 0)) {
         return Verify_sub_75B610(dst, dummyEdx, src);
     }
     ++g_armedCalls;

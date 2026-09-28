@@ -278,7 +278,7 @@ __declspec(safebuffers) static int __fastcall Hook_M2MeshPick(
         ++g_controlCalls;
         return g_orig(this_ptr, indicesBegin, indicesEnd, baseVertexIdx, testPoint2D, flag, hitObj, bestHeight, initialResult);
     }
-    if (g_verifiedCalls < kVerifyCalls || ((g_verifiedCalls & kVerifyMask) == 0)) {
+    if (g_verifiedCalls < kVerifyCalls || ((g_calls & kVerifyMask) == 0)) {
         return Verify_M2MeshPick(this_ptr, indicesBegin, indicesEnd, baseVertexIdx, testPoint2D, flag, hitObj, bestHeight, initialResult);
     }
     ++g_armedCalls;
