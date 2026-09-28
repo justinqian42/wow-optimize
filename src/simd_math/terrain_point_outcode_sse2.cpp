@@ -9,32 +9,26 @@
 // of candidate terrain cells against query bounding boxes using sub_7A61D0
 // (96 bytes at 0x007A61D0).
 //
-// Bottlenecks in the client implementation (0x007A61D0 -> 0x007A625F):
-//   1. Six sequential x87 subtraction/addition operations:
-//        d0 = pt.x - box.min.x + eps;  (fld, fsub, fadd)
-//        d1 = pt.y - box.min.y + eps;
-//        d2 = pt.z - box.min.z + eps;
-//        d3 = box.max.x - pt.x + eps;
-//        d4 = box.max.y - pt.y + eps;
-//        d5 = box.max.z - pt.z + eps;
-//   2. On every single test, the client stores the 32-bit float to the stack
-//      via fstp [ebp+arg_4] and immediately reloads it into a general-purpose
-//      register (mov ecx/esi, [ebp+arg_4]) to extract the sign bit via shr.
-//      This causes six consecutive store-to-load forwarding stalls on modern x86
-//      pipelines.
-//   3. High instruction count: 56 instructions per vertex test.
+// The client computes each of the six distances as (a - b) + eps in x87 at
+// 53-bit precision, stores it as a float and takes the sign bit (0x007A61D9
+// onwards; eps is flt_A3FDB8, 0.019444443f). The sign of the stored float is
+// the sign of the unrounded value, so the outcode is the sign of each sum in
+// double. This computes the six sums in packed double in the same order and
+// takes their signs with movmskpd.
 //
-// This replacement:
-//   - Evaluates all six plane distances in parallel using 128-bit packed SSE2
-//     subtractions and additions (_mm_sub_ps, _mm_add_ps).
-//   - Extracts sign bits branchlessly in two instructions using _mm_movemask_ps,
-//     eliminating all stack writes, loads, and store-forwarding stalls.
-//   - Reduces execution cost from 56 serialized instructions to ~10 vector
-//     instructions (6.30x speedup in microbenchmarks).
-//   - Bit-exact bitwise parity verified against client x87 instructions over
-//     1,000,000 cases with 0 bit differences (harness only, not run in a game).
-//   - Zero /GS stack security cookies via __declspec(safebuffers).
-//   - Pure dual-run verifier on hot path with immediate retirement on mismatch.
+// An earlier version did the sums in packed single. Rounding a - b to float
+// before adding eps can move a sum that is just below zero to exactly zero
+// when the subtraction is inexact (a tiny coordinate against a box face near
+// eps): pt = 1e-9, min = the float after eps gives a set bit in the client
+// and a clear one in single. On two million cases chosen near zero, single
+// disagreed with the client on 155,432 and double on none (Python doubles as
+// the x87 reference, struct round-trips for single).
+//
+// A startup self-test compares it with the client's arithmetic transcribed in
+// double on random and near-zero cases. At run time it is compared with the
+// client on the first 10,000 calls and one in 128 after, and retires on the
+// first difference. Off by default under the experimental switch
+// TerrainPointOutcode.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -80,7 +74,7 @@ static bool g_dead = false;
 static bool g_abSubject = false;
 static int  g_benchId = -1;
 
-static __m128 g_epsVec;
+static __m128d g_epsVec;
 
 // Telemetry counters:
 static uint64_t g_calls = 0;
@@ -89,25 +83,20 @@ static uint64_t g_fastCalls = 0;
 static uint64_t g_verified = 0;
 static uint64_t g_mismatches = 0;
 
-static uint64_t g_fastCyclesTotal = 0;
-static uint64_t g_clientCyclesTotal = 0;
-static uint32_t g_timedPairs = 0;
 
 constexpr uint64_t kLearnCalls = 10000;
 constexpr uint64_t kResampleMask = 127;
 
+// Lanes: bits 0-1 are pt.x - min.x and pt.y - min.y; bits 2-3 are
+// pt.z - min.z and max.x - pt.x; bits 4-5 are max.y - pt.y and max.z - pt.z.
 __forceinline int Fast_TerrainPointOutcode(const float* box, const float* pt) {
-    __m128 p = _mm_set_ps(0.0f, pt[2], pt[1], pt[0]);
-    __m128 bmin = _mm_set_ps(0.0f, box[2], box[1], box[0]);
-    __m128 bmax = _mm_set_ps(0.0f, box[5], box[4], box[3]);
-
-    __m128 diff_min = _mm_add_ps(_mm_sub_ps(p, bmin), g_epsVec);
-    __m128 diff_max = _mm_add_ps(_mm_sub_ps(bmax, p), g_epsVec);
-
-    int m_min = _mm_movemask_ps(diff_min) & 7;
-    int m_max = _mm_movemask_ps(diff_max) & 7;
-
-    return m_min | (m_max << 3);
+    const __m128d d01 = _mm_add_pd(_mm_sub_pd(_mm_set_pd(pt[1], pt[0]),
+                                              _mm_set_pd(box[1], box[0])), g_epsVec);
+    const __m128d d23 = _mm_add_pd(_mm_sub_pd(_mm_set_pd(box[3], pt[2]),
+                                              _mm_set_pd(pt[0], box[2])), g_epsVec);
+    const __m128d d45 = _mm_add_pd(_mm_sub_pd(_mm_set_pd(box[5], box[4]),
+                                              _mm_set_pd(pt[2], pt[1])), g_epsVec);
+    return _mm_movemask_pd(d01) | (_mm_movemask_pd(d23) << 2) | (_mm_movemask_pd(d45) << 4);
 }
 
 __declspec(safebuffers)
@@ -126,22 +115,11 @@ static int __cdecl Hook_TerrainPointOutcode(const float* box, const float* pt) {
     ++g_fastCalls;
 
     if (g_calls <= kLearnCalls || (g_calls & kResampleMask) == 0) {
-        uint64_t t0 = 0, t1 = 0, t2 = 0;
-        if (g_benchId >= 0 && g_timedPairs < 100000) {
-            t0 = __rdtsc();
-        }
-
+        const uint64_t t0 = SelfBench::Now();
         int fast_result = Fast_TerrainPointOutcode(box, pt);
-
-        if (g_benchId >= 0 && g_timedPairs < 100000) {
-            t1 = __rdtsc();
-        }
-
+        const uint64_t t1 = SelfBench::Now();
         int client_result = g_orig(box, pt);
-
-        if (g_benchId >= 0 && g_timedPairs < 100000) {
-            t2 = __rdtsc();
-        }
+        const uint64_t t2 = SelfBench::Now();
 
         ++g_verified;
 
@@ -153,11 +131,7 @@ static int __cdecl Hook_TerrainPointOutcode(const float* box, const float* pt) {
             return client_result;
         }
 
-        if (g_benchId >= 0 && g_timedPairs < 100000) {
-            g_fastCyclesTotal += (t1 - t0);
-            g_clientCyclesTotal += (t2 - t1);
-            ++g_timedPairs;
-        }
+        if (g_benchId >= 0) SelfBench::Pair(g_benchId, t1 - t0, t2 - t1);
 
         return fast_result;
     }
@@ -165,37 +139,53 @@ static int __cdecl Hook_TerrainPointOutcode(const float* box, const float* pt) {
     return Fast_TerrainPointOutcode(box, pt);
 }
 
-bool RunSelfTest() {
-    const float box[6] = { -10.0f, -10.0f, -10.0f, 10.0f, 10.0f, 10.0f };
+// sub_7A61D0 as the disassembly has it: each sum rounded once to float by
+// the fstp, and the sign bit of that float shifted into place.
+int RefTerrainPointOutcode(const float* edx, const float* eax, double eps) {
+    const float d[6] = {
+        (float)(((double)eax[0] - edx[0]) + eps), (float)(((double)eax[1] - edx[1]) + eps),
+        (float)(((double)eax[2] - edx[2]) + eps), (float)(((double)edx[3] - eax[0]) + eps),
+        (float)(((double)edx[4] - eax[1]) + eps), (float)(((double)edx[5] - eax[2]) + eps) };
+    int r = 0;
+    for (int i = 0; i < 6; ++i) {
+        uint32_t bits;
+        memcpy(&bits, &d[i], 4);
+        r |= (int)(bits >> 31) << i;
+    }
+    return r;
+}
 
-    // Point inside box -> outcode 0
-    const float p_inside[3] = { 0.0f, 0.0f, 0.0f };
-    if (Fast_TerrainPointOutcode(box, p_inside) != 0) return false;
+uint32_t g_rng = 0x2545F491u;
+uint32_t Rng() { g_rng ^= g_rng << 13; g_rng ^= g_rng >> 17; g_rng ^= g_rng << 5; return g_rng; }
+float RngF(float lo, float hi) { return lo + (hi - lo) * (float)(Rng() & 0xFFFFFF) / 16777215.0f; }
+float Step(float x, int n) { uint32_t b; memcpy(&b, &x, 4); b += (uint32_t)n; memcpy(&x, &b, 4); return x; }
 
-    // Point below minX -> bit 0 (1)
-    const float p_minX[3] = { -15.0f, 0.0f, 0.0f };
-    if ((Fast_TerrainPointOutcode(box, p_minX) & 1) == 0) return false;
-
-    // Point below minY -> bit 1 (2)
-    const float p_minY[3] = { 0.0f, -15.0f, 0.0f };
-    if ((Fast_TerrainPointOutcode(box, p_minY) & 2) == 0) return false;
-
-    // Point below minZ -> bit 2 (4)
-    const float p_minZ[3] = { 0.0f, 0.0f, -15.0f };
-    if ((Fast_TerrainPointOutcode(box, p_minZ) & 4) == 0) return false;
-
-    // Point above maxX -> bit 3 (8)
-    const float p_maxX[3] = { 15.0f, 0.0f, 0.0f };
-    if ((Fast_TerrainPointOutcode(box, p_maxX) & 8) == 0) return false;
-
-    // Point above maxY -> bit 4 (16)
-    const float p_maxY[3] = { 0.0f, 15.0f, 0.0f };
-    if ((Fast_TerrainPointOutcode(box, p_maxY) & 16) == 0) return false;
-
-    // Point above maxZ -> bit 5 (32)
-    const float p_maxZ[3] = { 0.0f, 0.0f, 15.0f };
-    if ((Fast_TerrainPointOutcode(box, p_maxZ) & 32) == 0) return false;
-
+// Random boxes and points, and points placed so that a sum lands within a
+// few ulps of zero with an inexact subtraction, where single precision and
+// the client disagree.
+bool RunSelfTest(double eps) {
+    const float feps = (float)eps;
+    for (int c = 0; c < 20000; ++c) {
+        float box[6], pt[3];
+        for (int i = 0; i < 3; ++i) {
+            const float a = RngF(-50.0f, 50.0f), b = RngF(-50.0f, 50.0f);
+            box[i] = a < b ? a : b;
+            box[i + 3] = a < b ? b : a;
+            pt[i] = RngF(-60.0f, 60.0f);
+        }
+        if (c % 2) {
+            const int k = (int)(Rng() % 3);
+            pt[k] = RngF(-1e-7f, 1e-7f);
+            box[k] = Step(feps, (int)(Rng() % 7) - 3);
+            box[k + 3] = Step(-feps, (int)(Rng() % 7) - 3);
+        }
+        if (Fast_TerrainPointOutcode(box, pt) != RefTerrainPointOutcode(box, pt, eps)) {
+            Log("[TerrainPointOutcode] NOT active: case %d answered 0x%02X where the client's "
+                "arithmetic gives 0x%02X.", c, Fast_TerrainPointOutcode(box, pt),
+                RefTerrainPointOutcode(box, pt, eps));
+            return false;
+        }
+    }
     return true;
 }
 
@@ -217,10 +207,9 @@ bool Init() {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         eps = 0.019444443f;
     }
-    g_epsVec = _mm_set1_ps(eps);
+    g_epsVec = _mm_set1_pd((double)eps);
 
-    if (!RunSelfTest()) {
-        Log("[TerrainPointOutcode] Startup self-test failed; hook not installed.");
+    if (!RunSelfTest((double)eps)) {
         return false;
     }
 
@@ -247,7 +236,7 @@ bool Init() {
 
     SamplingProfiler::RegisterSelfSymbol("TerrainPointOutcode", (const void*)&Hook_TerrainPointOutcode);
 
-    Log("[TerrainPointOutcode] ACTIVE on sub_7A61D0 (terrain vertex 3D Cohen-Sutherland outcode, 96 bytes, 128-bit SSE2).");
+    Log("[TerrainPointOutcode] ACTIVE on sub_7A61D0 (terrain point outcode in packed double). Off by default.");
     if (g_abSubject) {
         Log("[TerrainPointOutcode]   under A/B test: its OFF stints run the client's original function.");
     }
@@ -269,14 +258,6 @@ void LogStats() {
 
     Log("[TerrainPointOutcode] calls=%llu (ctrl=%llu, fast=%llu), verified=%llu, mismatches=%llu (dead=%d)",
         g_calls, g_controlCalls, g_fastCalls, g_verified, g_mismatches, g_dead ? 1 : 0);
-
-    if (g_timedPairs >= 100) {
-        const double avgFast = (double)g_fastCyclesTotal / g_timedPairs;
-        const double avgClient = (double)g_clientCyclesTotal / g_timedPairs;
-        const double speedup = (avgFast > 0.0) ? (avgClient / avgFast) : 1.0;
-        Log("[TerrainPointOutcode] cycle timing (%u pairs): fast=%.1f cycles, client=%.1f cycles (%.2fx speedup)",
-            g_timedPairs, avgFast, avgClient, speedup);
-    }
 }
 
 } // namespace TerrainPointOutcode
