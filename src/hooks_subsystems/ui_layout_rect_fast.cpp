@@ -22,18 +22,20 @@
 // If all four match within 1e-5f, it clears bits 0xC00 from flags and returns 1
 // with zero state modification.
 //
-// This replacement accelerates the unchanged frame check with a 4-wide packed
-// SSE2 vector comparison (_mm_loadu_ps, _mm_sub_ps, sign bit mask, _mm_cmplt_ps,
-// _mm_movemask_ps == 0x0F), resolving unchanged frames in ~4 instructions
-// without x87 serialization, stack spills, or helper function calls.
-// Verified offline against verbatim client instructions over 1,500,000 cases
-// with 0 bit differences (2.49x speedup; harness only, not run in a game).
-// Zero /GS security cookies and zero SEH frames on the hot path via __declspec(safebuffers).
+// This replacement makes the four comparisons at once. The client subtracts
+// in x87 at 53-bit precision (in sub_489570 for bottom and top, in sub_482870
+// for left and right), so the differences here are taken in packed double,
+// where they round the same; eps is flt_9EA558, 9.9999997e-6f. An earlier
+// version subtracted in packed single, which rounds the difference of two
+// tiny coordinates with different exponents and can carry it across eps: on
+// two million cases chosen near eps it disagreed with the client on 22,877.
+// Its runtime reference subtracted bottom and top in single too, so the check
+// could not see it.
 //
-// Verification:
-// Dual-runs comparison against client sub_482870 logic on unchanged frames for
-// the first 10,000 calls and 1 in every 128 calls thereafter, verifying return
-// values bit for bit. Retires immediately on first mismatch.
+// Verification: on the first 10,000 calls and one in 128 after, the rect
+// test is also made the client's way (x87-equivalent double for bottom and
+// top, the client's own sub_482870 for left and right) and the replacement
+// retires on the first difference.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -91,25 +93,24 @@ unsigned long long g_controlCalls = 0;
 unsigned g_mismatches = 0;
 
 static inline bool SSE2_RectEqual(const float* new_rect, const float* old_rect) {
-    __m128 v_new = _mm_loadu_ps(new_rect);
-    __m128 v_old = _mm_loadu_ps(old_rect);
-    __m128 v_diff = _mm_sub_ps(v_new, v_old);
-    static const __m128 SIGN_MASK = _mm_castsi128_ps(_mm_set1_epi32(0x7FFFFFFF));
-    __m128 v_abs = _mm_and_ps(v_diff, SIGN_MASK);
-    static const __m128 EPSILON = _mm_set1_ps(9.9999997e-6f);
-    __m128 v_cmp = _mm_cmplt_ps(v_abs, EPSILON);
-    return (_mm_movemask_ps(v_cmp) == 0x0F);
+    const __m128 n = _mm_loadu_ps(new_rect);
+    const __m128 o = _mm_loadu_ps(old_rect);
+    const __m128d d01 = _mm_sub_pd(_mm_cvtps_pd(n), _mm_cvtps_pd(o));
+    const __m128d d23 = _mm_sub_pd(_mm_cvtps_pd(_mm_movehl_ps(n, n)), _mm_cvtps_pd(_mm_movehl_ps(o, o)));
+    const __m128d abs_mask = _mm_castsi128_pd(_mm_set_epi32(0x7FFFFFFF, -1, 0x7FFFFFFF, -1));
+    const __m128d eps = _mm_set1_pd((double)9.9999997e-6f);
+    const int m = _mm_movemask_pd(_mm_cmplt_pd(_mm_and_pd(d01, abs_mask), eps)) |
+                  (_mm_movemask_pd(_mm_cmplt_pd(_mm_and_pd(d23, abs_mask), eps)) << 2);
+    return m == 0x0F;
 }
 
+// The client's order: bottom and top inline (0x004895BE, 0x004895D7; an
+// unordered compare fails), then left and right through sub_482870.
 static inline bool Client_RectEqual(const float* new_rect, const float* old_rect) {
     const float flt_eps = 9.9999997e-6f;
-    // 1. Bottom
-    if (!(fabs(new_rect[1] - old_rect[1]) < flt_eps)) return false;
-    // 2. Top
-    if (!(fabs(new_rect[3] - old_rect[3]) < flt_eps)) return false;
-    // 3. Left via client sub_482870
+    if (!(fabs((double)new_rect[1] - (double)old_rect[1]) < (double)flt_eps)) return false;
+    if (!(fabs((double)new_rect[3] - (double)old_rect[3]) < (double)flt_eps)) return false;
     if (!Client_Sub482870(new_rect[0], old_rect[0], flt_eps)) return false;
-    // 4. Right via client sub_482870
     if (!Client_Sub482870(new_rect[2], old_rect[2], flt_eps)) return false;
     return true;
 }
