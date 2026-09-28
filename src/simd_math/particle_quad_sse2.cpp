@@ -39,8 +39,19 @@
 //     x87 stack; the thunk jumps directly to the rejoin site.
 //
 // Verification:
-//   - Verified offline against verbatim client instruction sequence over
-//     one million random test cases with 0 bit differences (diffs: 0).
+//   - Checked by hand against the disassembly, vertex by vertex, on
+//     2026-09-28. Three of the four vertices matched the client's order. The
+//     fourth's x did not - the client computes (cw + sh) + cx, this computed
+//     (cw + cx) + sh - and is fixed. An earlier note here claimed an offline
+//     check of a million cases with no differences; a reference that shares
+//     the transcription's mistake agrees with it every time, so that number
+//     proved nothing about this vertex. The products cw, ch, sw, sh are
+//     float times float and exact in a double, which is why the order of the
+//     sums is the whole of the precision question.
+//   - The comparison for the bounding box uses the rounded float where the
+//     client compares the unrounded x87 value. Rounding to nearest is
+//     monotonic and the box edges are floats, so a value that rounds onto an
+//     edge leaves it unchanged either way: same result.
 //   - Six fixed cases run at startup asserting bit-exact parity before patching.
 //   - Head (9 bytes) and tail (21 bytes) are checked with memcmp before writing.
 // ============================================================================
@@ -185,8 +196,15 @@ __forceinline void ComputeQuadDirect(
     const float y2 = (float)((sw + ch) + d_cy);
     const float z2 = cz;
 
-    // Vertex 3: (cw + cx) + sh, (sw + cy) - ch, cz
-    const float x3 = (float)((cw + d_cx) + sh);
+    // Vertex 3: (cw + sh) + cx, (sw + cy) - ch, cz
+    //
+    // The x is (cw + sh) + cx: at 0x0097CAE6 the client swaps sh to the top,
+    // faddp's it into cw, and only then adds cx. This used to read
+    // (cw + cx) + sh. A Python-double check of 2,000,000 random cases found no
+    // float result where the two differ - three exact float products rounded
+    // once to 24 bits rarely feel the order - but rarely is not never, and in
+    // the client's order this is exact by construction.
+    const float x3 = (float)((cw + sh) + d_cx);
     const float y3 = (float)((sw + d_cy) - ch);
     const float z3 = cz;
 
