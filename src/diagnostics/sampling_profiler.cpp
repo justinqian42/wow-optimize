@@ -1054,6 +1054,134 @@ static bool IsWaitSymbol(const char* n) {
            strncmp(n, "NtRemoveIoCompletion", 20) == 0;
 }
 
+// ---- executing time by subsystem --------------------------------------------
+//
+// The function list is flat - the hottest client function is a few percent - and
+// a flat list cannot say which part of the client is worth rebuilding. This sums
+// the same buckets by subsystem.
+//
+// The wow.exe ranges come from the client's own source-file names: the engine
+// passes __FILE__ to its allocator and its asserts, so 1768 functions carry a
+// reference to exactly one .cpp, and the linker keeps each object file's
+// functions together. Each range below is bounded by functions tagged with the
+// files named (IDA, 2026-09-28). Untagged functions between two different files
+// are assigned by these bounds, so a range edge can be off by a function, and a
+// page of unnamed code is classified by where the page starts.
+enum ProfileFamily {
+    PF_LUA, PF_M2, PF_PARTICLES, PF_MAP, PF_WORLD, PF_UI, PF_GAMEUI, PF_OBJECTS,
+    PF_GX, PF_MATH, PF_TEXTURES, PF_SOUND, PF_OBJMGR, PF_WORLDFRAME, PF_FONTS,
+    PF_DBCACHE, PF_RLE, PF_WOW_OTHER, PF_SELF, PF_D3D9, PF_DRIVER, PF_NTDLL,
+    PF_OTHER_MODULE, PF_COUNT
+};
+
+static const char* const kFamilyName[PF_COUNT] = {
+    "Lua (0x84B000-0x860000, lmemPool.cpp inside)",
+    "M2 models and animation (M2Cache/M2Scene/M2Model/M2Shared.cpp)",
+    "particles (ParticleSystem2.cpp)",
+    "map: terrain, WMO, liquids, collision (Map*.cpp)",
+    "world and scene (World.cpp, WorldScene.cpp, MapWeather.cpp)",
+    "UI framework (CSimple*.cpp)",
+    "game UI scripts and events (AddOns, ScriptEvents, Tooltip, Camera)",
+    "game objects (Unit_C, Player_C, Spell/Effect, Missile, Item)",
+    "Gx render device, engine side of D3D (CGxDevice*.cpp)",
+    "math and geometry library (CMatrix, quaternions, frustum, ray-tri)",
+    "textures and model blobs (Texture.cpp, ModelBlob.cpp)",
+    "sound (FMOD, SoundInterface2)",
+    "object manager (ObjectMgrClient.cpp)",
+    "world frame and character components",
+    "font rendering (GxuFont*.cpp)",
+    "DB cache (DBCache.cpp)",
+    "run-length decoder sub_4CFBB0 (DbcFastRle replaces it)",
+    "wow.exe outside the ranges above",
+    "wow_optimize.dll",
+    "d3d9.dll (DXVK or the system runtime)",
+    "graphics driver and Vulkan",
+    "ntdll: heap, locks, loader (not waiting)",
+    "other modules",
+};
+
+struct FamilyRange { uintptr_t lo, hi; ProfileFamily fam; };
+static const FamilyRange kFamilyRanges[] = {
+    { 0x00481000, 0x0049F000, PF_UI },          // EvtTimer .. CSimpleFrameScript
+    { 0x004B4000, 0x004BD200, PF_TEXTURES },    // Texture, ModelBlob, Profile
+    { 0x004BD200, 0x004C5D60, PF_MATH },        // CMatrix / C3Vector (TextureBlob inside)
+    { 0x004C5D60, 0x004CE000, PF_SOUND },       // SoundInterface2*
+    { 0x004CFBB0, 0x004CFC10, PF_RLE },
+    { 0x004D2000, 0x004D7800, PF_OBJMGR },      // ObjectAlloc, ObjectMgrClient
+    { 0x004F1A00, 0x004FAC00, PF_WORLDFRAME },  // CharacterComponent .. WorldFrame
+    { 0x005F2A00, 0x00631600, PF_GAMEUI },      // CalendarEvent .. Tooltip
+    { 0x0067BA00, 0x00680E00, PF_DBCACHE },
+    { 0x00680E00, 0x006AB400, PF_GX },          // shader constants sub_6833E0, CGxDevice*
+    { 0x006C4000, 0x006C9000, PF_FONTS },
+    { 0x006CE000, 0x0071F400, PF_OBJECTS },     // Player_C .. Unit_C
+    { 0x00780000, 0x0079E000, PF_WORLD },       // World, MapWeather, WorldScene
+    { 0x0079E000, 0x007DA000, PF_MAP },         // Map, MapObj, MapChunk, MapObjGroup, liquids
+    { 0x0081C000, 0x0083E000, PF_M2 },          // M2Cache .. M2Shared
+    { 0x0084B000, 0x00860000, PF_LUA },
+    { 0x008F0000, 0x0095D000, PF_SOUND },       // fmod_*, aSfxDsp
+    { 0x0095DC00, 0x00978A10, PF_UI },          // CSimpleMovieFrame .. CSimpleHyperlinkedFrame
+    { 0x00978A10, 0x00981130, PF_PARTICLES },   // ParticleSystem2 up to GfxSingletonManager
+    { 0x00981130, 0x00986000, PF_MATH },        // quaternions, colour, frustum, ray-tri
+};
+
+static bool IsDriverModule(const char* n) {
+    static const char* const kPrefixes[] = {
+        "nv", "ati", "amd", "igd", "ig7", "ig8", "ig9", "ig1",
+        "vulkan", "dxgi", "d3d10", "d3d11", "d3d12",
+    };
+    for (const char* p : kPrefixes)
+        if (_strnicmp(n, p, strlen(p)) == 0) return true;
+    return false;
+}
+
+static ProfileFamily FamilyOfBucket(uintptr_t addr, const char* name) {
+    if (addr >= WOW_BASE && addr <= WOW_END) {
+        for (const FamilyRange& r : kFamilyRanges)
+            if (addr >= r.lo && addr < r.hi) return r.fam;
+        return PF_WOW_OTHER;
+    }
+    if (g_selfBase && addr >= g_selfBase && addr < g_selfEnd) return PF_SELF;
+    if (!name) return PF_OTHER_MODULE;
+    if (lstrcmpiA(name, "d3d9.dll") == 0) return PF_D3D9;
+    if (IsDriverModule(name)) return PF_DRIVER;
+    if (lstrcmpiA(name, "ntdll.dll") == 0 || (name[0] == 'N' && name[1] == 't') ||
+        (name[0] == 'R' && name[1] == 't' && name[2] == 'l'))
+        return PF_NTDLL;
+    return PF_OTHER_MODULE;
+}
+
+// Called once per report with the finished buckets and the executing total the
+// percentages are shares of. The shares of a whole must add up to it, so the
+// report says when they do not.
+static void LogFamilies(const SampleBucket* buckets, int bucketCount, uint64_t workSamples) {
+    if (!workSamples) return;
+    uint64_t fam[PF_COUNT] = {};
+    uint64_t summed = 0;
+    for (int i = 0; i < bucketCount; i++) {
+        if (!buckets[i].count || IsWaitSymbol(buckets[i].name)) continue;
+        fam[FamilyOfBucket(buckets[i].addr, buckets[i].name)] += buckets[i].count;
+        summed += buckets[i].count;
+    }
+    int order[PF_COUNT];
+    for (int i = 0; i < PF_COUNT; i++) order[i] = i;
+    std::sort(order, order + PF_COUNT, [&](int a, int b) { return fam[a] > fam[b]; });
+
+    Log("[SamplingProfiler] === EXECUTING TIME BY SUBSYSTEM (share of the time the main "
+        "thread was running code; wow.exe split by the client's own source files) ===");
+    for (int k = 0; k < PF_COUNT; k++) {
+        const int f = order[k];
+        if (!fam[f]) break;
+        Log("[SamplingProfiler]   %5.1f%%  %s", 100.0 * (double)fam[f] / (double)workSamples,
+            kFamilyName[f]);
+    }
+    if (summed != workSamples)
+        Log("[SamplingProfiler]   these add up to %llu samples where %llu were executing; "
+            "the difference is samples no bucket holds, so every share above is low by "
+            "up to %.1f%%.", (unsigned long long)summed, (unsigned long long)workSamples,
+            100.0 * (double)(workSamples > summed ? workSamples - summed : summed - workSamples)
+                  / (double)workSamples);
+}
+
 // Finds the single most-sampled instruction address inside a 4KB page.
 //
 // The ranked list groups unnamed client code by page, which is far too coarse to
@@ -1621,6 +1749,8 @@ static void DumpResults() {
             }
         }
     }
+
+    LogFamilies(buckets, bucketCount, workSamples);
 
     // Dump top-N (named functions and hot unlisted regions intermixed by heat).
     // Two percentages: of everything, and of the time the thread was running -
