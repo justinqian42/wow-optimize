@@ -38,7 +38,23 @@
 //   spills or control word modifications. Vec3 coordinate extrema evaluate branchlessly
 //   using bitwise IEEE fabs.
 //
-//   Dual-run verified against client output for bit-exact floating-point and integer results.
+//   Read against the disassembly on 2026-09-28, which found four differences
+//   the startup self-tests never reached:
+//   - sub_48BD20 forms x * 255 + 0.5 in x87 at 53-bit precision and truncates.
+//     Packed single rounded x * 255 first: x = 0.5 / 255 gave 1 where the
+//     client gives 0 (12 floats in a million uniform in [0, 1]). Now packed
+//     double.
+//   - Both pack routines keep the low byte of the integer (movzx byte); the
+//     SSE version saturated, so any channel outside [0, 1] differed (1.01 is
+//     2 in the client, was 255 here).
+//   - sub_9829B0 and sub_9829F0 send an unordered first compare to the Y
+//     branch; the C++ comparisons sent a NaN the other way.
+//   - sub_985030 subtracts 360 and takes the fractional part in 53-bit
+//     precision and clamps a NaN saturation to 1; this did both in single and
+//     kept the NaN.
+//   The self-tests, which run each routine against the client's own, now
+//   include values next to (k + 0.5) / 255, channels outside [0, 1], NaN
+//   components and saturations, and hues up to 1200.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -182,12 +198,17 @@ inline float* Color_UnpackBGR_SSE2(float* this_out, const uint8_t* bgr) {
     return this_out;
 }
 
+// sub_48BD20: x * 255 + 0.5 at 53-bit precision, truncated (fldcw 0C00h),
+// low byte of the integer kept.
 inline uint32_t Color_PackBGRA_SSE2(uint32_t* this_out, float a, float r, float g, float b) {
     if (!this_out) return 0;
 
     const __m128 v = _mm_setr_ps(b, g, r, a);
-    const __m128 scaled = _mm_add_ps(_mm_mul_ps(v, _mm_set1_ps(255.0f)), _mm_set1_ps(0.5f));
-    const __m128i vi = _mm_cvttps_epi32(scaled); // truncation matches stock fldcw 0C00h + fistp
+    const __m128d k255 = _mm_set1_pd(255.0);
+    const __m128d half = _mm_set1_pd(0.5);
+    const __m128i lo = _mm_cvttpd_epi32(_mm_add_pd(_mm_mul_pd(_mm_cvtps_pd(v), k255), half));
+    const __m128i hi = _mm_cvttpd_epi32(_mm_add_pd(_mm_mul_pd(_mm_cvtps_pd(_mm_movehl_ps(v, v)), k255), half));
+    const __m128i vi = _mm_and_si128(_mm_unpacklo_epi64(lo, hi), _mm_set1_epi32(0xFF));
     const __m128i v16 = _mm_packs_epi32(vi, vi);
     const __m128i v8 = _mm_packus_epi16(v16, v16);
 
@@ -201,7 +222,9 @@ inline uint8_t* Color_PackBGR_SSE2(uint8_t* this_out, const float* rgb) {
 
     const __m128 v = _mm_setr_ps(rgb[2], rgb[1], rgb[0], 1.0f);
     const __m128 scaled = _mm_mul_ps(v, _mm_set1_ps(255.0f));
-    const __m128i vi = _mm_cvtps_epi32(scaled); // round to nearest even matches fistp default CW
+    // sub_9851A0 stores x * 255 as a float, rounds it to nearest with fistp and
+    // keeps the low byte of the integer.
+    const __m128i vi = _mm_and_si128(_mm_cvtps_epi32(scaled), _mm_set1_epi32(0xFF));
     const __m128i v16 = _mm_packs_epi32(vi, vi);
     const __m128i v8 = _mm_packus_epi16(v16, v16);
 
@@ -228,9 +251,9 @@ inline int Vec3_DominantAxis_Fast(const float* this_vec) {
     memcpy(&ay, &iy, sizeof(float));
     memcpy(&az, &iz, sizeof(float));
 
-    // Match client sub_9829B0 exact branch order and tie-breaking:
-    // Ties favour Z over X/Y and Y over X.
-    if (ax <= ay) {
+    // sub_9829B0: test ah,41h jnz at 0x009829C7 takes |x| <= |y| and an
+    // unordered compare to the Y branch.
+    if (!(ax > ay)) {
         return (ay > az) ? 1 : 2;
     } else {
         return (ax > az) ? 0 : 2;
@@ -255,12 +278,13 @@ inline int Vec3_RecessiveAxis_Fast(const float* this_vec) {
     memcpy(&ay, &iy, sizeof(float));
     memcpy(&az, &iz, sizeof(float));
 
-    // Match client sub_9829F0 exact branch order and tie-breaking:
-    // Ties favour Y over Z (in branch ax >= ay) and Z over X (in branch ax < ay).
-    if (ax >= ay) {
+    // sub_9829F0: test ah,5 jp at 0x00982A07 takes |x| >= |y| and an
+    // unordered compare to the Y branch; in the X branch only an ordered
+    // |x| < |z| answers 0.
+    if (!(ax < ay)) {
         return (ay > az) ? 2 : 1;
     } else {
-        return (ax >= az) ? 2 : 0;
+        return (ax < az) ? 0 : 2;
     }
 }
 
@@ -328,30 +352,23 @@ inline void Color_HSVToRGB_SSE2(const float* hsv, float* rgb) {
         return;
     }
 
-    if (h >= 360.0f) {
-        h -= 360.0f;
-    }
-
-    // Multiply by 1.0f / 60.0f using client's exact float constant 0x3C888889 (0.016666668f)
+    // 0x00985071: h - 360 when h >= 360 (ordered), kept at 53 bits, times
+    // flt_A393E4 (0.016666668f), stored as a float.
     const float kInv60 = 0.016666668f;
-    float v12 = h * kInv60;
+    const double d_h = (h >= 360.0f) ? (double)h - 360.0 : (double)h;
+    const float v12 = (float)(d_h * (double)kInv60);
 
-    // In stock x87: fsub flt_B2D724 (0.5f) followed by fistp (round to nearest even)
-    // In SSE: _mm_cvtss_si32(_mm_sub_ss(v12, 0.5f)) matches fistp rounding
-    __m128 v_v12 = _mm_set_ss(v12);
-    __m128 v_sub = _mm_sub_ss(v_v12, _mm_set_ss(0.5f));
-    int sector = _mm_cvtss_si32(v_sub);
+    // fsub flt_B2D724 (0.5f) at 53 bits, fistp to nearest.
+    int sector = _mm_cvtsd_si32(_mm_set_sd((double)v12 - 0.5));
     if (sector > 5) {
         sector = 5;
     }
 
-    float f = v12 - static_cast<float>(sector);
-    float s_clamped = (s >= 1.0f) ? 1.0f : s;
-
-    // Intermediate terms evaluated in 53-bit double precision matching client x87 FPU stack:
-    double d_s = (double)s_clamped;
-    double d_f = (double)f;
-    double d_v = (double)v;
+    // fild; fsubr: the fraction stays at 53 bits. The saturation is used only
+    // when it is below 1 (0x009850B6 test ah,41h jnz), so a NaN becomes 1.
+    const double d_f = (double)v12 - (double)sector;
+    const double d_s = (s < 1.0f) ? (double)s : 1.0;
+    const double d_v = (double)v;
 
     float v9  = (float)((1.0 - d_s * d_f) * d_v);
     float v10 = (float)((1.0 - d_s) * d_v);
@@ -821,11 +838,20 @@ static bool SelfTestColorUnpack() {
     return true;
 }
 
+// The float `n` representable steps away from x.
+static float StepFloat(float x, int n) {
+    uint32_t b;
+    memcpy(&b, &x, 4);
+    b += (uint32_t)n;
+    memcpy(&x, &b, 4);
+    return x;
+}
+
 static bool SelfTestColorPack() {
     ColorPackBGRA_fn orig_pack_bgra = (ColorPackBGRA_fn)kColorPackBGRA;
     ColorPackBGR_fn  orig_pack_bgr  = (ColorPackBGR_fn)kColorPackBGR;
 
-    const int CASES = 20000;
+    const int CASES = 60000;
     unsigned seed = 0x87654321u;
 
     for (int c = 0; c < CASES; ++c) {
@@ -833,6 +859,21 @@ static bool SelfTestColorPack() {
         for (int i = 0; i < 4; ++i) {
             seed = seed * 1664525u + 1013904223u;
             rgba[i] = (float)(seed & 0xFFFF) / 65535.0f; // [0.0f, 1.0f]
+        }
+
+        // Values next to (k + 0.5) / 255, where rounding x * 255 early moves
+        // the result, and channels outside [0, 1], where the low byte wraps.
+        if (c >= 20000 && c < 40000) {
+            for (int i = 0; i < 4; ++i) {
+                seed = seed * 1664525u + 1013904223u;
+                const int k = (int)((seed >> 8) % 255);
+                rgba[i] = StepFloat(((float)k + 0.5f) / 255.0f, (int)((seed >> 20) % 41) - 20);
+            }
+        } else if (c >= 40000) {
+            for (int i = 0; i < 4; ++i) {
+                seed = seed * 1664525u + 1013904223u;
+                rgba[i] = (float)(int)(seed >> 8 & 0xFFFF) / 65535.0f * 7.0f - 3.0f;
+            }
         }
 
         // Include edge values: 0.0f, 1.0f, exact 1/255 increments
@@ -920,6 +961,11 @@ static bool SelfTestDominantAxis() {
         if (c % 25 == 0) {
             v[2] = v[1]; // Y == Z
         }
+        // A NaN component: the client's compares send it down particular branches.
+        if (c % 13 == 0) {
+            const uint32_t nan_bits = 0x7FC00000u;
+            memcpy(&v[(c / 13) % 3], &nan_bits, 4);
+        }
 
         int theirs = -1;
         __try {
@@ -964,6 +1010,11 @@ static bool SelfTestRecessiveAxis() {
         }
         if (c % 25 == 0) {
             v[2] = v[1]; // Y == Z
+        }
+        // A NaN component: the client's compares send it down particular branches.
+        if (c % 13 == 0) {
+            const uint32_t nan_bits = 0x7FC00000u;
+            memcpy(&v[(c / 13) % 3], &nan_bits, 4);
         }
 
         int theirs = -1;
@@ -1038,6 +1089,10 @@ static bool SelfTestRGBToHSV() {
         if ((i % 5) == 0) rgb[1] = rgb[0];
         if ((i % 7) == 0) rgb[2] = rgb[0];
         if ((i % 11) == 0) rgb[2] = rgb[1];
+        if ((i % 13) == 0) {
+            const uint32_t nan_bits = 0x7FC00000u;
+            memcpy(&rgb[(i / 13) % 3], &nan_bits, 4);
+        }
 
         float theirs[3] = { 0 };
         float mine[3]   = { 0 };
@@ -1119,6 +1174,11 @@ static bool SelfTestHSVToRGB() {
 
         if ((i % 10) == 0) hsv[1] = 0.0f;
         if ((i % 15) == 0) hsv[1] = 1.0f + next_float();
+        if ((i % 3) == 1) hsv[0] = next_float() * 1300.0f - 100.0f;  // past 720, and negative
+        if ((i % 17) == 0) {
+            const uint32_t nan_bits = 0x7FC00000u;
+            memcpy(&hsv[1], &nan_bits, 4);
+        }
 
         float theirs[3] = { 0 };
         float mine[3]   = { 0 };
