@@ -70,6 +70,7 @@
 #include "session_verdict.h"
 #include "self_bench.h"
 #include "sampling_profiler.h"
+#include "parallel_particles.h"
 
 extern "C" void Log(const char* fmt, ...);
 MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
@@ -160,7 +161,10 @@ void __cdecl Detour(float x, float* outFrac, int* outInt) {
     Split(x, &mineF, &mineI);
     const unsigned long long tB = SelfBench::Now();
     g_orig(x, outFrac, outInt);
-    SelfBench::Pair(g_benchSlot, tB - tA, SelfBench::Now() - tB);
+    // SelfBench adds its sums without a lock; the particle workers reach this
+    // function too.
+    if (!ParallelParticles::OnWorkerThread())
+        SelfBench::Pair(g_benchSlot, tB - tA, SelfBench::Now() - tB);
 
     uint32_t mineBits, theirBits;
     memcpy(&mineBits, &mineF, 4);
