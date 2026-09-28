@@ -142,7 +142,13 @@ __declspec(safebuffers) __forceinline void Walk(const uint8_t* bsp_nodes, uint32
                 break;
             }
 
+            // Axis 3 would make the client read past both boxes. Whatever
+            // it finds there, it finds in its own frame, so let it.
             uint32_t axis = node->flags & 3;
+            if (axis == 3) {
+                hand_to_client(cur.node_id, cur.query_box, cur.node_box);
+                break;
+            }
             float node_min = cur.node_box[axis];
             float query_max = cur.query_box[axis + 3];
             float node_max = cur.node_box[axis + 3];
@@ -432,7 +438,7 @@ void Shutdown() {
 
 void LogStats() {
     if (!g_installed) return;
-    Log("[CollisionBspTraverse] Calls: %llu, Leaves visited: %llu, Stack fallbacks: %llu",
+    Log("[CollisionBspTraverse] Calls: %llu, Leaves visited: %llu, nodes handed to the client: %llu",
         g_calls, g_leaves, g_fallbacks);
 }
 
