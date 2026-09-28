@@ -1,35 +1,20 @@
 // ============================================================================
 // Module: collision_swept_bsp_sse2.cpp
 //
-// Iterative world swept-ray collision BSP tree traversal (sub_7CA600).
+// Iterative walk of the collision tree for sub_7CB260's queries (sub_7CA600).
 //
-// In world collision detection for moving spheres and swept rays
-// (sub_7CB260 -> sub_7CA600), sub_7CA600 was sampled 4,984 times at 0x007CA61E
-// as a primary collision traversal bottleneck.
+// sub_7CA600 is sub_7CA180's code instruction for instruction, 0x480 bytes
+// further on, with sub_7C9AB0 as the leaf handler; this module is
+// collision_segment_bsp_sse2.cpp with the names changed, and everything said
+// there about the arithmetic, the NaN branches and the order holds here. The
+// leaf handler reaches sub_7C6600, which appends to word_D25BF8 and keeps the
+// nearest hit with <=, so the order of leaves is part of the answer.
 //
-// Bottlenecks in the client implementation (0x007CA600 -> 0x007CA8B8, 699 bytes):
-//   1. Deep recursive call overhead: allocates 84 bytes of stack frame per
-//      recursion level (sub esp, 54h plus 3 register saves: ebx, esi, edi) with
-//      7 recursive call sites.
-//   2. Serialized x87 status-word stalls: executes multiple fcom / fnstsw ax /
-//      test ah, 41h / test ah, 5 sequences to evaluate ray intervals and split
-//      planes.
-//   3. High per-node overhead for single-child traversals: allocating and
-//      tearing down stack frames even when traversing along a single branch.
+// An earlier version did the slab test on min/max of the endpoints and the cut
+// in single, and walked the far child through the client first when the stack
+// filled. Its self-test ran a copy of the loop.
 //
-// Optimizations implemented:
-//   - Transforms recursive traversal into iterative tree traversal with an
-//     explicit small stack (up to 64 levels).
-//   - Tail-recurses along the active child path, completely eliminating frame
-//     allocation and call overhead on single-child steps.
-//   - Evaluates slab bounds branchlessly with min/max comparisons.
-//   - Linear interpolation on straddling rays in IEEE double precision matching
-//     client semantics.
-//   - Zero /GS stack security cookies via __declspec(safebuffers) and zero SEH frames.
-//   - Bit-exact leaf sequence and ray endpoint equivalence verified over 1,000,000
-//     queries across 3,081,234 visited leaves (harness only).
-//   - Startup self-test validates traversal logic against fixed reference cases.
-//   - Off by default under experimental launcher switch CollisionSweptBsp.
+// Off by default under the experimental switch CollisionSweptBsp.
 // ============================================================================
 
 #include "collision_swept_bsp_sse2.h"
@@ -38,10 +23,8 @@
 #include "config.h"
 #include "ab_test.h"
 #include "sampling_profiler.h"
-#include "self_bench.h"
 
 #include <windows.h>
-#include <immintrin.h>
 #include <cstdint>
 #include <cstring>
 
@@ -83,395 +66,343 @@ struct WowBspNode {
 #pragma pack(pop)
 static_assert(sizeof(WowBspNode) == 16, "WowBspNode must be 16 bytes");
 
-struct C3Vector {
-    float x, y, z;
-};
-
-struct RaySegment {
-    C3Vector p0;
-    C3Vector p1;
-};
-
-struct Box6 {
-    float min_x, min_y, min_z;
-    float max_x, max_y, max_z;
-};
-
 struct SweptBspStackEntry {
     uint32_t node_id;
-    RaySegment ray;
-    Box6 node_box;
+    float    ray[6];       // p0, p1
+    float    node_box[6];  // min, max
 };
 
-typedef void (__fastcall* TraverseSweptBSP_fn)(void* this_ptr, void* dummy_edx,
+typedef void (__fastcall *FnTraverseSweptBSP)(void* this_ptr, void* dummy_edx,
                                                uint32_t node_id, const float* ray, const float* node_box);
-typedef void (__thiscall* LeafHandler_fn)(void* this_ptr, const void* node_ptr);
+static FnTraverseSweptBSP orig_TraverseSweptBSP = nullptr;
 
-TraverseSweptBSP_fn orig_TraverseSweptBSP = nullptr;
-const auto call_leaf = (LeafHandler_fn)kLeafHandler;
+typedef char (__thiscall *FnLeafHandler)(void* this_ptr, const void* node_ptr);
+static const FnLeafHandler call_leaf = (FnLeafHandler)kLeafHandler;
 
-bool g_installed = false;
-bool g_dead      = false;
+// Main-thread counters, read by the periodic report; a lower bound.
+static unsigned long long g_calls  = 0;
+static unsigned long long g_leaves = 0;
+static unsigned long long g_handed = 0;
 
-unsigned long long g_calls     = 0;
-unsigned long long g_leaves    = 0;
-unsigned long long g_fallbacks = 0;
+static bool g_installed = false;
+static bool g_abSubject = false;
 
-__declspec(safebuffers)
-void Fast_TraverseSweptBSP(void* this_ptr, uint32_t root_node_id, const RaySegment* root_ray, const float* root_node_box) {
-    void* bsp_desc = *(void**)this_ptr;
-    if (!bsp_desc) return;
-    const uint8_t* bsp_nodes = *(const uint8_t**)((uint8_t*)bsp_desc + 4);
-    if (!bsp_nodes) return;
+// flt_A104B4 and flt_9F1968, widened. Both are exact in double.
+constexpr double kLo = (double)-0.01f;
+constexpr double kHi = (double)0.01f;
 
+// The traversal, written once: the hook passes the client's leaf handler and
+// the client's own function for a node the stack cannot take, the self-test
+// passes a recorder and the reference.
+template <typename Visit, typename Hand>
+__declspec(safebuffers) __forceinline void Walk(const WowBspNode* nodes, uint32_t root_node_id,
+                        const float* root_ray, const float* root_box,
+                        Visit visit, Hand hand_to_client) {
     SweptBspStackEntry stack[64];
     int top = 0;
 
     stack[0].node_id = root_node_id;
-    stack[0].ray = *root_ray;
-    memcpy(&stack[0].node_box, root_node_box, sizeof(Box6));
+    for (int i = 0; i < 6; ++i) {
+        stack[0].ray[i] = root_ray[i];
+        stack[0].node_box[i] = root_box[i];
+    }
 
     while (top >= 0) {
-        uint32_t cur_node_id = stack[top].node_id;
-        RaySegment cur_ray = stack[top].ray;
-        Box6 cur_node_box = stack[top].node_box;
-        --top;
+        SweptBspStackEntry cur = stack[top--];
 
         while (true) {
-            const WowBspNode* node = (const WowBspNode*)(bsp_nodes + 16 * cur_node_id);
-            if (!node) break;
+            const WowBspNode* node = &nodes[cur.node_id];
 
             if (node->flags & 4) {
-                g_leaves++;
-                call_leaf(this_ptr, node);
+                visit(node, cur.ray);
                 break;
             }
 
-            uint32_t axis = node->flags & 3;
-            const float* ray_coords = (const float*)&cur_ray;
-            const float* box_coords = (const float*)&cur_node_box;
-            float p0 = ray_coords[axis];
-            float p1 = ray_coords[axis + 3];
-            float node_min = box_coords[axis];
-            float node_max = box_coords[axis + 3];
-
-            // Branchless slab bounds check
-            float min_p = (p0 < p1) ? p0 : p1;
-            float max_p = (p0 > p1) ? p0 : p1;
-            if (max_p - node_min < -0.01f || node_max - min_p < 0.01f) {
+            // Axis 3 would make the client read past both arrays. Whatever
+            // it finds there, it finds in its own frame, so let it.
+            const uint32_t axis = node->flags & 3;
+            if (axis == 3) {
+                hand_to_client(cur.node_id, cur.ray, cur.node_box);
                 break;
             }
 
-            float split = node->split_plane;
-            float d0 = p0 - split;
-            float d1 = p1 - split;
+            const double p0   = cur.ray[axis];
+            const double p1   = cur.ray[axis + 3];
+            const double bmin = cur.node_box[axis];
+            const double bmax = cur.node_box[axis + 3];
 
-            // Check if either endpoint is on split plane [-0.01, 0.01]
-            if ((d0 >= -0.01f && d0 <= 0.01f) || (d1 >= -0.01f && d1 <= 0.01f)) {
-                uint16_t left = node->left_child;
-                uint16_t right = node->right_child;
-
-                if (left != 0xFFFF) {
-                    if (top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray = cur_ray;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    } else {
-                        g_fallbacks++;
-                        Box6 l_box = cur_node_box;
-                        ((float*)&l_box)[axis + 3] = split;
-                        orig_TraverseSweptBSP(this_ptr, nullptr, left, (const float*)&cur_ray, (const float*)&l_box);
-                    }
-                }
-
-                if (right != 0xFFFF) {
-                    cur_node_id = right;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
-                } else {
-                    break;
-                }
+            // 0x007CA63B-0x007CA68D. A NaN difference passes.
+            if ((p0 - bmin < kLo && p1 - bmin < kLo) ||
+                (bmax - p0 < kHi && bmax - p1 < kHi)) {
+                break;
             }
 
-            // Both on right side
-            if (d0 > 0.01f && d1 > 0.01f) {
-                uint16_t right = node->right_child;
-                if (right != 0xFFFF) {
-                    cur_node_id = right;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
-                } else {
-                    break;
-                }
-            }
+            const float  split = node->split_plane;
+            const double d0 = p0 - (double)split;
+            const double d1 = p1 - (double)split;
+            const uint16_t left  = node->left_child;   // +2, box max = split
+            const uint16_t right = node->right_child;  // +4, box min = split
 
-            // Both on left side
-            if (d0 < -0.01f && d1 < -0.01f) {
-                uint16_t left = node->left_child;
-                if (left != 0xFFFF) {
-                    cur_node_id = left;
-                    ((float*)&cur_node_box)[axis + 3] = split;
-                    continue;
-                } else {
-                    break;
-                }
-            }
+            // Which child first, and the segment each one gets. Filled in by
+            // the four cases below; `second` is 0xFFFF when there is only one.
+            uint16_t first = 0xFFFF, second = 0xFFFF;
+            bool first_is_right = false;
+            bool cut = false;
+            float s[3];
 
-            // Straddle case: ray crosses split plane
-            float t = d0 / (d0 - d1);
-            C3Vector split_pt;
-            split_pt.x = (cur_ray.p1.x - cur_ray.p0.x) * t + cur_ray.p0.x;
-            split_pt.y = (cur_ray.p1.y - cur_ray.p0.y) * t + cur_ray.p0.y;
-            split_pt.z = (cur_ray.p1.z - cur_ray.p0.z) * t + cur_ray.p0.z;
-
-            uint16_t left = node->left_child;
-            uint16_t right = node->right_child;
-
-            if (d0 > 0.0f) {
-                // Starts on right (near), crosses into left (far)
-                // Push left (far) onto stack to visit second
-                if (left != 0xFFFF) {
-                    if (top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    } else {
-                        g_fallbacks++;
-                        RaySegment f_ray;
-                        f_ray.p0 = split_pt;
-                        f_ray.p1 = cur_ray.p1;
-                        Box6 l_box = cur_node_box;
-                        ((float*)&l_box)[axis + 3] = split;
-                        orig_TraverseSweptBSP(this_ptr, nullptr, left, (const float*)&f_ray, (const float*)&l_box);
-                    }
-                }
-
-                // Tail recurse into right (near) to visit first
-                if (right != 0xFFFF) {
-                    cur_node_id = right;
-                    cur_ray.p1 = split_pt;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
-                } else {
-                    break;
-                }
+            if ((d0 >= kLo && d0 <= kHi) || (d1 >= kLo && d1 <= kHi)) {
+                first = right; second = left; first_is_right = true;
+            } else if (d0 > kHi && d1 > kHi) {
+                first = right; first_is_right = true;
+            } else if (d0 < kLo && d1 < kLo) {
+                first = left;
             } else {
-                // Starts on left (near), crosses into right (far)
-                // Push right (far) onto stack to visit second
-                if (right != 0xFFFF) {
-                    if (top < 63) {
-                        ++top;
-                        stack[top].node_id = right;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis] = split;
-                    } else {
-                        g_fallbacks++;
-                        RaySegment f_ray;
-                        f_ray.p0 = split_pt;
-                        f_ray.p1 = cur_ray.p1;
-                        Box6 r_box = cur_node_box;
-                        ((float*)&r_box)[axis] = split;
-                        orig_TraverseSweptBSP(this_ptr, nullptr, right, (const float*)&f_ray, (const float*)&r_box);
-                    }
+                // sub_78F4D0 with t rounded to float, as the client passes it.
+                const float t = (float)(d0 / (d0 - d1));
+                for (int k = 0; k < 3; ++k) {
+                    const double a = cur.ray[k];
+                    s[k] = (float)(((double)cur.ray[k + 3] - a) * (double)t + a);
                 }
-
-                // Tail recurse into left (near) to visit first
-                if (left != 0xFFFF) {
-                    cur_node_id = left;
-                    cur_ray.p1 = split_pt;
-                    ((float*)&cur_node_box)[axis + 3] = split;
-                    continue;
+                cut = true;
+                if ((float)d0 > 0.0f) {
+                    first = right; second = left; first_is_right = true;
                 } else {
-                    break;
+                    first = left; second = right;
                 }
             }
+
+            if (first == 0xFFFF) {
+                // Only the second child is there; it gets the far piece.
+                if (second == 0xFFFF) break;
+                first = second;
+                second = 0xFFFF;
+                first_is_right = !first_is_right;
+                if (cut) for (int k = 0; k < 3; ++k) cur.ray[k] = s[k];
+            } else if (second != 0xFFFF) {
+                if (top >= 63) {
+                    // Neither child has been visited yet.
+                    hand_to_client(cur.node_id, cur.ray, cur.node_box);
+                    break;
+                }
+                SweptBspStackEntry& far_e = stack[++top];
+                far_e.node_id = second;
+                for (int i = 0; i < 6; ++i) {
+                    far_e.ray[i] = cur.ray[i];
+                    far_e.node_box[i] = cur.node_box[i];
+                }
+                if (cut) for (int k = 0; k < 3; ++k) far_e.ray[k] = s[k];
+                if (first_is_right) far_e.node_box[axis + 3] = split;
+                else                far_e.node_box[axis] = split;
+                if (cut) for (int k = 0; k < 3; ++k) cur.ray[k + 3] = s[k];
+            } else if (cut) {
+                for (int k = 0; k < 3; ++k) cur.ray[k + 3] = s[k];
+            }
+
+            cur.node_id = first;
+            if (first_is_right) cur.node_box[axis] = split;
+            else                cur.node_box[axis + 3] = split;
         }
     }
 }
 
 __declspec(safebuffers)
 void __fastcall Hooked_TraverseSweptBSP(void* this_ptr, void* dummy_edx,
-                                        uint32_t node_id, const float* ray, const float* node_box) {
-    if (!this_ptr || !ray || !node_box) return;
-
-    if (g_dead) {
+                                         uint32_t node_id, const float* ray, const float* node_box) {
+    if (g_abSubject && AbTest::StandAside()) {
+        orig_TraverseSweptBSP(this_ptr, dummy_edx, node_id, ray, node_box);
+        return;
+    }
+    const uintptr_t model_struct = *(const uintptr_t*)this_ptr;
+    const WowBspNode* nodes = model_struct ? *(const WowBspNode* const*)(model_struct + 4) : nullptr;
+    if (!nodes) {
+        // The client makes the same null checks, or faults; either way it is
+        // the client's answer.
         orig_TraverseSweptBSP(this_ptr, dummy_edx, node_id, ray, node_box);
         return;
     }
 
     g_calls++;
-    Fast_TraverseSweptBSP(this_ptr, node_id, (const RaySegment*)ray, node_box);
+    Walk(nodes, node_id, ray, node_box,
+         [this_ptr](const WowBspNode* leaf, const float*) {
+             g_leaves++;
+             call_leaf(this_ptr, leaf);
+         },
+         [this_ptr](uint32_t id, const float* r, const float* b) {
+             g_handed++;
+             orig_TraverseSweptBSP(this_ptr, nullptr, id, r, b);
+         });
 }
 
-// Startup self-test verifying traversal logic against fixed reference cases
-bool RunSelfTest() {
-    // 5-node test tree:
-    // Node 0: split X at 0.0 -> left: 1, right: 2 (leaf)
-    // Node 1: split Y at 0.0 -> left: 3 (leaf), right: 4 (leaf)
-    WowBspNode test_tree[5]{};
-    test_tree[0].flags = 0; // split X
-    test_tree[0].left_child = 1;
-    test_tree[0].right_child = 2;
-    test_tree[0].split_plane = 0.0f;
+// sub_7CA600 transcribed branch by branch from the disassembly, recursive, in
+// double. It shares nothing with Walk but the node layout. Each leaf is
+// recorded with the segment that reached it, so a cut point one bit off fails.
+struct LeafLog {
+    uint32_t idx[512];
+    float    ray[512][6];
+    uint32_t count;
+    bool     overflow;
+};
 
-    test_tree[1].flags = 1; // split Y
-    test_tree[1].left_child = 3;
-    test_tree[1].right_child = 4;
-    test_tree[1].split_plane = 0.0f;
+void Record(LeafLog& log, uint32_t id, const float* ray) {
+    if (log.count >= 512) { log.overflow = true; return; }
+    log.idx[log.count] = id;
+    memcpy(log.ray[log.count], ray, sizeof(float) * 6);
+    ++log.count;
+}
 
-    test_tree[2].flags = 4; // leaf
-    test_tree[3].flags = 4; // leaf
-    test_tree[4].flags = 4; // leaf
+void RefSwept(const WowBspNode* nodes, uint32_t a2, const float* a3, const float* a4,
+                LeafLog& log) {
+    const WowBspNode* v4 = &nodes[a2];
+    if (v4->flags & 4) { Record(log, a2, a3); return; }            // 0x007CA624
+    const uint32_t v5 = v4->flags & 3;
+    const double split = v4->split_plane;
 
-    struct DummyDesc {
-        uint32_t dummy0;
-        const void* nodes;
-    } desc;
-    desc.dummy0 = 0;
-    desc.nodes = test_tree;
+    // 0x007CA647 fcom; test ah,41h jnz: d >= -0.01 or unordered passes.
+    // 0x007CA659 fcomp; test ah,5 jnp: fails only on an ordered d < -0.01.
+    const double e0 = (double)a3[v5] - a4[v5];
+    const double e1 = (double)a3[v5 + 3] - a4[v5];
+    if (!(e0 >= kLo || e0 != e0) && e1 < kLo) return;
+    const double f0 = (double)a4[v5 + 3] - a3[v5];                 // 0x007CA666
+    const double f1 = (double)a4[v5 + 3] - a3[v5 + 3];
+    if (!(f0 >= kHi || f0 != f0) && f1 < kHi) return;
 
-    struct DummyThis {
-        DummyDesc* pDesc;
-        void* visitorContext;
-    } d_this;
-    d_this.pDesc = &desc;
-    d_this.visitorContext = nullptr;
+    float v23[6], v24[6];                                          // +4 box, +2 box
+    for (int i = 0; i < 6; ++i) { v23[i] = a4[i]; v24[i] = a4[i]; }
+    v23[v5] = (float)split;
+    v24[v5 + 3] = (float)split;
 
-    const float world_box[6] = { -50.0f, -50.0f, -50.0f, 50.0f, 50.0f, 50.0f };
+    const double v8 = (double)a3[v5] - split;                      // 0x007CA6EA
+    const float v27 = (float)v8;                                   // fst [ebp+arg_0]
+    const double v9 = (double)a3[v5 + 3] - split;
 
-    // Query 1: Positive X -> should visit only leaf 2
-    RaySegment r1 = { { 5.0f, 5.0f, 5.0f }, { 10.0f, 10.0f, 10.0f } };
-    // Query 2: Negative X, negative Y -> should visit only leaf 3
-    RaySegment r2 = { { -10.0f, -10.0f, -10.0f }, { -5.0f, -5.0f, -5.0f } };
-    // Query 3: Straddle X, straddle Y -> should visit leaf 2, then leaf 4, then leaf 3
-    RaySegment r3 = { { 10.0f, 10.0f, 10.0f }, { -10.0f, -10.0f, -10.0f } };
+    // 0x007CA6F9-0x007CA71D: test ah,1 jnz takes an unordered d to the next
+    // test, so a NaN is never "within 0.01".
+    bool mid = false;
+    if (!(v8 < kLo || v8 != v8) && v8 <= kHi) mid = true;
+    else if (!(v9 < kLo || v9 != v9) && v9 <= kHi) mid = true;
+    if (mid) {
+        if (v4->right_child != 0xFFFF) RefSwept(nodes, v4->right_child, a3, v23, log);
+        if (v4->left_child != 0xFFFF)  RefSwept(nodes, v4->left_child, a3, v24, log);
+        return;
+    }
+    if (v8 > kHi && v9 > kHi) {                                    // 0x007CA749-0x007CA75B
+        if (v4->right_child != 0xFFFF) RefSwept(nodes, v4->right_child, a3, v23, log);
+        return;
+    }
+    if (v8 < kLo && v9 < kLo) {                                    // 0x007CA78E-0x007CA7A0
+        if (v4->left_child != 0xFFFF) RefSwept(nodes, v4->left_child, a3, v24, log);
+        return;
+    }
 
-    auto CountLeaves = [&](const RaySegment* r) -> int {
-        int count = 0;
-        SweptBspStackEntry stack[64];
-        int top = 0;
-        stack[0].node_id = 0;
-        stack[0].ray = *r;
-        memcpy(&stack[0].node_box, world_box, sizeof(Box6));
+    // 0x007CA7CF fsubr st,st(1); fdivp: v8 / (v8 - v9), stored as float.
+    const float t = (float)(v8 / (v8 - v9));
+    float v26[3];                                                  // sub_78F4D0
+    for (int k = 0; k < 3; ++k)
+        v26[k] = (float)(((double)a3[k + 3] - a3[k]) * t + a3[k]);
+    float v22[6];
 
-        while (top >= 0) {
-            uint32_t cur_node_id = stack[top].node_id;
-            RaySegment cur_ray = stack[top].ray;
-            Box6 cur_node_box = stack[top].node_box;
-            --top;
-
-            while (true) {
-                const WowBspNode* n = &test_tree[cur_node_id];
-                if (n->flags & 4) { count++; break; }
-
-                uint32_t axis = n->flags & 3;
-                const float* ray_coords = (const float*)&cur_ray;
-                const float* box_coords = (const float*)&cur_node_box;
-                float p0 = ray_coords[axis];
-                float p1 = ray_coords[axis + 3];
-                float node_min = box_coords[axis];
-                float node_max = box_coords[axis + 3];
-
-                float min_p = (p0 < p1) ? p0 : p1;
-                float max_p = (p0 > p1) ? p0 : p1;
-                if (max_p - node_min < -0.01f || node_max - min_p < 0.01f) break;
-
-                float split = n->split_plane;
-                float d0 = p0 - split;
-                float d1 = p1 - split;
-
-                if ((d0 >= -0.01f && d0 <= 0.01f) || (d1 >= -0.01f && d1 <= 0.01f)) {
-                    uint16_t left = n->left_child;
-                    uint16_t right = n->right_child;
-                    if (left != 0xFFFF && top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray = cur_ray;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    }
-                    if (right != 0xFFFF) {
-                        cur_node_id = right;
-                        ((float*)&cur_node_box)[axis] = split;
-                        continue;
-                    } else break;
-                }
-
-                if (d0 > 0.01f && d1 > 0.01f) {
-                    if (n->right_child == 0xFFFF) break;
-                    cur_node_id = n->right_child;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
-                }
-
-                if (d0 < -0.01f && d1 < -0.01f) {
-                    if (n->left_child == 0xFFFF) break;
-                    cur_node_id = n->left_child;
-                    ((float*)&cur_node_box)[axis + 3] = split;
-                    continue;
-                }
-
-                float t = d0 / (d0 - d1);
-                C3Vector split_pt;
-                split_pt.x = (cur_ray.p1.x - cur_ray.p0.x) * t + cur_ray.p0.x;
-                split_pt.y = (cur_ray.p1.y - cur_ray.p0.y) * t + cur_ray.p0.y;
-                split_pt.z = (cur_ray.p1.z - cur_ray.p0.z) * t + cur_ray.p0.z;
-
-                uint16_t left = n->left_child;
-                uint16_t right = n->right_child;
-
-                if (d0 > 0.0f) {
-                    if (left != 0xFFFF && top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    }
-                    if (right != 0xFFFF) {
-                        cur_node_id = right;
-                        cur_ray.p1 = split_pt;
-                        ((float*)&cur_node_box)[axis] = split;
-                        continue;
-                    } else break;
-                } else {
-                    if (right != 0xFFFF && top < 63) {
-                        ++top;
-                        stack[top].node_id = right;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis] = split;
-                    }
-                    if (left != 0xFFFF) {
-                        cur_node_id = left;
-                        cur_ray.p1 = split_pt;
-                        ((float*)&cur_node_box)[axis + 3] = split;
-                        continue;
-                    } else break;
-                }
-            }
+    // 0x007CA7E2 fldz; fcomp v27; test ah,5 jp: only 0 < v27 falls through.
+    if (0.0f < v27) {
+        if (v4->right_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = a3[k]; v22[k + 3] = v26[k]; }
+            RefSwept(nodes, v4->right_child, v22, v23, log);
         }
-        return count;
-    };
+        if (v4->left_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = v26[k]; v22[k + 3] = a3[k + 3]; }
+            RefSwept(nodes, v4->left_child, v22, v24, log);
+        }
+    } else {
+        if (v4->left_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = a3[k]; v22[k + 3] = v26[k]; }
+            RefSwept(nodes, v4->left_child, v22, v24, log);
+        }
+        if (v4->right_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = v26[k]; v22[k + 3] = a3[k + 3]; }
+            RefSwept(nodes, v4->right_child, v22, v23, log);
+        }
+    }
+}
 
-    if (CountLeaves(&r1) != 1) return false;
-    if (CountLeaves(&r2) != 1) return false;
-    if (CountLeaves(&r3) != 3) return false;
+uint32_t g_rng = 0x2545F491u;
+uint32_t Rng() { g_rng ^= g_rng << 13; g_rng ^= g_rng >> 17; g_rng ^= g_rng << 5; return g_rng; }
+float RngF(float lo, float hi) { return lo + (hi - lo) * (float)(Rng() & 0xFFFFFF) / 16777215.0f; }
 
+// A random tree with children always at higher indices, or with `chain` set a
+// run of nodes that all split X at 0 with the segment starting on the plane,
+// so every level is "within 0.01" and pushes a node: deep enough to fill the
+// stack.
+uint32_t BuildTree(WowBspNode* t, uint32_t cap, bool chain) {
+    for (uint32_t i = 0; i < cap; ++i) t[i] = WowBspNode{};
+    if (chain) {
+        const uint32_t k = (cap - 1) / 2;
+        for (uint32_t i = 0; i < k; ++i) {
+            t[i].flags = 0;
+            t[i].split_plane = 0.0f;
+            t[i].right_child = (uint16_t)(i + 1 < k ? i + 1 : k);
+            t[i].left_child  = (uint16_t)(k + 1 + i);
+        }
+        for (uint32_t i = k; i < cap; ++i) t[i].flags = 4;
+        return cap;
+    }
+    const uint32_t count = 8 + Rng() % (cap - 8);
+    for (uint32_t i = 0; i < count; ++i) {
+        const bool leaf = (i * 2 + 1 >= count) || (Rng() % 5 == 0);
+        if (leaf) { t[i].flags = 4; continue; }
+        t[i].flags = (uint16_t)(Rng() % 3);
+        t[i].split_plane = RngF(-10.0f, 10.0f);
+        const uint32_t span = count - (i + 1);
+        t[i].left_child  = (Rng() % 7 == 0) ? 0xFFFF : (uint16_t)(i + 1 + Rng() % span);
+        t[i].right_child = (Rng() % 7 == 0) ? 0xFFFF : (uint16_t)(i + 1 + Rng() % span);
+    }
+    return count;
+}
+
+// Walk against the transcription: random trees and segments, some with a NaN
+// coordinate, and the chain, where Walk has to hand a node to the "client".
+bool RunSelfTest() {
+    static WowBspNode tree[200];
+    static LeafLog want, got;
+    for (int c = 0; c < 400; ++c) {
+        const bool chain = (c == 0);
+        BuildTree(tree, chain ? 199 : 200, chain);
+        float r[6], nb[6];
+        for (int i = 0; i < 6; ++i) r[i] = RngF(-12.0f, 12.0f);
+        for (int i = 0; i < 3; ++i) { nb[i] = -10.0f; nb[i + 3] = 10.0f; }
+        if (chain) { r[0] = 0.0f; r[3] = 5.0f; }
+        // A NaN in the segment, or in a split near the root: the client's
+        // compares send it down particular branches, and those must match.
+        const uint32_t nan = 0x7FC00000u;
+        if (c % 8 == 1) memcpy(&r[Rng() % 6], &nan, 4);
+        if (c % 8 == 2) memcpy(&tree[Rng() % 4].split_plane, &nan, 4);
+
+        want.count = 0; want.overflow = false;
+        RefSwept(tree, 0, r, nb, want);
+        got.count = 0; got.overflow = false;
+        int handed = 0;
+        Walk(tree, 0, r, nb,
+             [&](const WowBspNode* leaf, const float* ray) {
+                 Record(got, (uint32_t)(leaf - tree), ray);
+             },
+             [&](uint32_t id, const float* rr, const float* bb) {
+                 ++handed;
+                 RefSwept(tree, id, rr, bb, got);
+             });
+        if (want.overflow || got.overflow || want.count != got.count ||
+            memcmp(want.idx, got.idx, want.count * sizeof(uint32_t)) != 0 ||
+            memcmp(want.ray, got.ray, want.count * sizeof(want.ray[0])) != 0) {
+            Log("[CollisionSweptBsp] NOT active: case %d reached %u leaves where the "
+                "transcription of the client reaches %u, or in another order, or with "
+                "another segment.", c, got.count, want.count);
+            return false;
+        }
+        if (chain && handed == 0) {
+            Log("[CollisionSweptBsp] NOT active: the deep test tree never filled the "
+                "stack, so the hand-over to the client went untested.");
+            return false;
+        }
+    }
     return true;
 }
-
-bool g_abSubject = false;
-int g_benchId    = -1;
 
 } // anonymous namespace
 
@@ -497,7 +428,6 @@ bool Init() {
 
     // Run startup self-test
     if (!RunSelfTest()) {
-        Log("[CollisionSweptBsp] Refusing to hook 0x%08X: self-test failed", kTarget);
         return false;
     }
 
@@ -515,7 +445,6 @@ bool Init() {
 
     g_installed = true;
     g_abSubject = AbTest::IsSubject("CollisionSweptBsp", &g_abSubject);
-    g_benchId = SelfBench::Register("CollisionSweptBsp");
 
     SamplingProfiler::RegisterSelfSymbol("CollisionSweptBsp", (const void*)&Hooked_TraverseSweptBSP);
 
@@ -532,8 +461,8 @@ void Shutdown() {
 
 void LogStats() {
     if (!g_installed) return;
-    Log("[CollisionSweptBsp] Calls: %llu, Leaves visited: %llu, Stack fallbacks: %llu%s",
-        g_calls, g_leaves, g_fallbacks, g_dead ? " [RETIRED]" : "");
+    Log("[CollisionSweptBsp] %llu calls, %llu leaves, %llu nodes handed to the client "
+        "(stack full)", g_calls, g_leaves, g_handed);
 }
 
 } // namespace CollisionSweptBsp
