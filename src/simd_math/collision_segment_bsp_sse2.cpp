@@ -11,23 +11,29 @@
 // Invoked during segment and line collision queries against world geometry
 // (sub_7CB0C0 and sub_7CB2F0 -> sub_7CA180).
 //
-// Bottlenecks in client sub_7CA180:
-// 1. Recursive __thiscall traversal allocating 84-byte stack frames plus 3
-//    register pushes per depth level (96 bytes per frame).
-// 2. Serialized x87 float operations with status-word transfers (fnstsw ax)
-//    and complex branch logic per internal node.
-// 3. Sub-segment linear interpolation delegating out to external helper
-//    functions sub_78F480 and sub_78F4D0 with parameter passing and call overhead.
+// The client recurses once per node, 96 bytes of frame each, and calls two
+// helpers (sub_78F480, sub_78F4D0) to cut the segment where it crosses a split.
+// This walks the tree with an explicit 64-entry stack and does the cut inline.
 //
-// Optimizations:
-// 1. Iterative stack-based traversal (up to 64 levels) with tail-recursion along
-//    the active child descent path.
-// 2. Inlined linear interpolation matching client operation order bit for bit.
-// 3. Fast-path single child descents with zero stack operations.
-// 4. Zero /GS security cookies on the hot path via __declspec(safebuffers).
-// 5. 16-byte prologue verification against IDA client bytes before hooking.
-// 6. Startup self-test over fixed reference queries.
-// 7. Off by default under experimental launcher switch CollisionSegmentBsp.
+// Arithmetic. The client does every subtraction, the division and the cut in
+// x87 at 53-bit precision and rounds to float only on store. Here the same
+// operations run in double in the client's order, which rounds identically at
+// every step (see x87-is-53-bit in the project notes); the constants at
+// 0x00A104B4 and 0x009F1968 are exactly -0.01f and 0.01f. An earlier version
+// did all of it in single, which moved the cut point and could change which
+// nodes a segment reaches below the cut.
+//
+// Unordered compares. The client's fnstsw tests send a NaN difference to the
+// "passes" side of the slab test and to the straddle case; the tests below are
+// written so a NaN takes the same branches. See RefSegment for the trace.
+//
+// Order. The leaf handler reaches sub_7C6C30, which appends each triangle to
+// word_D25BF8 and keeps the nearest hit with <=, so on a tie the later leaf
+// wins. The depth-first order of leaves is part of the answer, and when the
+// stack is full the whole node goes to the client, which visits both children
+// in its own order.
+//
+// Off by default under the experimental switch CollisionSegmentBsp.
 
 #include "collision_segment_bsp_sse2.h"
 #include "config.h"
@@ -37,7 +43,6 @@
 #include "version.h"
 #include <windows.h>
 #include <cstdint>
-#include <atomic>
 #include <cstring>
 
 extern "C" void Log(const char* fmt, ...);
@@ -69,24 +74,10 @@ struct WowBspNode {
 
 static_assert(sizeof(WowBspNode) == 16, "WowBspNode size must be 16 bytes");
 
-struct C3Vector {
-    float x, y, z;
-};
-
-struct RaySegment {
-    C3Vector p0;
-    C3Vector p1;
-};
-
-struct Box6 {
-    C3Vector min;
-    C3Vector max;
-};
-
 struct SegmentBspStackEntry {
-    uint16_t node_id;
-    RaySegment ray;
-    Box6 node_box;
+    uint32_t node_id;
+    float    ray[6];       // p0, p1
+    float    node_box[6];  // min, max
 };
 
 typedef void (__fastcall *FnTraverseSegmentBSP)(void* this_ptr, void* dummy_edx,
@@ -96,195 +87,128 @@ static FnTraverseSegmentBSP orig_TraverseSegmentBSP = nullptr;
 typedef char (__thiscall *FnLeafHandler)(void* this_ptr, const void* node_ptr);
 static const FnLeafHandler kLeafHandler = (FnLeafHandler)kTargetSub7C9A00;
 
-static std::atomic<uint64_t> g_calls{0};
-static std::atomic<uint64_t> g_leaves{0};
-static std::atomic<uint64_t> g_straddles{0};
-static std::atomic<uint64_t> g_culled{0};
-static std::atomic<uint64_t> g_fallbacks{0};
+// Main-thread counters, read by the periodic report; a lower bound.
+static unsigned long long g_calls  = 0;
+static unsigned long long g_leaves = 0;
+static unsigned long long g_handed = 0;
 
 static bool g_installed = false;
-static bool g_dead = false;
 static bool g_abSubject = false;
 
-// Fast iterative traversal
-__declspec(safebuffers)
-static void Fast_TraverseSegmentBSP(void* this_ptr, uint32_t root_node_id,
-                                    const RaySegment* root_ray, const float* root_box) {
-    uintptr_t model_struct = *(uintptr_t*)this_ptr;
-    if (!model_struct) return;
-    const WowBspNode* nodes = *(const WowBspNode**)(model_struct + 4);
-    if (!nodes) return;
+// flt_A104B4 and flt_9F1968, widened. Both are exact in double.
+constexpr double kLo = (double)-0.01f;
+constexpr double kHi = (double)0.01f;
 
+// The traversal, written once: the hook passes the client's leaf handler and
+// the client's own function for a node the stack cannot take, the self-test
+// passes a recorder and the reference.
+template <typename Visit, typename Hand>
+__declspec(safebuffers) __forceinline void Walk(const WowBspNode* nodes, uint32_t root_node_id,
+                        const float* root_ray, const float* root_box,
+                        Visit visit, Hand hand_to_client) {
     SegmentBspStackEntry stack[64];
     int top = 0;
 
-    stack[0].node_id = (uint16_t)root_node_id;
-    stack[0].ray = *root_ray;
-    stack[0].node_box = *(const Box6*)root_box;
+    stack[0].node_id = root_node_id;
+    for (int i = 0; i < 6; ++i) {
+        stack[0].ray[i] = root_ray[i];
+        stack[0].node_box[i] = root_box[i];
+    }
 
     while (top >= 0) {
-        uint16_t cur_node_id = stack[top].node_id;
-        RaySegment cur_ray = stack[top].ray;
-        Box6 cur_node_box = stack[top].node_box;
-        --top;
+        SegmentBspStackEntry cur = stack[top--];
 
         while (true) {
-            const WowBspNode* node = &nodes[cur_node_id];
+            const WowBspNode* node = &nodes[cur.node_id];
 
-            // Leaf node check
-            if ((node->flags & 4) != 0) {
-                g_leaves.fetch_add(1, std::memory_order_relaxed);
-                kLeafHandler(this_ptr, node);
+            if (node->flags & 4) {
+                visit(node, cur.ray);
                 break;
             }
 
-            int axis = node->flags & 3;
-            float p0 = ((const float*)&cur_ray.p0)[axis];
-            float p1 = ((const float*)&cur_ray.p1)[axis];
-            float bMin = ((const float*)&cur_node_box.min)[axis];
-            float bMax = ((const float*)&cur_node_box.max)[axis];
-
-            // Slab bounds check
-            bool pass1 = (p0 - bMin >= -0.01f || p1 - bMin >= -0.01f);
-            bool pass2 = (bMax - p0 >= 0.01f || bMax - p1 >= 0.01f);
-            if (!pass1 || !pass2) {
-                g_culled.fetch_add(1, std::memory_order_relaxed);
+            // Axis 3 would make the client read past both arrays. Whatever
+            // it finds there, it finds in its own frame, so let it.
+            const uint32_t axis = node->flags & 3;
+            if (axis == 3) {
+                hand_to_client(cur.node_id, cur.ray, cur.node_box);
                 break;
             }
 
-            float split = node->split_plane;
+            const double p0   = cur.ray[axis];
+            const double p1   = cur.ray[axis + 3];
+            const double bmin = cur.node_box[axis];
+            const double bmax = cur.node_box[axis + 3];
 
-            float d0 = p0 - split;
-            float d1 = p1 - split;
-
-            bool d0_mid = (d0 >= -0.01f && d0 <= 0.01f);
-            bool d1_mid = (d1 >= -0.01f && d1 <= 0.01f);
-
-            if (d0_mid || d1_mid) {
-                // Visits child2 (right) first, then child1 (left)
-                uint16_t left = node->left_child;
-                uint16_t right = node->right_child;
-
-                if (left != 0xFFFF) {
-                    if (top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray = cur_ray;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    } else {
-                        g_fallbacks.fetch_add(1, std::memory_order_relaxed);
-                        Box6 l_box = cur_node_box;
-                        ((float*)&l_box)[axis + 3] = split;
-                        orig_TraverseSegmentBSP(this_ptr, nullptr, left, (const float*)&cur_ray, (const float*)&l_box);
-                    }
-                }
-
-                if (right != 0xFFFF) {
-                    cur_node_id = right;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
-                } else {
-                    break;
-                }
+            // 0x007CA1BB-0x007CA20D. A NaN difference passes.
+            if ((p0 - bmin < kLo && p1 - bmin < kLo) ||
+                (bmax - p0 < kHi && bmax - p1 < kHi)) {
+                break;
             }
 
-            if (d0 > 0.01f && d1 > 0.01f) {
-                uint16_t right = node->right_child;
-                if (right != 0xFFFF) {
-                    cur_node_id = right;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
-                } else {
-                    break;
-                }
-            }
+            const float  split = node->split_plane;
+            const double d0 = p0 - (double)split;
+            const double d1 = p1 - (double)split;
+            const uint16_t left  = node->left_child;   // +2, box max = split
+            const uint16_t right = node->right_child;  // +4, box min = split
 
-            if (d0 < -0.01f && d1 < -0.01f) {
-                uint16_t left = node->left_child;
-                if (left != 0xFFFF) {
-                    cur_node_id = left;
-                    ((float*)&cur_node_box)[axis + 3] = split;
-                    continue;
-                } else {
-                    break;
-                }
-            }
+            // Which child first, and the segment each one gets. Filled in by
+            // the four cases below; `second` is 0xFFFF when there is only one.
+            uint16_t first = 0xFFFF, second = 0xFFFF;
+            bool first_is_right = false;
+            bool cut = false;
+            float s[3];
 
-            // Straddle case: ray crosses split plane
-            g_straddles.fetch_add(1, std::memory_order_relaxed);
-            float t = d0 / (d0 - d1);
-            C3Vector split_pt;
-            split_pt.x = (cur_ray.p1.x - cur_ray.p0.x) * t + cur_ray.p0.x;
-            split_pt.y = (cur_ray.p1.y - cur_ray.p0.y) * t + cur_ray.p0.y;
-            split_pt.z = (cur_ray.p1.z - cur_ray.p0.z) * t + cur_ray.p0.z;
-
-            uint16_t left = node->left_child;
-            uint16_t right = node->right_child;
-
-            if (d0 <= 0.0f) {
-                // Starts on left (near), crosses into right (far)
-                // Push right (far) onto stack to visit second
-                if (right != 0xFFFF) {
-                    if (top < 63) {
-                        ++top;
-                        stack[top].node_id = right;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis] = split;
-                    } else {
-                        g_fallbacks.fetch_add(1, std::memory_order_relaxed);
-                        RaySegment f_ray;
-                        f_ray.p0 = split_pt;
-                        f_ray.p1 = cur_ray.p1;
-                        Box6 r_box = cur_node_box;
-                        ((float*)&r_box)[axis] = split;
-                        orig_TraverseSegmentBSP(this_ptr, nullptr, right, (const float*)&f_ray, (const float*)&r_box);
-                    }
-                }
-
-                // Tail-recurse into left (near)
-                if (left != 0xFFFF) {
-                    cur_node_id = left;
-                    cur_ray.p1 = split_pt;
-                    ((float*)&cur_node_box)[axis + 3] = split;
-                    continue;
-                } else {
-                    break;
-                }
+            if ((d0 >= kLo && d0 <= kHi) || (d1 >= kLo && d1 <= kHi)) {
+                first = right; second = left; first_is_right = true;
+            } else if (d0 > kHi && d1 > kHi) {
+                first = right; first_is_right = true;
+            } else if (d0 < kLo && d1 < kLo) {
+                first = left;
             } else {
-                // Starts on right (near), crosses into left (far)
-                // Push left (far) onto stack to visit second
-                if (left != 0xFFFF) {
-                    if (top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    } else {
-                        g_fallbacks.fetch_add(1, std::memory_order_relaxed);
-                        RaySegment f_ray;
-                        f_ray.p0 = split_pt;
-                        f_ray.p1 = cur_ray.p1;
-                        Box6 l_box = cur_node_box;
-                        ((float*)&l_box)[axis + 3] = split;
-                        orig_TraverseSegmentBSP(this_ptr, nullptr, left, (const float*)&f_ray, (const float*)&l_box);
-                    }
+                // sub_78F4D0 with t rounded to float, as the client passes it.
+                const float t = (float)(d0 / (d0 - d1));
+                for (int k = 0; k < 3; ++k) {
+                    const double a = cur.ray[k];
+                    s[k] = (float)(((double)cur.ray[k + 3] - a) * (double)t + a);
                 }
-
-                // Tail-recurse into right (near)
-                if (right != 0xFFFF) {
-                    cur_node_id = right;
-                    cur_ray.p1 = split_pt;
-                    ((float*)&cur_node_box)[axis] = split;
-                    continue;
+                cut = true;
+                if ((float)d0 > 0.0f) {
+                    first = right; second = left; first_is_right = true;
                 } else {
-                    break;
+                    first = left; second = right;
                 }
             }
+
+            if (first == 0xFFFF) {
+                // Only the second child is there; it gets the far piece.
+                if (second == 0xFFFF) break;
+                first = second;
+                second = 0xFFFF;
+                first_is_right = !first_is_right;
+                if (cut) for (int k = 0; k < 3; ++k) cur.ray[k] = s[k];
+            } else if (second != 0xFFFF) {
+                if (top >= 63) {
+                    // Neither child has been visited yet.
+                    hand_to_client(cur.node_id, cur.ray, cur.node_box);
+                    break;
+                }
+                SegmentBspStackEntry& far_e = stack[++top];
+                far_e.node_id = second;
+                for (int i = 0; i < 6; ++i) {
+                    far_e.ray[i] = cur.ray[i];
+                    far_e.node_box[i] = cur.node_box[i];
+                }
+                if (cut) for (int k = 0; k < 3; ++k) far_e.ray[k] = s[k];
+                if (first_is_right) far_e.node_box[axis + 3] = split;
+                else                far_e.node_box[axis] = split;
+                if (cut) for (int k = 0; k < 3; ++k) cur.ray[k + 3] = s[k];
+            } else if (cut) {
+                for (int k = 0; k < 3; ++k) cur.ray[k + 3] = s[k];
+            }
+
+            cur.node_id = first;
+            if (first_is_right) cur.node_box[axis] = split;
+            else                cur.node_box[axis + 3] = split;
         }
     }
 }
@@ -292,159 +216,199 @@ static void Fast_TraverseSegmentBSP(void* this_ptr, uint32_t root_node_id,
 __declspec(safebuffers)
 void __fastcall Hooked_TraverseSegmentBSP(void* this_ptr, void* dummy_edx,
                                          uint32_t node_id, const float* ray, const float* node_box) {
-    if (!this_ptr || !ray || !node_box) return;
-
-    if (g_dead) {
+    if (g_abSubject && AbTest::StandAside()) {
+        orig_TraverseSegmentBSP(this_ptr, dummy_edx, node_id, ray, node_box);
+        return;
+    }
+    const uintptr_t model_struct = *(const uintptr_t*)this_ptr;
+    const WowBspNode* nodes = model_struct ? *(const WowBspNode* const*)(model_struct + 4) : nullptr;
+    if (!nodes) {
+        // The client makes the same null checks, or faults; either way it is
+        // the client's answer.
         orig_TraverseSegmentBSP(this_ptr, dummy_edx, node_id, ray, node_box);
         return;
     }
 
-    g_calls.fetch_add(1, std::memory_order_relaxed);
-    Fast_TraverseSegmentBSP(this_ptr, node_id, (const RaySegment*)ray, node_box);
+    g_calls++;
+    Walk(nodes, node_id, ray, node_box,
+         [this_ptr](const WowBspNode* leaf, const float*) {
+             g_leaves++;
+             kLeafHandler(this_ptr, leaf);
+         },
+         [this_ptr](uint32_t id, const float* r, const float* b) {
+             g_handed++;
+             orig_TraverseSegmentBSP(this_ptr, nullptr, id, r, b);
+         });
 }
 
-// Startup self-test verifying traversal logic against fixed reference cases
-bool RunSelfTest() {
-    // 5-node test tree:
-    // Node 0: split X at 0.0 -> left: 1, right: 2 (leaf)
-    // Node 1: split Y at 0.0 -> left: 3 (leaf), right: 4 (leaf)
-    WowBspNode test_tree[5]{};
-    test_tree[0].flags = 0; // split X
-    test_tree[0].left_child = 1;
-    test_tree[0].right_child = 2;
-    test_tree[0].split_plane = 0.0f;
+// sub_7CA180 transcribed branch by branch from the disassembly, recursive, in
+// double. It shares nothing with Walk but the node layout. Each leaf is
+// recorded with the segment that reached it, so a cut point one bit off fails.
+struct LeafLog {
+    uint32_t idx[512];
+    float    ray[512][6];
+    uint32_t count;
+    bool     overflow;
+};
 
-    test_tree[1].flags = 1; // split Y
-    test_tree[1].left_child = 3;
-    test_tree[1].right_child = 4;
-    test_tree[1].split_plane = 0.0f;
+void Record(LeafLog& log, uint32_t id, const float* ray) {
+    if (log.count >= 512) { log.overflow = true; return; }
+    log.idx[log.count] = id;
+    memcpy(log.ray[log.count], ray, sizeof(float) * 6);
+    ++log.count;
+}
 
-    test_tree[2].flags = 4; // leaf
-    test_tree[3].flags = 4; // leaf
-    test_tree[4].flags = 4; // leaf
+void RefSegment(const WowBspNode* nodes, uint32_t a2, const float* a3, const float* a4,
+                LeafLog& log) {
+    const WowBspNode* v4 = &nodes[a2];
+    if (v4->flags & 4) { Record(log, a2, a3); return; }            // 0x007CA1A4
+    const uint32_t v5 = v4->flags & 3;
+    const double split = v4->split_plane;
 
-    struct DummyDesc {
-        uint32_t dummy0;
-        const void* nodes;
-    } desc;
-    desc.dummy0 = 0;
-    desc.nodes = test_tree;
+    // 0x007CA1C7 fcom; test ah,41h jnz: d >= -0.01 or unordered passes.
+    // 0x007CA1D9 fcomp; test ah,5 jnp: fails only on an ordered d < -0.01.
+    const double e0 = (double)a3[v5] - a4[v5];
+    const double e1 = (double)a3[v5 + 3] - a4[v5];
+    if (!(e0 >= kLo || e0 != e0) && e1 < kLo) return;
+    const double f0 = (double)a4[v5 + 3] - a3[v5];                 // 0x007CA1E6
+    const double f1 = (double)a4[v5 + 3] - a3[v5 + 3];
+    if (!(f0 >= kHi || f0 != f0) && f1 < kHi) return;
 
-    struct DummyThis {
-        DummyDesc* pDesc;
-        void* visitorContext;
-    } d_this;
-    d_this.pDesc = &desc;
-    d_this.visitorContext = nullptr;
+    float v23[6], v24[6];                                          // +4 box, +2 box
+    for (int i = 0; i < 6; ++i) { v23[i] = a4[i]; v24[i] = a4[i]; }
+    v23[v5] = (float)split;
+    v24[v5 + 3] = (float)split;
 
-    const float world_box[6] = { -50.0f, -50.0f, -50.0f, 50.0f, 50.0f, 50.0f };
+    const double v8 = (double)a3[v5] - split;                      // 0x007CA26A
+    const float v27 = (float)v8;                                   // fst [ebp+arg_0]
+    const double v9 = (double)a3[v5 + 3] - split;
 
-    RaySegment r1 = { { 5.0f, 5.0f, 5.0f }, { 10.0f, 10.0f, 10.0f } };
-    RaySegment r2 = { { -10.0f, -10.0f, -10.0f }, { -5.0f, -5.0f, -5.0f } };
-    RaySegment r3 = { { 10.0f, 10.0f, 10.0f }, { -10.0f, -10.0f, -10.0f } };
+    // 0x007CA279-0x007CA29D: test ah,1 jnz takes an unordered d to the next
+    // test, so a NaN is never "within 0.01".
+    bool mid = false;
+    if (!(v8 < kLo || v8 != v8) && v8 <= kHi) mid = true;
+    else if (!(v9 < kLo || v9 != v9) && v9 <= kHi) mid = true;
+    if (mid) {
+        if (v4->right_child != 0xFFFF) RefSegment(nodes, v4->right_child, a3, v23, log);
+        if (v4->left_child != 0xFFFF)  RefSegment(nodes, v4->left_child, a3, v24, log);
+        return;
+    }
+    if (v8 > kHi && v9 > kHi) {                                    // 0x007CA2C9-0x007CA2DB
+        if (v4->right_child != 0xFFFF) RefSegment(nodes, v4->right_child, a3, v23, log);
+        return;
+    }
+    if (v8 < kLo && v9 < kLo) {                                    // 0x007CA30E-0x007CA320
+        if (v4->left_child != 0xFFFF) RefSegment(nodes, v4->left_child, a3, v24, log);
+        return;
+    }
 
-    auto CountLeaves = [&](const RaySegment* r) -> int {
-        int count = 0;
-        SegmentBspStackEntry stack[64];
-        int top = 0;
-        stack[0].node_id = 0;
-        stack[0].ray = *r;
-        stack[0].node_box = *(const Box6*)world_box;
+    // 0x007CA34F fsubr st,st(1); fdivp: v8 / (v8 - v9), stored as float.
+    const float t = (float)(v8 / (v8 - v9));
+    float v26[3];                                                  // sub_78F4D0
+    for (int k = 0; k < 3; ++k)
+        v26[k] = (float)(((double)a3[k + 3] - a3[k]) * t + a3[k]);
+    float v22[6];
 
-        while (top >= 0) {
-            uint16_t cur_node_id = stack[top].node_id;
-            RaySegment cur_ray = stack[top].ray;
-            Box6 cur_node_box = stack[top].node_box;
-            --top;
-
-            while (true) {
-                const WowBspNode* node = &test_tree[cur_node_id];
-                if ((node->flags & 4) != 0) {
-                    count++;
-                    break;
-                }
-                int axis = node->flags & 3;
-                float p0 = ((const float*)&cur_ray.p0)[axis];
-                float p1 = ((const float*)&cur_ray.p1)[axis];
-                float bMin = ((const float*)&cur_node_box.min)[axis];
-                float bMax = ((const float*)&cur_node_box.max)[axis];
-
-                bool pass1 = (p0 - bMin >= -0.01f || p1 - bMin >= -0.01f);
-                bool pass2 = (bMax - p0 >= 0.01f || bMax - p1 >= 0.01f);
-                if (!pass1 || !pass2) break;
-
-                float split = node->split_plane;
-                float d0 = p0 - split;
-                float d1 = p1 - split;
-
-                if (d0 > 0.01f && d1 > 0.01f) {
-                    if (node->right_child != 0xFFFF) {
-                        cur_node_id = node->right_child;
-                        ((float*)&cur_node_box)[axis] = split;
-                        continue;
-                    }
-                    break;
-                }
-                if (d0 < -0.01f && d1 < -0.01f) {
-                    if (node->left_child != 0xFFFF) {
-                        cur_node_id = node->left_child;
-                        ((float*)&cur_node_box)[axis + 3] = split;
-                        continue;
-                    }
-                    break;
-                }
-
-                float t = d0 / (d0 - d1);
-                C3Vector split_pt;
-                split_pt.x = (cur_ray.p1.x - cur_ray.p0.x) * t + cur_ray.p0.x;
-                split_pt.y = (cur_ray.p1.y - cur_ray.p0.y) * t + cur_ray.p0.y;
-                split_pt.z = (cur_ray.p1.z - cur_ray.p0.z) * t + cur_ray.p0.z;
-
-                uint16_t left = node->left_child;
-                uint16_t right = node->right_child;
-
-                if (d0 <= 0.0f) {
-                    if (right != 0xFFFF && top < 63) {
-                        ++top;
-                        stack[top].node_id = right;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis] = split;
-                    }
-                    if (left != 0xFFFF) {
-                        cur_node_id = left;
-                        cur_ray.p1 = split_pt;
-                        ((float*)&cur_node_box)[axis + 3] = split;
-                        continue;
-                    }
-                    break;
-                } else {
-                    if (left != 0xFFFF && top < 63) {
-                        ++top;
-                        stack[top].node_id = left;
-                        stack[top].ray.p0 = split_pt;
-                        stack[top].ray.p1 = cur_ray.p1;
-                        stack[top].node_box = cur_node_box;
-                        ((float*)&stack[top].node_box)[axis + 3] = split;
-                    }
-                    if (right != 0xFFFF) {
-                        cur_node_id = right;
-                        cur_ray.p1 = split_pt;
-                        ((float*)&cur_node_box)[axis] = split;
-                        continue;
-                    }
-                    break;
-                }
-            }
+    // 0x007CA362 fldz; fcomp v27; test ah,5 jp: only 0 < v27 falls through.
+    if (0.0f < v27) {
+        if (v4->right_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = a3[k]; v22[k + 3] = v26[k]; }
+            RefSegment(nodes, v4->right_child, v22, v23, log);
         }
-        return count;
-    };
+        if (v4->left_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = v26[k]; v22[k + 3] = a3[k + 3]; }
+            RefSegment(nodes, v4->left_child, v22, v24, log);
+        }
+    } else {
+        if (v4->left_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = a3[k]; v22[k + 3] = v26[k]; }
+            RefSegment(nodes, v4->left_child, v22, v24, log);
+        }
+        if (v4->right_child != 0xFFFF) {
+            for (int k = 0; k < 3; ++k) { v22[k] = v26[k]; v22[k + 3] = a3[k + 3]; }
+            RefSegment(nodes, v4->right_child, v22, v23, log);
+        }
+    }
+}
 
-    if (CountLeaves(&r1) != 1) return false;
-    if (CountLeaves(&r2) != 1) return false;
-    if (CountLeaves(&r3) != 3) return false;
+uint32_t g_rng = 0x2545F491u;
+uint32_t Rng() { g_rng ^= g_rng << 13; g_rng ^= g_rng >> 17; g_rng ^= g_rng << 5; return g_rng; }
+float RngF(float lo, float hi) { return lo + (hi - lo) * (float)(Rng() & 0xFFFFFF) / 16777215.0f; }
 
+// A random tree with children always at higher indices, or with `chain` set a
+// run of nodes that all split X at 0 with the segment starting on the plane,
+// so every level is "within 0.01" and pushes a node: deep enough to fill the
+// stack.
+uint32_t BuildTree(WowBspNode* t, uint32_t cap, bool chain) {
+    for (uint32_t i = 0; i < cap; ++i) t[i] = WowBspNode{};
+    if (chain) {
+        const uint32_t k = (cap - 1) / 2;
+        for (uint32_t i = 0; i < k; ++i) {
+            t[i].flags = 0;
+            t[i].split_plane = 0.0f;
+            t[i].right_child = (uint16_t)(i + 1 < k ? i + 1 : k);
+            t[i].left_child  = (uint16_t)(k + 1 + i);
+        }
+        for (uint32_t i = k; i < cap; ++i) t[i].flags = 4;
+        return cap;
+    }
+    const uint32_t count = 8 + Rng() % (cap - 8);
+    for (uint32_t i = 0; i < count; ++i) {
+        const bool leaf = (i * 2 + 1 >= count) || (Rng() % 5 == 0);
+        if (leaf) { t[i].flags = 4; continue; }
+        t[i].flags = (uint16_t)(Rng() % 3);
+        t[i].split_plane = RngF(-10.0f, 10.0f);
+        const uint32_t span = count - (i + 1);
+        t[i].left_child  = (Rng() % 7 == 0) ? 0xFFFF : (uint16_t)(i + 1 + Rng() % span);
+        t[i].right_child = (Rng() % 7 == 0) ? 0xFFFF : (uint16_t)(i + 1 + Rng() % span);
+    }
+    return count;
+}
+
+// Walk against the transcription: random trees and segments, some with a NaN
+// coordinate, and the chain, where Walk has to hand a node to the "client".
+bool RunSelfTest() {
+    static WowBspNode tree[200];
+    static LeafLog want, got;
+    for (int c = 0; c < 400; ++c) {
+        const bool chain = (c == 0);
+        BuildTree(tree, chain ? 199 : 200, chain);
+        float r[6], nb[6];
+        for (int i = 0; i < 6; ++i) r[i] = RngF(-12.0f, 12.0f);
+        for (int i = 0; i < 3; ++i) { nb[i] = -10.0f; nb[i + 3] = 10.0f; }
+        if (chain) { r[0] = 0.0f; r[3] = 5.0f; }
+        // A NaN in the segment, or in a split near the root: the client's
+        // compares send it down particular branches, and those must match.
+        const uint32_t nan = 0x7FC00000u;
+        if (c % 8 == 1) memcpy(&r[Rng() % 6], &nan, 4);
+        if (c % 8 == 2) memcpy(&tree[Rng() % 4].split_plane, &nan, 4);
+
+        want.count = 0; want.overflow = false;
+        RefSegment(tree, 0, r, nb, want);
+        got.count = 0; got.overflow = false;
+        int handed = 0;
+        Walk(tree, 0, r, nb,
+             [&](const WowBspNode* leaf, const float* ray) {
+                 Record(got, (uint32_t)(leaf - tree), ray);
+             },
+             [&](uint32_t id, const float* rr, const float* bb) {
+                 ++handed;
+                 RefSegment(tree, id, rr, bb, got);
+             });
+        if (want.overflow || got.overflow || want.count != got.count ||
+            memcmp(want.idx, got.idx, want.count * sizeof(uint32_t)) != 0 ||
+            memcmp(want.ray, got.ray, want.count * sizeof(want.ray[0])) != 0) {
+            Log("[CollisionSegmentBsp] NOT active: case %d reached %u leaves where the "
+                "transcription of the client reaches %u, or in another order, or with "
+                "another segment.", c, got.count, want.count);
+            return false;
+        }
+        if (chain && handed == 0) {
+            Log("[CollisionSegmentBsp] NOT active: the deep test tree never filled the "
+                "stack, so the hand-over to the client went untested.");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -466,7 +430,6 @@ bool Init() {
     }
 
     if (!RunSelfTest()) {
-        Log("[CollisionSegmentBsp] NOT active: self-test failed");
         return false;
     }
 
@@ -504,15 +467,8 @@ void Shutdown() {
 
 void LogStats() {
     if (!g_installed) return;
-    uint64_t calls     = g_calls.load(std::memory_order_relaxed);
-    uint64_t leaves    = g_leaves.load(std::memory_order_relaxed);
-    uint64_t straddles = g_straddles.load(std::memory_order_relaxed);
-    uint64_t culled    = g_culled.load(std::memory_order_relaxed);
-    uint64_t fallbacks = g_fallbacks.load(std::memory_order_relaxed);
-
-    Log("[CollisionSegmentBsp] %llu calls, %llu leaves visited, %llu straddles, %llu culled, %llu stack fallbacks%s",
-        calls, leaves, straddles, culled, fallbacks,
-        g_dead ? " [RETIRED]" : "");
+    Log("[CollisionSegmentBsp] %llu calls, %llu leaves, %llu nodes handed to the client "
+        "(stack full)", g_calls, g_leaves, g_handed);
 }
 
 } // namespace CollisionSegmentBsp

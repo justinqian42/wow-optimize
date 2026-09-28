@@ -52,7 +52,6 @@
 #include "config.h"
 #include "ab_test.h"
 #include "sampling_profiler.h"
-#include "self_bench.h"
 
 extern "C" void Log(const char* fmt, ...);
 MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
@@ -106,7 +105,7 @@ TraverseFrustumBSP_fn orig_TraverseFrustumBSP = nullptr;
 const auto call_leaf = (LeafHandler_fn)kLeafHandler;
 
 bool g_installed = false;
-bool g_dead      = false;
+bool g_abSubject = false;
 
 unsigned long long g_calls    = 0;
 unsigned long long g_leaves   = 0;
@@ -122,7 +121,7 @@ unsigned long long g_fallbacks = 0;
 // appends to a list the caller reads in that order. Pushing the +2 child and
 // continuing into the +4 child keeps the same depth-first order.
 template <typename Visit, typename Hand>
-__forceinline void Walk(const uint8_t* bsp_nodes, uint32_t root_node_id,
+__declspec(safebuffers) __forceinline void Walk(const uint8_t* bsp_nodes, uint32_t root_node_id,
                         const float* root_query_box, const float* root_node_box,
                         Visit visit, Hand hand_to_client) {
     BspStackEntry stack[64];
@@ -234,7 +233,7 @@ void __fastcall Hooked_TraverseFrustumBSP(void* this_ptr, void* dummy_edx,
                                           uint32_t node_id, const float* query_box, const float* node_box) {
     if (!this_ptr || !query_box || !node_box) return;
 
-    if (g_dead) {
+    if (g_abSubject && AbTest::StandAside()) {
         orig_TraverseFrustumBSP(this_ptr, dummy_edx, node_id, query_box, node_box);
         return;
     }
@@ -261,30 +260,35 @@ void RefTraverse(const WowBspNode* nodes, uint32_t id, const float* a3, const fl
         return;
     }
     const uint32_t v5 = v4->flags & 3;
-    if (!(a4[v5] <= a3[v5 + 3] && a4[v5 + 3] >= a3[v5])) return;
+    // 0x007CA479 test ah,41h jz and 0x007CA48C test ah,5 jnp: only an ordered
+    // compare leaves, so a NaN on either side carries on.
+    if (a4[v5] > a3[v5 + 3] || a4[v5 + 3] < a3[v5]) return;
     float v41[6], v39[6];
     for (int i = 0; i < 6; ++i) { v41[i] = a4[i]; v39[i] = a4[i]; }
     v41[v5] = v4->split_plane;          // box for the child at +4
     v39[v5 + 3] = v4->split_plane;      // box for the child at +2
-    if (v4->split_plane >= a3[v5]) {
-        if (v4->split_plane <= a3[v5 + 3]) {
-            if (v4->right_child != 0xFFFF) {
-                float q[6];
-                for (int i = 0; i < 6; ++i) q[i] = a3[i];
-                q[v5] = v4->split_plane;
-                RefTraverse(nodes, v4->right_child, q, v41, log);
-            }
-            if (v4->left_child != 0xFFFF) {
-                float q[6];
-                for (int i = 0; i < 6; ++i) q[i] = a3[i];
-                q[v5 + 3] = v4->split_plane;
-                RefTraverse(nodes, v4->left_child, q, v39, log);
-            }
-        } else if (v4->left_child != 0xFFFF) {
-            RefTraverse(nodes, v4->left_child, a3, v39, log);
-        }
-    } else if (v4->right_child != 0xFFFF) {
-        RefTraverse(nodes, v4->right_child, a3, v41, log);
+    // 0x007CA4F1 test ah,5 jp: only an ordered split < min goes to +4 alone.
+    if (v4->split_plane < a3[v5]) {
+        if (v4->right_child != 0xFFFF) RefTraverse(nodes, v4->right_child, a3, v41, log);
+        return;
+    }
+    // 0x007CA526 test ah,41h jnz: only an ordered split > max goes to +2 alone.
+    if (v4->split_plane > a3[v5 + 3]) {
+        if (v4->left_child != 0xFFFF) RefTraverse(nodes, v4->left_child, a3, v39, log);
+        return;
+    }
+    // Straddling, or a NaN on either side of either compare.
+    if (v4->right_child != 0xFFFF) {
+        float q[6];
+        for (int i = 0; i < 6; ++i) q[i] = a3[i];
+        q[v5] = v4->split_plane;
+        RefTraverse(nodes, v4->right_child, q, v41, log);
+    }
+    if (v4->left_child != 0xFFFF) {
+        float q[6];
+        for (int i = 0; i < 6; ++i) q[i] = a3[i];
+        q[v5 + 3] = v4->split_plane;
+        RefTraverse(nodes, v4->left_child, q, v39, log);
     }
 }
 
@@ -338,6 +342,11 @@ bool RunSelfTest() {
             nb[i] = -10.0f;        nb[i + 3] = 10.0f;
         }
         if (chain) { q[0] = -5.0f; q[3] = 5.0f; }
+        // A NaN in the query or in a split near the root: the client's
+        // compares send it down particular branches, and those must match.
+        const uint32_t nan = 0x7FC00000u;
+        if (c % 8 == 1) memcpy(&q[Rng() % 6], &nan, 4);
+        if (c % 8 == 2) memcpy(&tree[Rng() % 4].split_plane, &nan, 4);
 
         want.count = 0; want.overflow = false;
         RefTraverse(tree, 0, q, nb, want);
@@ -367,9 +376,6 @@ bool RunSelfTest() {
     }
     return true;
 }
-
-bool g_abSubject = false;
-int g_benchId    = -1;
 
 } // anonymous namespace
 
@@ -413,7 +419,6 @@ bool Init() {
 
     g_installed = true;
     g_abSubject = AbTest::IsSubject("CollisionFrustumBsp", &g_abSubject);
-    g_benchId = SelfBench::Register("CollisionFrustumBsp");
 
     SamplingProfiler::RegisterSelfSymbol("CollisionFrustumBsp", (const void*)&Hooked_TraverseFrustumBSP);
 
@@ -430,8 +435,8 @@ void Shutdown() {
 
 void LogStats() {
     if (!g_installed) return;
-    Log("[CollisionFrustumBsp] Calls: %llu, Leaves visited: %llu, Stack fallbacks: %llu%s",
-        g_calls, g_leaves, g_fallbacks, g_dead ? " [RETIRED]" : "");
+    Log("[CollisionFrustumBsp] Calls: %llu, Leaves visited: %llu, Stack fallbacks: %llu",
+        g_calls, g_leaves, g_fallbacks);
 }
 
 } // namespace CollisionFrustumBsp
