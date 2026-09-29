@@ -74,8 +74,54 @@ typedef bool (__thiscall* Sub78F370_fn)(void* this_ptr, const void* box);
 
 constexpr uintptr_t fn_sub_7F9430 = 0x007F9430;
 constexpr uintptr_t fn_sub_78F370 = 0x0078F370;
-constexpr uintptr_t fn_sub_7A3E40 = 0x007A3E40;
-constexpr uintptr_t fn_sub_7A4AF0 = 0x007A4AF0;
+
+// The two leaves take their operands in registers the client sets up once for the
+// whole traversal: ebx = node, esi = a2, edi = a3, and ecx = &box for the first,
+// edx = esi for the second. They are called from naked thunks that read their
+// arguments off the stack at fixed offsets. The hook used to do this in an inline
+// __asm block where "mov ebx, ebx" named the register and not the C local of the
+// same name (the compiler kept the node in esi), so ebx held whatever the loop
+// left in it, and esi, which the client's leaf and the callee behind it read as
+// a2, was never loaded. The leaf dereferenced a null there in the first frame
+// of the world.
+//
+// Frame after the three pushes: [esp+16] node, [esp+20] a2, [esp+24] a3,
+// [esp+28] the box.
+__declspec(naked) void __cdecl CallLeafBox(uint32_t node, uint32_t a2, uint32_t a3, const void* box) {
+    __asm {
+        push ebx
+        push esi
+        push edi
+        mov ebx, [esp + 16]
+        mov esi, [esp + 20]
+        mov edi, [esp + 24]
+        mov ecx, [esp + 28]
+        mov eax, 0x007A3E40
+        call eax
+        pop edi
+        pop esi
+        pop ebx
+        ret
+    }
+}
+
+__declspec(naked) void __cdecl CallLeafHost(uint32_t node, uint32_t a2, uint32_t a3, const void* box) {
+    __asm {
+        push ebx
+        push esi
+        push edi
+        mov ebx, [esp + 16]
+        mov esi, [esp + 20]
+        mov edi, [esp + 24]
+        mov edx, esi
+        mov eax, 0x007A4AF0
+        call eax
+        pop edi
+        pop esi
+        pop ebx
+        ret
+    }
+}
 
 __declspec(safebuffers) int __cdecl Hook_SceneVisTraverse(uint32_t* a1, int a2, int a3, int a4) {
     ++g_calls;
@@ -145,35 +191,9 @@ __declspec(safebuffers) int __cdecl Hook_SceneVisTraverse(uint32_t* a1, int a2, 
                 if (overlap) {
                     ++g_nodesPassed;
                     if (*(const int8_t*)(ebx + 0x0C) >= 0) {
-                        // sub_7A3E40 expects ecx = &box, edi = a3, ebx = ebx
-                        __asm {
-                            push ebx
-                            push edi
-                            push esi
-                            lea ecx, box
-                            mov edi, a3
-                            mov ebx, ebx
-                            mov eax, fn_sub_7A3E40
-                            call eax
-                            pop esi
-                            pop edi
-                            pop ebx
-                        }
+                        CallLeafBox(ebx, (uint32_t)a2, (uint32_t)a3, &box);
                     } else {
-                        // sub_7A4AF0 expects edx = a2, edi = a3, ebx = ebx
-                        __asm {
-                            push ebx
-                            push edi
-                            push esi
-                            mov edx, a2
-                            mov edi, a3
-                            mov ebx, ebx
-                            mov eax, fn_sub_7A4AF0
-                            call eax
-                            pop esi
-                            pop edi
-                            pop ebx
-                        }
+                        CallLeafHost(ebx, (uint32_t)a2, (uint32_t)a3, &box);
                     }
                 } else {
                     ++g_nodesCulled;
