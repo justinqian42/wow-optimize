@@ -46,8 +46,14 @@
 #include "config.h"
 #include "high_tables.h"
 #include "sampling_profiler.h"
+#include "d3d9_state_manager.h"
+#include "m2_anim_stride.h"
+#include "diagnostics/frame_bench.h"
+#include "loading_state.h"
+#include "lua_optimize.h"
 
 extern "C" void Log(const char* fmt, ...);
+extern "C" void WowOpt_OnFrameBoundary();
 
 namespace GxRT {
 
@@ -172,6 +178,13 @@ DWORD         g_renderTid = 0;
 uint8_t*      g_stubs = nullptr;
 void*         g_thunk[kSlots] = {};      // what this file wrote into each slot
 uintptr_t*    g_patchedVt = nullptr;     // the vtable those thunks were written into
+
+// The device restart this module asks the client for, once, when the client made
+// its first device before the loader hook could see it.
+bool          g_armed = false;           // Init succeeded and no device has come through the hook yet
+bool          g_restartAsked = false;
+bool          g_restartReported = false;
+LARGE_INTEGER g_restartQpc;
 
 // ---- the render thread ----------------------------------------------------------
 inline void RelObj(IUnknown* o) { if (o) o->Release(); }
@@ -488,6 +501,15 @@ HRESULT __stdcall T_Present(IDirect3DDevice9* d, const RECT* src, const RECT* ds
         Drain();
         return O<F_Present>(S_Present)(d, src, dst, wnd, dirty);
     }
+    // The frame boundary, here on the main thread where its work belongs. The
+    // state manager's Present hook, which would have run it, executes on the
+    // render thread from here on and leaves it out. The two paths above reach
+    // that hook on this thread and it runs the boundary itself, so each frame
+    // sees exactly one.
+    D3D9StateManager_RunDeferredMainThreadWork();
+    M2AnimStride::OnPresent();
+    FrameBench::OnPresent(FrameBench::Source::D3D9Present);
+    WowOpt_OnFrameBoundary();
     CmdPresent* c = Emit<CmdPresent>(OP_PRESENT);
     c->flags = (src ? 1u : 0u) | (dst ? 2u : 0u);
     if (src) c->src = *src;
@@ -720,6 +742,7 @@ bool Init() {
         return false;
     }
     g_why = "waiting for the device";
+    g_armed = true;
     Log("[GxRT] armed: the client's D3D loader (0x%08X) is hooked; the device will be created MULTITHREADED "
         "and its calls queued to a render thread. Ring %u KB, arena 2 x %u KB.",
         (unsigned)kLoadD3dLib, kRingBytes >> 10, kArenaBytes >> 10);
@@ -727,6 +750,63 @@ bool Init() {
 }
 
 bool IsActive() { return g_active != 0; }
+
+bool OnRenderThread() {
+    const DWORD tid = g_renderTid;
+    return tid != 0 && GetCurrentThreadId() == tid;
+}
+
+namespace {
+// sub_4DD400 is `sub_7658A0("gxRestart", 1)` and nothing else: the console
+// dispatcher with the restart command, which is what typing it runs. It takes no
+// arguments, so nothing about the dispatcher's own signature is assumed here.
+constexpr uintptr_t kGxRestartCommand = 0x004DD400;
+const uint8_t kGxRestartCommandPrologue[7] = { 0x6A, 0x01, 0x68, 0x08, 0x57, 0x9F, 0x00 };
+constexpr uintptr_t kGxDeviceGlobal = 0x00C5DF88;     // the client's CGxDevice pointer
+constexpr uintptr_t kLuaStateGlobal = 0x00D3F78C;
+constexpr double    kSettleMs = 4000.0;               // after Init, before asking
+constexpr double    kReportMs = 6000.0;               // after asking, before saying it did not take
+}  // namespace
+
+void OnMainThreadTick() {
+    if (!g_armed || g_everActive || g_dead) return;
+
+    LARGE_INTEGER f, now;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&now);
+
+    if (g_restartAsked) {
+        if (!g_restartReported &&
+            (double)(now.QuadPart - g_restartQpc.QuadPart) * 1000.0 / (double)f.QuadPart >= kReportMs) {
+            g_restartReported = true;
+            g_why = "the restart did not create a device through the hook";
+            Log("[GxRT] the device restart was requested %.0f ms ago and no device has come through the "
+                "hook since: %s. The client is running its own device; '/console gxRestart' can be tried by hand.",
+                kReportMs, g_why);
+        }
+        return;
+    }
+
+    if ((double)(now.QuadPart - g_qpc0.QuadPart) * 1000.0 / (double)f.QuadPart < kSettleMs) return;
+    // Wait for the client to have a device and an interface, and never restart
+    // in the middle of a loading screen or a state swap.
+    if (!*(volatile uintptr_t*)kGxDeviceGlobal || !*(volatile uintptr_t*)kLuaStateGlobal) return;
+    if (LoadingState::IsLoading() || LuaOpt::IsLoadingMode() || LuaOpt::IsReloading() || LuaOpt::IsSwapping()) return;
+
+    if (memcmp((const void*)kGxRestartCommand, kGxRestartCommandPrologue, sizeof(kGxRestartCommandPrologue)) != 0) {
+        g_armed = false;
+        g_why = "the client's gxRestart command is not the one this was read from";
+        Log("[GxRT] no automatic device restart: %s (0x%08X).", g_why, (unsigned)kGxRestartCommand);
+        return;
+    }
+
+    g_restartAsked = true;
+    g_restartQpc = now;
+    g_why = "waiting for the device restart";
+    Log("[GxRT] the client created its device before this module loaded; asking it for a device restart "
+        "(the gxRestart command) so the device is made through the hook. The screen goes black for a moment.");
+    ((void (__cdecl*)())kGxRestartCommand)();
+}
 
 bool IsThunk(const void* fn) {
     if (!fn || !g_patchedVt) return false;

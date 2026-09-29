@@ -28,6 +28,18 @@ bool IsActive();
 // hook this module captured below it.
 bool IsThunk(const void* fn);
 
+// True on the render thread itself. Present reaches the state manager's hook on
+// that thread while this module is active, and that hook must not run the work
+// that belongs to the main thread's frame.
+bool OnRenderThread();
+
+// Main thread, from the pump. The render thread is normally only reachable
+// through a device the client creates through our hook, and this module loads
+// after the client made its first one. Once the client has settled this asks it
+// for a device restart, exactly as typing the console command would, so the
+// device is made again through the hook.
+void OnMainThreadTick();
+
 void LogStats();
 void Shutdown();
 

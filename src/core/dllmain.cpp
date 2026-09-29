@@ -2272,6 +2272,10 @@ static void MainThreadPump() {
 
         RunPeriodicMaintenanceOnMainThread();
 
+        // One device restart, so the client's device is made through the
+        // render thread's hook. Does nothing once that has happened.
+        GxRT::OnMainThreadTick();
+
         // Detect lua_State destruction (logout/exit) - clear caches
         static uintptr_t g_lastLState = 0;
         uintptr_t currentL = *(uintptr_t*)0x00D3F78C;  // lua_State* global

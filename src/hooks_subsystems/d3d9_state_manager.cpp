@@ -234,6 +234,22 @@ static void InvalidateAllCaches();
 static void UnpatchDeviceVTable();
 static bool PatchDeviceVTable(void* pDevice);
 
+static volatile LONG g_mainThreadClearPending = 0;
+
+static void ClearMainThreadCaches() {
+    #ifndef TEST_DISABLE_FONT_METRICS_FAST
+    FontGlyphCache::ClearCache();
+    #endif
+    TextureUnloadDelay::Discard();
+    D3D9StateCache::InvalidateAllCaches(false);
+}
+
+void D3D9StateManager_RunDeferredMainThreadWork(void) {
+    if (g_mainThreadClearPending && InterlockedExchange(&g_mainThreadClearPending, 0)) {
+        ClearMainThreadCaches();
+    }
+}
+
 static inline void CheckDeviceChange(void* dev) {
     // Do NOT bypass this under DXVK: it's the only mechanism that notices a
     // device reset/recreation (windowed<->fullscreen, resize) and invalidates
@@ -249,11 +265,8 @@ static inline void CheckDeviceChange(void* dev) {
         InterlockedIncrement(&g_deviceResetCounter);
         InvalidateAllCaches();
         RenderStateDedup_ClearCache();
-        #ifndef TEST_DISABLE_FONT_METRICS_FAST
-        FontGlyphCache::ClearCache();
-        #endif
-        TextureUnloadDelay::Discard();
-        D3D9StateCache::InvalidateAllCaches(false);
+        if (GxRT::OnRenderThread()) InterlockedExchange(&g_mainThreadClearPending, 1);
+        else ClearMainThreadCaches();
 
         g_pDevice = dev;
 
@@ -859,9 +872,16 @@ static HRESULT __stdcall Hooked_Present(void* dev, const RECT* src, const RECT* 
     D3D9StateCache::NoteFrameForDrawCensus();
     // A frame at any frame rate, which the stride phase needs and the
     // maintenance tick cannot give it - that runs about once in four.
-    M2AnimStride::OnPresent();
-    FrameBench::OnPresent(FrameBench::Source::D3D9Present);
-    WowOpt_OnFrameBoundary();
+    //
+    // With the render thread active this hook runs on that thread, and the
+    // frame boundary does main-thread work (Lua, object manager, the client's
+    // own tables). The render thread's Present entry point calls it on the
+    // main thread instead, once per frame.
+    if (!GxRT::OnRenderThread()) {
+        M2AnimStride::OnPresent();
+        FrameBench::OnPresent(FrameBench::Source::D3D9Present);
+        WowOpt_OnFrameBoundary();
+    }
 
     HRESULT hr = g_orig_Present(dev, src, dst, hOverride, dirty);
 

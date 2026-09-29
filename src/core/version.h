@@ -367,7 +367,12 @@
 // axis-aligned rotation via fsincos in double precision directly updating only
 // the 2 rotating rows, bypassing stack-allocated temporary matrices, zero-multiplications,
 // and redundant memcpy operations. Pointer-validated + SEH + shadow verification.
-#define TEST_DISABLE_MATRIX_ROTATE_SSE2         0
+//
+// Not installed. Every call runs the client's own routine on a copy to compare
+// against, on three entry points with 56 callers between them, and no session has
+// recorded a saving to set against that. The CreateRotate* entry points are a
+// separate switch and are untouched.
+#define TEST_DISABLE_MATRIX_ROTATE_SSE2         1
 
 // SSE2 CMatrix::MultiplyInPlace (sub_4C2370, 27 callers), CMatrix::ScaleLocal
 // (sub_4C1B90, 18 callers), CMatrix::Scale3x3 (sub_4C1BF0, 36 callers),

@@ -1541,6 +1541,21 @@ static float* __fastcall Hooked_BoxScale(float* self, void* edx, float scale) {
 // ================================================================
 // CMatrix::RotateX/Y/Z (sub_4C3300, sub_4C3340, sub_4C3380, 56 callers)
 // ================================================================
+
+// Shared with the CreateRotate* replacements further down, which stay installed
+// when the RotateX/Y/Z hooks below are switched off.
+static inline void FastSinCos(float angle, float& outSin, float& outCos) {
+    float s, c;
+    __asm {
+        fld angle
+        fsincos
+        fstp c
+        fstp s
+    }
+    outSin = s;
+    outCos = c;
+}
+
 #if !TEST_DISABLE_MATRIX_ROTATE_SSE2
 typedef float* (__fastcall* MatRotate_t)(float* self, void* edx, float angle);
 
@@ -1562,18 +1577,6 @@ static volatile unsigned long g_matrotate_z_calls = 0;
 static volatile unsigned long g_matrotate_z_agreements = 0;
 static volatile LONG g_matrotate_z_armed = 0;
 static volatile LONG g_matrotate_z_dead = 0;
-
-static inline void FastSinCos(float angle, float& outSin, float& outCos) {
-    float s, c;
-    __asm {
-        fld angle
-        fsincos
-        fstp c
-        fstp s
-    }
-    outSin = s;
-    outCos = c;
-}
 
 inline void MatRotateX_SSE2(float* m, float angle) {
     float s, c;

@@ -49,7 +49,9 @@ namespace WowOptimizeLauncher {
             // against it. Distance is a poor stand-in for whether a held
             // skeleton is seen: a large animation fills the screen at any range.
             "AnimLod",
-            "M2AnimStride"
+            "M2AnimStride",
+            "M2AnimReuse",
+            "CollisionFaceClip"
         };
 
         private static readonly string[] DiagKeys = new string[] {
@@ -158,6 +160,15 @@ namespace WowOptimizeLauncher {
             "UIFrameBatch",        // switches nothing; the two it named have their own
             "LuaGcStockPace",      // turns the GC pacing below it off again
             "LuaGcCoalesce",
+
+            // Each verifies itself against the client on the hot path it replaces
+            // and none has been seen to arm and pay in a session. Two have a
+            // recorded reason: M2AnimReuse got two different bone arrays for the
+            // same model and arguments and retired itself, and CollisionFaceClip
+            // retires on its second verified call with a real disagreement. The
+            // other three have no measured gain either; they stay a tickbox.
+            "M2AnimReuse", "CollisionFaceClip", "AnimSplineTrack",
+            "PixelFormatBlit", "SkyTextureReuse",
         };
 
         // The order a tab lists them in, and what each run is called. Worst

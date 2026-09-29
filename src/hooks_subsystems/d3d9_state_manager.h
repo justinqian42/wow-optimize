@@ -11,6 +11,11 @@ void D3D9StateManager_LogStats(void);
 // on the vtable lock could hang the exiting process. Gives up rather than waits.
 void ShutdownD3D9StateManagerAtProcessExit(void);
 void OnFrameD3D9StateManager(DWORD mainThreadId);
+// The cache clears a device change owes the main thread. The change is noticed
+// in Present, which is the render thread's when that module is active; the
+// caches belong to the main thread, so the render thread leaves them and the
+// main thread's Present calls this.
+void D3D9StateManager_RunDeferredMainThreadWork(void);
 bool IsD3D9DeviceHooked(void);
 // How many merge barriers went in, of how many, and how many state blocks the
 // client created. The draw-merge census needs all three to say whether its own
