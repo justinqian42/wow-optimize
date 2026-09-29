@@ -19,8 +19,10 @@ bool Running();
 const char* Subject();
 
 // Register this module as a possible subject and hand over the flag its hot path
-// tests. Call once at init; the harness owns the flag from then on. With
-// AbTestSubject=all it rotates, so only one feature alternates at a time.
+// tests. Call once at init; the harness owns the flag from then on. Unnamed, or
+// AbTestSubject=bundle, every subject alternates together; AbTestSubject=all
+// rotates, so only one feature alternates at a time; a name measures that one.
+// A module may register before or after Init: Init adopts the earlier ones.
 //
 // Returns the flag's initial value, so a caller can log that it is the subject
 // without reading the flag back.

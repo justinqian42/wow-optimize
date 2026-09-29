@@ -650,7 +650,7 @@ namespace WowOptimizeLauncher {
                 { "No Client Patches (diagnostic)", new SettingItem("General", "NoClientPatches", false, null, "Writes nothing into WoW.exe, which turns every optimization off. Fixes the WoWCircle disconnects: two players ran it and the drops stopped. It is a trade, not a fix - you keep your connection and lose the performance work.", true) },
                 { "Flight Recorder (mark a moment)", new SettingItem("General", "FlightRecorder", true, null, "Keeps the last 512 frames and writes 240 of them to the log when you press Scroll Lock. Press it the moment you see something wrong. Nothing is written until you do, and it also marks itself for a disconnect, a freeze and a bad SavedVariables filename. Change the key with FlightRecorderKey in wow_opt.ini.") },
                 { "Camera Replay Benchmark", new SettingItem("General", "CameraReplay", false, null, "Measurement only. Stand still somewhere, press Shift+Pause, move the camera around, and press Shift+Pause again: the camera's motion is saved. Press Pause to play it back while the log measures every frame of the playback on its own. Run it once per build or setting from the same spot, facing the same way, with vsync off, and compare the BENCHMARK WINDOW blocks. Only the camera is replayed; other players and NPCs still move, so repeat each side. Hooks one wow.exe function, so leave it off on servers that kick for client patches. Change the key with CameraReplayKey in wow_opt.ini.", true) },
-                { "A/B Test a Feature", new SettingItem("General", "AbTest", false, null, "Turns one feature on and off in stints while you play and compares the two halves. It can only measure features you have switched on. Tick the features you want compared as well, or it has nothing to measure. Play at least 45 minutes.", true) },
+                { "A/B Test a Feature", new SettingItem("General", "AbTest", false, null, "Switches every replacement you have turned on off and on together, 20 seconds at a time, and compares the frame times of the two halves of the same session. It measures only features that are switched on, so tick the ones you want counted as well; TRY THE UNPROVEN ONES does both. Play at least 45 minutes with the frame rate uncapped, somewhere busy. To measure a single feature instead, put AbTestSubject=its name under [General] in wow_opt.ini.", true) },
                 { "Thread ID Cache", new SettingItem("General", "ThreadIdCache", true, null, "Caches GetCurrentThreadId in a thread-local slot to avoid redundant kernel queries on hot paths.") },
                 { "Object Visibility Lookup Cache", new SettingItem("General", "ObjVisCache", false, null, "Caches GUID-to-object visibility hash lookups in a thread-safe slot pool. Experimental, off by default.", true) },
 
@@ -1930,6 +1930,11 @@ namespace WowOptimizeLauncher {
                 bool want;
                 if (item.Key == "SamplingProfiler") {
                     want = true;
+                } else if (item.Key == "AbTest") {
+                    // The same session then also says what the replacements are
+                    // worth: all of them switched off and on together, in
+                    // stints, with the frame times of the two halves compared.
+                    want = true;
                 } else if (item.Key == "FrameLimiter") {
                     // A run that spends its frames waiting measures nothing: the
                     // profile fills with the wait and every share in it is a
@@ -1971,7 +1976,10 @@ namespace WowOptimizeLauncher {
                 + " that buy frames by changing how the game looks or sounds, which is "
                 + "your call and not this button's; and the frame rate limiter, because a "
                 + "capped session measures nothing.\r\n\r\n"
-                + "Play normally for half an hour or more, then send "
+                + "The A/B test is on too: every replacement is switched off and on "
+                + "together for 20 seconds at a time, and the log compares the frame "
+                + "times of the two halves, which says what they are worth as a set. "
+                + "Play somewhere busy for at least 45 minutes, then send "
                 + "Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT to put "
                 + "it back.\r\n\r\nSaved. Launch when ready.",
                 "Try the unproven ones", MessageBoxButtons.OK, MessageBoxIcon.Information);

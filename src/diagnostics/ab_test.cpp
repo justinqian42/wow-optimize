@@ -118,11 +118,23 @@ DWORD    g_periodMs = 20000;
 
 // How many subjects can register. Declared here because the per-subject arrays
 // below are sized by it.
-constexpr int kMaxOffered = 32;
+//
+// Eighty-three modules offer a name, so the list of names and flags holds
+// ninety-six. The frame-time statistics are 4.6 KB a subject and this image sits
+// in the half of the address space the client allocates from, so those stay at
+// thirty-two slots: a rotating or named run can measure the first thirty-two
+// that registered, and a bundle run uses one slot for all of them.
+constexpr int kMaxOffered = 96;
+constexpr int kMaxStats   = 32;
 
 bool     g_onNow    = true;
 bool     g_claimed  = false;    // some module answered to the configured name
-uint64_t g_standAside[kMaxOffered] = {};   // hot-path calls each subject handed back
+uint64_t g_standAside[kMaxStats] = {};   // hot-path calls each subject handed back
+
+// AbTestSubject=bundle: every registered subject is switched on and off
+// together, by one clock. It answers "what is all of this worth", which the
+// per-subject runs cannot at the time one pass over eighty subjects takes.
+bool     g_bundle   = false;
 
 // One call in 256 is timed. A power of two so the test is an AND, and a plain
 // counter because this is a hot path and a lock-prefixed increment there has
@@ -195,10 +207,18 @@ void LogOffered(const char* lead) {
             "features that can be tested were switched on either", lead);
         return;
     }
+    // In as many lines as it takes: eighty-three names do not fit in one, and a
+    // list that stops at the thirtieth without saying so reads as complete.
     char line[512];
     int w = _snprintf(line, sizeof(line) - 1, "[AbTest] %s. Offered this session:", lead);
-    for (int i = 0; i < g_offeredCount && w > 0 && w < (int)sizeof(line) - 40; ++i)
+    for (int i = 0; i < g_offeredCount; ++i) {
+        if (w < 0 || w >= (int)sizeof(line) - 40) {
+            line[sizeof(line) - 1] = 0;
+            Log("%s", line);
+            w = _snprintf(line, sizeof(line) - 1, "[AbTest]   and:");
+        }
         w += _snprintf(line + w, sizeof(line) - 1 - w, " %s", g_offered[i]);
+    }
     line[sizeof(line) - 1] = 0;
     Log("%s", line);
     Log("[AbTest] Only a feature that is itself switched on can offer a name, so "
@@ -210,8 +230,8 @@ int      g_settle   = 0;
 uint64_t g_dropped  = 0;
 
 // One pair per registered subject, so a rotating session keeps them apart.
-Phase    g_on[kMaxOffered];
-Phase    g_off[kMaxOffered];
+Phase    g_on[kMaxStats];
+Phase    g_off[kMaxStats];
 
 LARGE_INTEGER g_freq = {};
 LARGE_INTEGER g_last = {};
@@ -320,15 +340,28 @@ bool IsSubject(const char* name, bool* flag) {
     if (flag) g_flag[slot] = flag;
     if (!g_active) return false;
 
+    if (g_bundle) {
+        g_claimed = true;
+        CountOpeningStint();
+        return true;
+    }
     if (g_rotate) {
         // Everything registered is a subject; which one is live is decided by the
         // rotation below, and the first registered starts.
+        if (slot >= kMaxStats) return false;    // no statistics slot for it
         g_claimed = true;
         if (slot != g_rotIndex) return false;
         CountOpeningStint();
         return true;
     }
     if (lstrcmpiA(g_subject, name) != 0) return false;
+    if (slot >= kMaxStats) {
+        Log("[AbTest] '%s' registered as subject number %d and only the first %d "
+            "keep statistics, so it cannot be measured on its own this session; "
+            "AbTestSubject=bundle measures every subject together.",
+            name, slot + 1, kMaxStats);
+        return false;
+    }
     g_claimed = true;
     g_rotIndex = slot;                 // so the stats land in this subject's slot
     CountOpeningStint();
@@ -384,8 +417,9 @@ void OnFrame() {
             g_rotPairs = 0;
             if (g_flag[g_rotIndex]) *g_flag[g_rotIndex] = false;
             int next = g_rotIndex;
-            for (int n = 0; n < g_offeredCount; ++n) {
-                next = (next + 1) % (g_offeredCount ? g_offeredCount : 1);
+            const int span = g_offeredCount < kMaxStats ? g_offeredCount : kMaxStats;
+            for (int n = 0; n < span; ++n) {
+                next = (next + 1) % (span ? span : 1);
                 if (g_flag[next]) break;
             }
             g_rotIndex = next;
@@ -411,7 +445,21 @@ void OnFrame() {
 // and flags were recorded when they registered, so the subject is chosen here
 // from those, the same way IsSubject would have chosen it.
 static void AdoptEarlyRegistrants() {
-    for (int i = 0; i < g_offeredCount; ++i) {
+    if (g_bundle) {
+        bool any = false;
+        for (int i = 0; i < g_offeredCount; ++i) {
+            if (!g_flag[i]) continue;
+            *g_flag[i] = true;
+            any = true;
+        }
+        if (any) {
+            g_claimed = true;
+            CountOpeningStint();
+        }
+        return;
+    }
+    const int span = g_offeredCount < kMaxStats ? g_offeredCount : kMaxStats;
+    for (int i = 0; i < span; ++i) {
         if (!g_flag[i]) continue;
         if (!g_rotate && lstrcmpiA(g_subject, g_offered[i]) != 0) continue;
         g_rotIndex = i;
@@ -434,12 +482,30 @@ bool Init() {
 
     lstrcpynA(g_subject, Config::g_settings.AbTestSubject, (int)sizeof(g_subject));
 
-    // An unnamed subject means rotation. The tickbox is in the launcher and the
-    // subject name is not, so standing down and printing a list of names costs a
-    // tester a whole session and answers nothing.
-    bool subjectWasBlank = (g_subject[0] == 0);
-    if (subjectWasBlank || lstrcmpiA(g_subject, "all") == 0 ||
-        lstrcmpiA(g_subject, "*") == 0) {
+    // "bundle": everything that registered, on and off together. It is also what
+    // an unnamed subject means. The tickbox is in the launcher and the subject
+    // name is not, so the reading of a bare tickbox has to be the useful one, and
+    // with eighty-odd subjects registering, one pass of a rotation is hours. A
+    // rotation is AbTestSubject=all.
+    if (g_subject[0] == 0) lstrcpynA(g_subject, "bundle", (int)sizeof(g_subject));
+    if (lstrcmpiA(g_subject, "bundle") == 0) {
+        g_bundle = true;
+        g_active = true;
+        g_onNow = true;
+        g_periodMs = (DWORD)Config::g_settings.AbTestPeriodMs;
+        if (g_periodMs < 5000)   g_periodMs = 5000;
+        if (g_periodMs > 120000) g_periodMs = 120000;
+        Log("[AbTest] ACTIVE, bundle: every feature that registers is switched on "
+            "for %u s and off for %u s together, so the two halves of the session "
+            "differ by all of them at once and nothing else. Only features that "
+            "are switched on by their own settings and stand aside through this "
+            "harness take part; the list is in the report.",
+            g_periodMs / 1000, g_periodMs / 1000);
+        AdoptEarlyRegistrants();
+        return true;
+    }
+
+    if (lstrcmpiA(g_subject, "all") == 0 || lstrcmpiA(g_subject, "*") == 0) {
         g_rotate = true;
         g_active = true;
         g_onNow = true;
@@ -459,12 +525,6 @@ bool Init() {
             "are what say whether the share was enough to read anything into.",
             kPairsPerSubject, g_periodMs / 1000,
             (unsigned)(2 * kPairsPerSubject * (g_periodMs / 1000)));
-        if (subjectWasBlank)
-            Log("[AbTest]   no AbTestSubject was named, and rotating every "
-                "subject is the useful reading of that. To spend the whole "
-                "session on one feature instead, put its name in wow_opt.ini "
-                "as AbTestSubject=<name>; the names it answers to are listed "
-                "in the periodic report below.");
         AdoptEarlyRegistrants();
         return true;
     }
@@ -594,7 +654,11 @@ static void ReportSubject(int i, const char* name) {
             // frequency is not the performance-counter frequency and this project has
             // no honest conversion for it, so the ratio is reported and the absolute
             // figure is left in the unit it was measured in.
-            if (g_on[i].workCalls && g_off[i].workCalls) {
+            if (g_bundle) {
+                // Every module's sampled calls land in the one slot, so the ratio
+                // would compare a mix of unrelated functions with another mix.
+                // Per-call figures come from the named and rotating runs.
+            } else if (g_on[i].workCalls && g_off[i].workCalls) {
                 double tOn  = (double)g_on[i].workTicks  / (double)g_on[i].workCalls;
                 double tOff = (double)g_off[i].workTicks / (double)g_off[i].workCalls;
                 Log("[AbTest]   the replaced call itself: %.0f ticks with the feature "
@@ -752,8 +816,21 @@ void LogStats() {
         }
     }
 
+    if (g_bundle) {
+        Log("[AbTest] bundle: %d subject(s) registered and switch together. This "
+            "measures what they are worth as a set, in one session, against the "
+            "same client with every one of them standing aside.", g_offeredCount);
+        LogOffered("these are the subjects in the bundle");
+    }
+    if (g_offeredCount > kMaxStats && !g_bundle)
+        Log("[AbTest] %d subjects registered and only the first %d keep "
+            "statistics; the rest run as their own switches say and are not "
+            "measured. AbTestSubject=bundle measures all of them together.",
+            g_offeredCount, kMaxStats);
+
     int reported = 0;
-    for (int i = 0; i < g_offeredCount; ++i) {
+    const int shown = g_offeredCount < kMaxStats ? g_offeredCount : kMaxStats;
+    for (int i = 0; i < shown; ++i) {
         if (!g_on[i].frames && !g_off[i].frames) continue;
         ReportSubject(i, g_rotate ? g_offered[i] : g_subject);
         ++reported;
