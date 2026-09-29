@@ -16,6 +16,8 @@ void OnFrameD3D9StateManager(DWORD mainThreadId);
 // caches belong to the main thread, so the render thread leaves them and the
 // main thread's Present calls this.
 void D3D9StateManager_RunDeferredMainThreadWork(void);
+// The device the state hooks were last installed on, or null. No reference is taken.
+void* D3D9StateManager_GetDevice(void);
 bool IsD3D9DeviceHooked(void);
 // How many merge barriers went in, of how many, and how many state blocks the
 // client created. The draw-merge census needs all three to say whether its own

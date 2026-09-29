@@ -1999,6 +1999,9 @@ static bool TryFindAndPatchDevice() {
 
 // Public API
 bool IsD3D9DeviceHooked(void) { return g_deviceHooked; }
+void* D3D9StateManager_GetDevice(void) {
+    return (g_pDevice && IsReadable((uintptr_t)g_pDevice)) ? g_pDevice : nullptr;
+}
 
 bool InstallD3D9StateManager(void) {
     memset(g_isCriticalRs, 0, sizeof(g_isCriticalRs));

@@ -184,6 +184,7 @@ uintptr_t*    g_patchedVt = nullptr;     // the vtable those thunks were written
 bool          g_armed = false;           // Init succeeded and no device has come through the hook yet
 bool          g_restartAsked = false;
 bool          g_restartReported = false;
+bool          g_hookReported = false;
 volatile bool g_deviceThroughHook = false;   // the client's device has been created by our hook at least once
 LARGE_INTEGER g_restartQpc;
 
@@ -800,6 +801,33 @@ void OnMainThreadTick() {
     // in the middle of a loading screen or a state swap.
     if (!*(volatile uintptr_t*)kGxDeviceGlobal || !*(volatile uintptr_t*)kLuaStateGlobal) return;
     if (LoadingState::IsLoading() || LuaOpt::IsLoadingMode() || LuaOpt::IsReloading() || LuaOpt::IsSwapping()) return;
+
+    // A restart does not go back through the client's D3D loader: the first one
+    // in a field log made a new device at once, through the IDirect3D9 the client
+    // already held, and the loader hook that installs the CreateDevice hook only
+    // ran eleven seconds later. So put that hook in from the device we have. On
+    // DXVK the IDirect3D9 vtable is one static table, so any instance reaches it.
+    if (!g_createDeviceHooked) {
+        IDirect3D9* d3d = nullptr;
+        void* dev = D3D9StateManager_GetDevice();
+        __try {
+            if (dev && SUCCEEDED(((IDirect3DDevice9*)dev)->GetDirect3D(&d3d)) && d3d) {
+                HookCreateDeviceOn(d3d);
+                d3d->Release();
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            d3d = nullptr;
+        }
+        if (!g_createDeviceHooked) {
+            if (!g_hookReported &&
+                (double)(now.QuadPart - g_qpc0.QuadPart) * 1000.0 / (double)f.QuadPart >= kSettleMs + kReportMs) {
+                g_hookReported = true;
+                g_why = "no IDirect3D9 was reachable to hook CreateDevice on";
+                Log("[GxRT] no automatic device restart: %s (device %p).", g_why, dev);
+            }
+            return;
+        }
+    }
 
     if (memcmp((const void*)kGxRestartCommand, kGxRestartCommandPrologue, sizeof(kGxRestartCommandPrologue)) != 0) {
         g_armed = false;
