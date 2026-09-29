@@ -21,6 +21,13 @@ namespace GxRT {
 bool Init();
 
 bool IsActive();
+
+// True when fn is one of the thunks this module wrote into the device vtable.
+// Another module that hooks the same vtable asks before writing over a slot: a
+// hook placed above a thunk, whose original is that thunk, closes a loop with the
+// hook this module captured below it.
+bool IsThunk(const void* fn);
+
 void LogStats();
 void Shutdown();
 

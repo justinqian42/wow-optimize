@@ -171,6 +171,7 @@ HANDLE        g_thread = nullptr;
 DWORD         g_renderTid = 0;
 uint8_t*      g_stubs = nullptr;
 void*         g_thunk[kSlots] = {};      // what this file wrote into each slot
+uintptr_t*    g_patchedVt = nullptr;     // the vtable those thunks were written into
 
 // ---- the render thread ----------------------------------------------------------
 inline void RelObj(IUnknown* o) { if (o) o->Release(); }
@@ -582,11 +583,25 @@ void PatchDevice(IDirect3DDevice9* dev) {
     BuildStubs();
     if (!g_stubs) { g_why = "the stub page could not be allocated"; return; }
 
-    // Originals first. On a vtable this file has already rewritten (the same class
-    // seen again after a device is recreated) the slot holds our own thunk, and
-    // the original stays what it was.
+    // The same vtable again, which is what a recreated device on the same class
+    // hands back. It is already ours and whatever sits in a slot now is either
+    // our thunk or another module's hook written over it. Capturing that hook as
+    // the original would make it call our thunk which calls it, forever: the first
+    // in-game device restart did exactly that with the state manager's hooks and
+    // both threads ran out of stack.
+    if (g_patchedVt == vt) {
+        Log("[GxRT] device %p shares the vtable already rewritten; nothing to patch.", (void*)dev);
+        return;
+    }
+    // A different class: nothing captured for the old one applies to this one.
+    if (g_patchedVt) {
+        for (int i = 0; i < kSlots; ++i) { g_orig[i] = nullptr; g_thunk[i] = nullptr; }
+    }
+
+    // Originals first, whatever the slot holds now: another module's hook that
+    // was there before this file arrived is the function to call through.
     for (int i = 0; i < kSlots; ++i) {
-        if (vt[i] != (uintptr_t)g_thunk[i] || !g_orig[i]) g_orig[i] = (void*)vt[i];
+        if (!g_orig[i]) g_orig[i] = (void*)vt[i];
     }
 
     DWORD oldProt = 0;
@@ -603,6 +618,7 @@ void PatchDevice(IDirect3DDevice9* dev) {
         vt[i] = (uintptr_t)t;
     }
     VirtualProtect(vt, kSlots * sizeof(void*), oldProt, &oldProt);
+    g_patchedVt = vt;
     Log("[GxRT] device vtable rewritten: %d slots queued, %d drain-then-direct, %d left alone.",
         queued, drained, direct);
 }
@@ -711,6 +727,14 @@ bool Init() {
 }
 
 bool IsActive() { return g_active != 0; }
+
+bool IsThunk(const void* fn) {
+    if (!fn || !g_patchedVt) return false;
+    for (int i = 0; i < kSlots; ++i) {
+        if (!IsDirectSlot(i) && g_thunk[i] == fn) return true;
+    }
+    return false;
+}
 
 void Shutdown() {
     if (g_active) { Drain(); InterlockedExchange(&g_active, 0); }

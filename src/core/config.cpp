@@ -333,11 +333,10 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         // missing from here is the defect the check exists to catch.
         Log("[Config] Settings with no launcher entry, set by hand in the ini "
             "and now preserved when the launcher saves: AddonDispatcher, "
-            "CrtMimalloc, D3d9RenderThread, MimallocLarge, "
+            "CrtMimalloc, MimallocLarge, "
             "NameplateMT, PacketOffload, RcuObjMgr, "
             "SavedVarsAsync, UnitAuraFast, VaArena, WorldStateCoalesce. "
-            "MimallocLarge has a known heap crash and D3d9RenderThread moves "
-            "draw submission off the main thread; the rest are off because "
+            "MimallocLarge has a known heap crash; the rest are off because "
             "nothing has measured them, not because they are known bad.");
 
         if (haveFile) ReportDuplicateKeys(path);

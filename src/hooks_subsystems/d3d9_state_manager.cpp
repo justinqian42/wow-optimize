@@ -19,6 +19,7 @@
 #include "font_glyph_cache.h"
 #include "texture_unload_delay.h"
 #include "d3d9_state_cache.h"
+#include "gx_render_thread.h"
 #include "render_state_dedup.h"
 #include "win_mutex.h"
 #include "diagnostics/crash_dumper.h"
@@ -1747,6 +1748,16 @@ static bool PatchDeviceVTable(void* pDevice) {
         // Avoid infinite recursion: check if the vtable entry is already pointing to our hook
         if (origFunc == (uintptr_t)g_hookFuncs[i]) {
             g_vtablePatched[i] = true;
+            patched++;
+            continue;
+        }
+
+        // The render thread's thunk over a hook this module wrote earlier. Its
+        // original is that hook, so taking the thunk as this hook's original
+        // closes a loop: hook, thunk, hook, until the stack ends. The first
+        // in-game device restart with the render thread on did exactly that.
+        // The hook is still there, under the thunk; leave both as they are.
+        if (g_vtablePatched[i] && GxRT::IsThunk((const void*)origFunc)) {
             patched++;
             continue;
         }
