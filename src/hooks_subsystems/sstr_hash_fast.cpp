@@ -86,6 +86,27 @@ __declspec(noinline) __declspec(safebuffers) static uint32_t Fast_SStrHashHT(con
     const __m128i backslash = _mm_set1_epi8('\\');
 
     while (len + 16 <= 0x3FC) {
+        // A 16-byte load reads past the terminator of a short string. Within a page
+        // that is harmless; when the string ends in the last 15 bytes of a page the
+        // next page may be unmapped, and the load faults on bytes the client never
+        // reads (a tester crashed on exactly this, reading the first byte of the
+        // page after a path string). Those bytes go one at a time.
+        if (((uintptr_t)s & 0xFFF) > 0xFF0) {
+            unsigned char c = (unsigned char)*s;
+            if (!c) break;
+            if (c >= 0x80) {
+                return g_orig(str);
+            }
+            if (c >= 'a' && c <= 'z') {
+                c -= 32;
+            } else if (c == '/') {
+                c = '\\';
+            }
+            buf[len++] = (char)c;
+            ++s;
+            continue;
+        }
+
         __m128i v = _mm_loadu_si128((const __m128i*)s);
 
         // Check for non-ASCII (any byte with MSB set >= 0x80)

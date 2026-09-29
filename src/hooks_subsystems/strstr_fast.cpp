@@ -67,17 +67,26 @@ static const char* __cdecl Hooked_strstr(const char* haystack, const char* needl
         }
     } else {
         // 9-16 byte pattern - use SSE2
-        __m128i needleXmm = _mm_loadu_si128((__m128i*)needle);
-        __m128i mask = _mm_cmpeq_epi8(needleXmm, _mm_set1_epi8(first));
-        int maskBits = _mm_movemask_epi8(mask);
-        
+        // Neither 16-byte load may run past the bytes the string owns: a pattern or a
+        // haystack that ends in the last bytes of a page would fault on the next one.
+        // The pattern is copied into a padded local; a haystack window that would
+        // reach past its terminator is compared byte by byte.
+        __declspec(align(16)) char needlePad[16] = {};
+        memcpy(needlePad, needle, needleLen);
+        __m128i needleXmm = _mm_load_si128((const __m128i*)needlePad);
+        const char* const ownedEnd = haystack + hayLen + 1;   // through the terminator
+
         while (p <= end) {
-            __m128i hayXmm = _mm_loadu_si128((__m128i*)p);
-            __m128i cmp = _mm_cmpeq_epi8(hayXmm, needleXmm);
-            int bits = _mm_movemask_epi8(cmp);
             // Check if all needleLen bytes match
-            int needleMask = (1 << needleLen) - 1;
-            if ((bits & needleMask) == needleMask) { g_fast++; return p; }
+            if (p + 16 <= ownedEnd) {
+                __m128i hayXmm = _mm_loadu_si128((const __m128i*)p);
+                __m128i cmp = _mm_cmpeq_epi8(hayXmm, needleXmm);
+                int bits = _mm_movemask_epi8(cmp);
+                int needleMask = (1 << needleLen) - 1;
+                if ((bits & needleMask) == needleMask) { g_fast++; return p; }
+            } else if (memcmp(p, needle, needleLen) == 0) {
+                g_fast++; return p;
+            }
             // Skip using bad-char heuristic
             unsigned char lastChar = (unsigned char)p[needleLen - 1];
             int step = skip[lastChar];
