@@ -169,6 +169,13 @@ namespace WowOptimizeLauncher {
             // other three have no measured gain either; they stay a tickbox.
             "M2AnimReuse", "CollisionFaceClip", "AnimSplineTrack",
             "PixelFormatBlit", "SkyTextureReuse",
+
+            // Computes a distance and a speed in single precision where the client
+            // uses x87 at 53 bits, and writes the distance into a client global.
+            // Its own header says the size of the difference has not been measured,
+            // and a field session ran it for 289007 calls. Until it is rebuilt in
+            // packed double and measured against the client, no button turns it on.
+            "ParticlePhysics",
         };
 
         // The order a tab lists them in, and what each run is called. Worst
