@@ -148,6 +148,7 @@
 #include "loading_defrag.h"
 #include "d3d9_state_cache.h"
 #include "d3d9_render_thread.h"
+#include "gx_render_thread.h"
 #include "frame_limiter.h"
 #include "net_packet_offload.h"
 #include "predictive_prefetch.h"
@@ -5922,6 +5923,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("TickListPrefetch::LogStats", TickListPrefetch::LogStats());
     STAT_TIME("LuaTableCensus::LogStats", LuaTableCensus::LogStats());
     STAT_TIME("D3D9StateManager_LogStats", D3D9StateManager_LogStats());
+    STAT_TIME("GxRT::LogStats", GxRT::LogStats());
     STAT_TIME("SimdHooks_LogStats", SimdHooks_LogStats());
     STAT_TIME("DeviceCallbackGuard::LogStats", DeviceCallbackGuard::LogStats());
     STAT_TIME("LayoutRelinkFast::LogStats", LayoutRelinkFast::LogStats());
@@ -7964,6 +7966,10 @@ static DWORD WINAPI MainThread(LPVOID param) {
     if (MH_Initialize() != MH_OK) { Log("FATAL: MinHook initialization failed"); LogClose(); return 1; }
     Log("MinHook initialized");
 
+    // Early on purpose: the render thread has to see the client create its D3D
+    // device, and the client starts creating it while this init is still running.
+    GxRT::Init();
+
     // Before the allocator is configured, so its arena reservations and the
     // pre-warm below are recorded under this tool's name like everyone else's.
     HighPlacement::Init();
@@ -9497,15 +9503,14 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("");
     Log("--- D3D9 Render State Cache & Render Thread ---");
 #if !TEST_DISABLE_D3D9_STATE_CACHE
-    bool d3d9StateCacheOk = (Config::g_settings.OptVulkanDXVK || Config::g_settings.OptD3d9RenderThread) && D3D9StateCache::Init();
+    bool d3d9StateCacheOk = Config::g_settings.OptVulkanDXVK && D3D9StateCache::Init();
 #else
     bool d3d9StateCacheOk = false;
     Log("[D3D9StateCache] DISABLED via TEST_DISABLE_D3D9_STATE_CACHE");
 #endif
 
-    if (Config::g_settings.OptD3d9RenderThread) {
-        D3D9RenderThread::Init();
-    }
+    // The render thread (GxRT) is armed right after MinHook comes up, before the
+    // client can create its device, and reports from there.
 
     Log("");
     Log("--- High-Precision Hybrid Frame Limiter ---");
@@ -11772,6 +11777,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             LoadingDefrag::Shutdown();
             ShutdownAsyncIoWorker();
             D3D9RenderThread::Shutdown();
+            GxRT::Shutdown();
             D3D9StateCache::Shutdown();
             FrameLimiter::Shutdown();
             NetPacketOffload::Shutdown();

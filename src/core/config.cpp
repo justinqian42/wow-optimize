@@ -807,15 +807,12 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptRenderStateDedup    = GetPrivateProfileIntA("Graphics_Sound", "RenderStateDedup",
                                               (g_settings.OptVulkanDXVK || g_settings.OptD3d9RenderThread) ? 1 : 0,
                                               iniPath.c_str()) != 0;
-        // HARD-DISABLED regardless of ini: this offloads D3D9 draw/Present/Reset
-        // calls to a worker thread, but WoW's device isn't created
-        // D3DCREATE_MULTITHREADED, so cross-thread rendering is undefined
-        // behavior -> mid-fight screen flashing, and the main thread spin-waits
-        // in PipelineFlush on a render thread that stalls on the device Reset
-        // during zone loads -> the "loaded then froze forever" hang. Same class
-        // of unsafe-by-design as MimallocLarge. Kept readable above only so old
-        // profiles with D3d9RenderThread=1 don't silently re-enable it.
-        g_settings.OptD3d9RenderThread = false;
+        // The first render thread was hard-disabled here: it queued calls onto a
+        // device that was not created D3DCREATE_MULTITHREADED and did not put
+        // resource creation, locks or Reset behind the queue. gx_render_thread
+        // replaces it and creates the device MULTITHREADED itself, so the key is
+        // read as written. It is still forced off under Wine/Rosetta and with
+        // No Client Patches, which GxRT::Init checks.
 
         // Parse Features 21-30
         g_settings.OptCombatLogFilter    = GetPrivateProfileIntA("Combat_Net", "CombatLogFilter", 0, iniPath.c_str()) != 0;

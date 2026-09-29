@@ -434,6 +434,11 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/hooks_async.h
     src/hooks_subsystems/d3d9_state_manager.cpp
     src/hooks_subsystems/d3d9_state_manager.h
+    src/hooks_subsystems/gx_ring.h
+    src/hooks_subsystems/gx_internal.h
+    src/hooks_subsystems/gx_render_thread.cpp
+    src/hooks_subsystems/gx_render_thread.h
+    src/hooks_subsystems/gx_buffers.cpp
     src/hooks_subsystems/event_coalescer.cpp
     src/hooks_subsystems/event_coalescer.h
     src/hooks_subsystems/loading_state.cpp
