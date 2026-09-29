@@ -117,10 +117,19 @@ const char* const kSlotName[kSlots] = {
 
 // Left exactly as the device made them. None of these depends on what is still in
 // the ring, and each is legal from the main thread on a MULTITHREADED device.
+//
+// GetBackBuffer (18) is not on this list. The client's pixel readback
+// (sub_6A16D0) is GetBackBuffer followed at once by LockRect on that surface, and a
+// surface method is not something this module can fence. The readback is how the
+// portrait probe (sub_616DC0) decides whether the unit portraits are drawn into a
+// texture: it clears the target, reads 64x64 back and looks at the alpha bytes.
+// With the Clear still in the ring the probe read the previous frame, answered
+// no, and the player and target portraits stayed black for the session. Draining
+// here makes the surface complete before it is handed out.
 bool IsDirectSlot(int s) {
     switch (s) {
     case 0: case 1: case 3: case 4: case 6: case 7: case 8: case 9:
-    case 10: case 11: case 12: case 13: case 14: case 15: case 18: case 19:
+    case 10: case 11: case 12: case 13: case 14: case 15: case 19:
     case 21: case 22: case 23: case 24: case 25: case 28: case 29: case 36:
     case 86: case 91: case 106: case 118:
         return true;
