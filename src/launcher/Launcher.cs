@@ -1073,8 +1073,10 @@ namespace WowOptimizeLauncher {
             btnProve.Location = new Point(15, y);
             btnProve.Click += delegate { SetUpProvingRun(); };
             toolTip.SetToolTip(btnProve,
-                "Exactly what MAX PERFORMANCE turns on, plus the sampling profiler "
-                + "and the A/B test.\r\n\r\n"
+                "THE BUTTON FOR TESTERS. One click, then launch and play for 45 "
+                + "minutes or more, then send Logs\\wow_optimize.log.\r\n\r\n"
+                + "Turns on everything MAX PERFORMANCE does, plus every recording "
+                + "switch LOGGING: FULL does, plus the A/B test.\r\n\r\n"
                 + "Each replacement checks its own answers against the "
                 + "game's for thousands of calls before it answers anything, keeps "
                 + "checking one call in a few thousand after that, and switches "
@@ -1955,53 +1957,60 @@ namespace WowOptimizeLauncher {
                    item.Tooltip.IndexOf("skipped by Enable All", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        // Exactly MAX PERFORMANCE, plus the two things that turn the session into
-        // a measurement: the sampling profiler and the A/B test, which switches
-        // every replacement off and on together in 20 second stints and compares
-        // the frame times of the two halves. The censuses stay off, because they
-        // cost frames and would move the numbers this run is for.
+        // The one button a tester presses. Exactly MAX PERFORMANCE, plus the A/B
+        // test (every replacement switched off and on together in 20 second
+        // stints, frame times of the two halves compared) plus everything
+        // LOGGING: FULL turns on, so a single session returns the verification of
+        // each replacement, what the frames were spent on and what the game was
+        // doing, and nobody has to be sent back to press a second button.
+        //
+        // The recording switches cost frames, which inflates absolute frame
+        // times. The A/B comparison is unaffected in the way that matters: both
+        // halves of a stint carry the same recording cost, so it is the
+        // difference between them that is read.
         //
         // This used to hold back the switches under investigation, on the
         // reasoning that a crash takes the measurement with it. That made the
         // button turn on a different set from MAX PERFORMANCE without saying
         // which, and the crash is itself the answer the session exists to give.
         private void SetUpProvingRun() {
-            int unproven = 0, on = 0, off = 0, investigated = 0;
+            int unproven = 0, on = 0, off = 0, investigated = 0, recording = 0;
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl == null) continue;
-                bool want = item.Key == "SamplingProfiler" || item.Key == "AbTest"
-                    || WantedForSpeed(item);
+                bool records = Kinds.RecordsForLogging(item.Key);
+                bool want = item.Key == "AbTest" || records || WantedForSpeed(item);
                 item.Ctrl.Checked = want;
                 if (want) {
                     on++;
-                    if (item.Experimental && item.Key != "SamplingProfiler" && item.Key != "AbTest")
-                        unproven++;
-                    if (SkippedByEnableAll(item) && item.Key != "SamplingProfiler")
-                        investigated++;
+                    if (records) recording++;
+                    else if (item.Experimental && item.Key != "AbTest") unproven++;
+                    if (SkippedByEnableAll(item) && !records) investigated++;
                 } else {
                     off++;
                 }
             }
             UpdateActiveModulesCount();
             SaveSettings();
+            UpdateLoggingButton();
             MessageBox.Show(
-                on.ToString() + " features on: everything MAX PERFORMANCE turns on "
-                + "(" + unproven.ToString() + " unproven replacements among them), "
-                + "plus the sampling profiler and the A/B test.\r\n\r\n"
-                + investigated.ToString() + " of the replacements carry a warning in "
-                + "their own description (a crash report, an addon error or corrupted "
-                + "names under investigation). They are on because this session is "
-                + "the one that says whether they can ship. If the game crashes, "
-                + "send the log and the crash file, then press DEFAULT.\r\n\r\n"
-                + "Each replacement checks its answers against the game's before it "
-                + "answers anything, and switches itself off at the first "
-                + "disagreement. Nothing here changes how the game looks or sounds. "
-                + off.ToString() + " are off: the censuses, the look-and-sound "
-                + "trades, the measured losses, the frame limiter override, the "
-                + "Critical Section Hook and No Client Patches.\r\n\r\n"
-                + "Play somewhere busy for at least 45 minutes, then send "
-                + "Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT to put "
-                + "it back.\r\n\r\nSaved. Launch when ready.",
+                "Test session is set up. " + on.ToString() + " switches on: "
+                + unproven.ToString() + " unproven replacements and the rest of "
+                + "MAX PERFORMANCE, " + recording.ToString() + " recording switches, "
+                + "and the A/B test.\r\n\r\n"
+                + "Nothing else to tick. Launch, play somewhere busy (a city, "
+                + "a dungeon or a raid) for at least 45 minutes, and quit normally. "
+                + "Then send Logs\\wow_optimize.log, and any wow_crash file if the "
+                + "game crashed.\r\n\r\n"
+                + investigated.ToString() + " of the replacements are under "
+                + "investigation for a crash or an addon error. That is why this "
+                + "session exists. If the game crashes, that is the answer - send the "
+                + "log and the crash file. It will be slower than usual while "
+                + "recording, so do not judge FPS by feel.\r\n\r\n"
+                + off.ToString() + " switches stay off on purpose (the ones that "
+                + "change how the game looks or sounds, the measured losses, the "
+                + "frame limiter override, the Critical Section Hook and No Client "
+                + "Patches). Press DEFAULT afterwards to go back to normal.\r\n\r\n"
+                + "Saved.",
                 "Try the unproven ones", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
