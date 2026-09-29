@@ -29,13 +29,21 @@ static const uintptr_t kGetLuaStateAddr         = 0x00817DB0;
 static const uintptr_t kPushNumberAddr          = 0x0084E2A0;
 static const uintptr_t kSignalEventAddr         = 0x0081A2C0;
 
+// The base-class targets of vtable slots +0x28 and +0x2C, whose whole effect on a
+// frame with no dirty bit or no animation group is nothing.
+static const uintptr_t kBaseDirtyUpdate         = 0x0048EBA0;
+static const uintptr_t kBaseAnimUpdate          = 0x00488890;
+
 // Function pointer typedefs
 typedef void* (__thiscall *FrameStrataOnUpdateFn)(void* this_ptr, float elapsed);
 typedef int   (__thiscall *SimpleFrameOnUpdateFn)(void* this_ptr, float elapsed);
 typedef void* (__thiscall *FrameLevelOnUpdateFn)(void* this_ptr, float elapsed);
 
 typedef int   (__cdecl *LayoutResolveFn)();
-typedef void  (__cdecl *PendingCleanupFn)(int);
+// sub_48ECF0 ends in retn 4, so the callee pops its argument. The client's own
+// loop pushes 0 and calls it with no add esp afterwards; declared __cdecl here, the
+// compiler added one and every pass through the pending queue raised esp by four.
+typedef void  (__stdcall *PendingCleanupFn)(int);
 typedef BOOL  (__cdecl *MouseMoveHitTestFn)(int a1, int a2);
 typedef void* (__cdecl *GetLuaStateFn)();
 typedef void  (__cdecl *PushNumberFn)(void* L, double num);
@@ -87,55 +95,65 @@ int __fastcall Hook_SimpleFrame_OnUpdate(void* this_ptr, void* /*edx*/, float el
         ++g_framesWithLuaScript;
     }
 
-    // 2. Dirty alpha / visibility state update: vtable[10] (offset 0x28)
-    // Inlined dirty check from sub_48EBA0: tests bit 2 of byte [frame + 0xBF]
-    const uint8_t flags = *(const uint8_t*)(frame + 0xBF);
-    if (flags & 2) {
-        const uintptr_t vtable = *(const uintptr_t*)frame;
-        ((Vtable10Fn)*(const uintptr_t*)(vtable + 0x28))((void*)frame);
-        ++g_framesWithDirtyState;
+    // The client calls vtable[10] (+0x28) and vtable[11] (+0x2C) on the frame and on
+    // every child unconditionally. For frames whose slot still points at the base
+    // implementation (sub_48EBA0, sub_488890) the call does nothing when bit 2 of
+    // [frame + 0xBF] is clear or [frame + 0x98] is null, so it is skipped. A frame
+    // type that overrides the slot may do work in those cases, so its call is made
+    // exactly as the client makes it.
+    bool anySkipped = false;
+
+    // 2. vtable[10] on the frame
+    {
+        const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)frame + 0x28);
+        if (fn != kBaseDirtyUpdate || (*(const uint8_t*)(frame + 0xBF) & 2)) {
+            ((Vtable10Fn)fn)((void*)frame);
+            ++g_framesWithDirtyState;
+        } else {
+            anySkipped = true;
+        }
     }
 
-    // 3. Children dirty check (first pass)
-    const uintptr_t children = *(const uintptr_t*)(frame + 0x214);
-    if (children && !(children & 1)) {
-        const uint32_t linkOffset = *(const uint32_t*)(frame + 0x20C);
-        uintptr_t child = children;
-        do {
-            const uint8_t childFlags = *(const uint8_t*)(child + 0xBF);
-            if (childFlags & 2) {
-                const uintptr_t childVtable = *(const uintptr_t*)child;
-                ((Vtable10Fn)*(const uintptr_t*)(childVtable + 0x28))((void*)child);
+    // 3. vtable[10] on the children. The list head and link offset are read where
+    // the client reads them, after the calls above have had their chance to change them.
+    {
+        uintptr_t child = *(const uintptr_t*)(frame + 0x214);
+        if (child & 1) child = 0;
+        while (child && !(child & 1)) {
+            const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)child + 0x28);
+            if (fn != kBaseDirtyUpdate || (*(const uint8_t*)(child + 0xBF) & 2)) {
+                ((Vtable10Fn)fn)((void*)child);
             }
-            child = *(const uintptr_t*)(child + linkOffset + 4);
-        } while (child && !(child & 1));
+            child = *(const uintptr_t*)(*(const uint32_t*)(frame + 0x20C) + child + 4);
+        }
     }
 
-    // 4. Animation groups update: vtable[11] (offset 0x2C)
-    // Inlined animation check from sub_488890: checks pointer [frame + 0x98]
-    const uintptr_t animGroup = *(const uintptr_t*)(frame + 0x98);
+    // 4. vtable[11] on the frame
     int result = 0;
-    if (animGroup) {
-        const uintptr_t vtable = *(const uintptr_t*)frame;
-        result = ((Vtable11Fn)*(const uintptr_t*)(vtable + 0x2C))((void*)frame, elapsed);
-        ++g_framesWithAnim;
+    {
+        const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)frame + 0x2C);
+        if (fn != kBaseAnimUpdate || *(const uintptr_t*)(frame + 0x98)) {
+            result = ((Vtable11Fn)fn)((void*)frame, elapsed);
+            ++g_framesWithAnim;
+        } else {
+            anySkipped = true;
+        }
     }
 
-    // 5. Children animation update (second pass)
-    if (children && !(children & 1)) {
-        const uint32_t linkOffset = *(const uint32_t*)(frame + 0x20C);
-        uintptr_t child = children;
-        do {
-            const uintptr_t childAnim = *(const uintptr_t*)(child + 0x98);
-            if (childAnim) {
-                const uintptr_t childVtable = *(const uintptr_t*)child;
-                result = ((Vtable11Fn)*(const uintptr_t*)(childVtable + 0x2C))((void*)child, elapsed);
+    // 5. vtable[11] on the children
+    {
+        uintptr_t child = *(const uintptr_t*)(frame + 0x214);
+        if (child & 1) child = 0;
+        while (child && !(child & 1)) {
+            const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)child + 0x2C);
+            if (fn != kBaseAnimUpdate || *(const uintptr_t*)(child + 0x98)) {
+                result = ((Vtable11Fn)fn)((void*)child, elapsed);
             }
-            child = *(const uintptr_t*)(child + linkOffset + 4);
-        } while (child && !(child & 1));
+            child = *(const uintptr_t*)(*(const uint32_t*)(frame + 0x20C) + child + 4);
+        }
     }
 
-    if (!scriptHandler && !(flags & 2) && !animGroup && (!children || (children & 1))) {
+    if (!scriptHandler && anySkipped) {
         ++g_framesFastBypassed;
     }
 
