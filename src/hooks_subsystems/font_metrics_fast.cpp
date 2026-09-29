@@ -111,6 +111,13 @@ static __forceinline bool ValidateObjectType(void* obj, int typeId) {
 static volatile long g_getstringwidth_calls = 0;
 static volatile long g_getstringheight_calls = 0;
 
+// Where each call went. Plain 32-bit counters, lower bounds. A call is counted
+// in `calls` first and then in one of hit, miss or passed to the client; a fault
+// in the middle of a miss counts as both a miss and a pass.
+static unsigned long g_widthHits = 0, g_widthMisses = 0, g_widthPassed = 0;
+static unsigned long g_heightHits = 0, g_heightMisses = 0, g_heightPassed = 0;
+static bool g_installedOk = false;
+
 // TypeId pointer
 static const uintptr_t ADDR_FONTSTRING_TYPEID = 0x00B4792C;
 
@@ -208,10 +215,12 @@ typedef int (__cdecl* GetStringWidth_t)(uintptr_t L);
 static GetStringWidth_t orig_GetStringWidth = nullptr;
 
 static int __cdecl hook_GetStringWidth(uintptr_t L) {
-    if (IsTeardownState() || LuaOpt::IsReloading() || LuaOpt::IsSwapping() || LuaOpt::IsLoadingMode()) 
-        return orig_GetStringWidth(L);
-
     ++g_getstringwidth_calls;
+    if (IsTeardownState() || LuaOpt::IsReloading() || LuaOpt::IsSwapping() || LuaOpt::IsLoadingMode()) {
+        ++g_widthPassed;
+        return orig_GetStringWidth(L);
+    }
+
     __try {
         int typeId = *(int*)ADDR_FONTSTRING_TYPEID;
         if (typeId != 0) {
@@ -226,11 +235,13 @@ static int __cdecl hook_GetStringWidth(uintptr_t L) {
                     g_fontStringCache[idx].textHash == th &&
                     g_fontStringCache[idx].frame == g_fontCacheFrame && 
                     g_fontStringCache[idx].hasWidth) {
+                    ++g_widthHits;
                     pushnumber_fn(L, g_fontStringCache[idx].width);
                     return 1;
                 }
                 #endif
 
+                ++g_widthMisses;
                 double w = orig_GetWidth(obj);
                 double scale = orig_sub_47BFE0();
                 double v3 = scale * 1024.0 * w;
@@ -250,6 +261,7 @@ static int __cdecl hook_GetStringWidth(uintptr_t L) {
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    ++g_widthPassed;
     return orig_GetStringWidth(L);
 }
 
@@ -258,10 +270,12 @@ typedef int (__cdecl* GetStringHeight_t)(uintptr_t L);
 static GetStringHeight_t orig_GetStringHeight = nullptr;
 
 static int __cdecl hook_GetStringHeight(uintptr_t L) {
-    if (IsTeardownState() || LuaOpt::IsReloading() || LuaOpt::IsSwapping() || LuaOpt::IsLoadingMode()) 
-        return orig_GetStringHeight(L);
-
     ++g_getstringheight_calls;
+    if (IsTeardownState() || LuaOpt::IsReloading() || LuaOpt::IsSwapping() || LuaOpt::IsLoadingMode()) {
+        ++g_heightPassed;
+        return orig_GetStringHeight(L);
+    }
+
     __try {
         int typeId = *(int*)ADDR_FONTSTRING_TYPEID;
         if (typeId != 0) {
@@ -276,11 +290,13 @@ static int __cdecl hook_GetStringHeight(uintptr_t L) {
                     g_fontStringCache[idx].textHash == th &&
                     g_fontStringCache[idx].frame == g_fontCacheFrame && 
                     g_fontStringCache[idx].hasHeight) {
+                    ++g_heightHits;
                     pushnumber_fn(L, g_fontStringCache[idx].height);
                     return 1;
                 }
                 #endif
 
+                ++g_heightMisses;
                 double h = orig_GetHeight(obj);
                 double scale = orig_sub_47BFE0();
                 double v5 = scale * 1024.0 * h;
@@ -300,6 +316,7 @@ static int __cdecl hook_GetStringHeight(uintptr_t L) {
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    ++g_heightPassed;
     return orig_GetStringHeight(L);
 }
 
@@ -332,7 +349,13 @@ bool InstallFontMetricsFast() {
 
     #undef INSTALL
 
-    Log("[FontMetricsFast] %d/2 hooks installed", installed);
+    #if !TEST_DISABLE_FONT_METRICS_LOCK_FREE
+    constexpr int kHooks = 3;
+    #else
+    constexpr int kHooks = 2;
+    #endif
+    Log("[FontMetricsFast] %d/%d hooks installed", installed, kHooks);
+    g_installedOk = installed > 0;
     return installed > 0;
     #endif
 }
@@ -344,6 +367,21 @@ void ShutdownFontMetricsFast() {
     Log("[FontMetricsFast] Stats: GetStringWidth=%ld GetStringHeight=%ld",
         g_getstringwidth_calls, g_getstringheight_calls);
     #endif
+}
+
+// Printed from the periodic report: Shutdown is never reached, and its counters
+// had never put a number in any log.
+void FontMetrics_LogStats() {
+    if (!g_installedOk) { Log("[FontMetricsFast] not measured: not installed."); return; }
+    const unsigned long wc = (unsigned long)g_getstringwidth_calls, hc = (unsigned long)g_getstringheight_calls;
+    if (!wc && !hc) { Log("[FontMetricsFast] measured and zero: no GetStringWidth or GetStringHeight call was made."); return; }
+    Log("[FontMetricsFast] GetStringWidth: %lu call(s), %lu answered from the cache (%.1f%%), %lu measured by the "
+        "client and stored, %lu handed to the client without a lookup.",
+        wc, g_widthHits, wc ? 100.0 * (double)g_widthHits / (double)wc : 0.0, g_widthMisses, g_widthPassed);
+    Log("[FontMetricsFast] GetStringHeight: %lu call(s), %lu answered from the cache (%.1f%%), %lu measured by the "
+        "client and stored, %lu handed to the client without a lookup. An entry lives for one frame. "
+        "Plain counters, lower bounds.",
+        hc, g_heightHits, hc ? 100.0 * (double)g_heightHits / (double)hc : 0.0, g_heightMisses, g_heightPassed);
 }
 
 extern "C" void FontMetrics_GetStats(long* widthCalls, long* heightCalls) {

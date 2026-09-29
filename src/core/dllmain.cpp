@@ -1011,6 +1011,7 @@ extern void ShutdownUIAccessorFast();
 extern bool InstallFontMetricsFast();
 extern void ShutdownFontMetricsFast();
 extern void FontMetrics_OnFrame();
+extern void FontMetrics_LogStats();
 
 
 // Forward declarations
@@ -5897,6 +5898,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaFastPath::LogStats", LuaFastPath::LogStats());
     STAT_TIME("ObjVisCache::LogStats", ObjVisCache::LogStats());
     STAT_TIME("FontGlyphCache::LogStats", FontGlyphCache::LogStats());
+    STAT_TIME("FontMetrics_LogStats", FontMetrics_LogStats());
     STAT_TIME("WowOpt_ReportForeignDetours", WowOpt_ReportForeignDetours());
     STAT_TIME("ApiCache::LogStats", ApiCache::LogStats());
     // Both of these used to print only from their own Shutdown, which this
