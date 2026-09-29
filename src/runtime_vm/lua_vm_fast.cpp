@@ -257,6 +257,23 @@ unsigned long g_opSamples[64] = {};
 unsigned long g_opSamplesTotal = 0;
 unsigned g_opNextSample = kSampleGapMin;
 
+// Which C functions the scripts call, sampled at CALL. Answers "what are the most
+// called API functions" for anything that wants to fast-path them: without it
+// the list is a guess. One CALL in about 64 is looked at, at a jittered gap for
+// the same reason as above; a callee that is a C closure (isC at +10, the
+// function at +24, both read off the client's own luaD_precall) is counted by
+// its address in a small open-addressing table. Callees that are not functions
+// (a __call metamethod) are counted as neither.
+constexpr unsigned kCallGapMin = 48;
+constexpr unsigned kCallGapMask = 31;
+constexpr unsigned kCfnSlots = 256;
+struct CfnSlot { const void* f; unsigned long n; };
+CfnSlot g_cfn[kCfnSlots] = {};
+unsigned long g_callSeen = 0;                 // every CALL, plain
+unsigned g_callNext = kCallGapMin;
+unsigned long g_callSamples = 0, g_callSampledC = 0, g_callSampledLua = 0, g_callSampledOther = 0;
+unsigned long g_cfnLost = 0;                  // sampled C calls the table had no room for
+
 const char* const kOpName[kOpcodes] = {
     "MOVE", "LOADK", "LOADBOOL", "LOADNIL", "GETUPVAL", "GETGLOBAL", "GETTABLE", "SETGLOBAL",
     "SETUPVAL", "SETTABLE", "NEWTABLE", "SELF", "ADD", "SUB", "MUL", "DIV", "MOD", "POW", "UNM",
@@ -272,6 +289,20 @@ template <typename T> __forceinline T& F(void* p, unsigned off) {
 }
 template <typename T> __forceinline T Fc(const void* p, unsigned off) {
     return *(const T*)((const uint8_t*)p + off);
+}
+
+void NoteCallee(const TV* fn) {
+    if (fn->tt != 6) { ++g_callSampledOther; return; }
+    const void* cl = (const void*)(uintptr_t)fn->lo;
+    if (!Fc<uint8_t>(cl, 10)) { ++g_callSampledLua; return; }
+    ++g_callSampledC;
+    const void* f = Fc<const void*>(cl, kCl_p);      // CClosure::f shares the offset with LClosure::p
+    unsigned h = (unsigned)(((uintptr_t)f >> 4) ^ ((uintptr_t)f >> 12)) & (kCfnSlots - 1);
+    for (unsigned probe = 0; probe < 8; ++probe, h = (h + 1) & (kCfnSlots - 1)) {
+        if (g_cfn[h].f == f) { ++g_cfn[h].n; return; }
+        if (!g_cfn[h].f) { g_cfn[h].f = f; g_cfn[h].n = 1; return; }
+    }
+    ++g_cfnLost;
 }
 
 __forceinline uint32_t Cell()   { return *(uint32_t*)kTaintCell; }
@@ -778,6 +809,11 @@ reentry:   // 0x00857CB0
             break;
         }
         case 28: {  // CALL, 0x00858942
+            if (++g_callSeen == g_callNext) {
+                ++g_callSamples;
+                NoteCallee(ra);
+                g_callNext = (unsigned)g_callSeen + kCallGapMin + ((unsigned)__rdtsc() & kCallGapMask);
+            }
             const uint32_t saved = Frozen() ? Cell() : 0;
             SetFrozen(0);
             if (b) F<TV*>(L, kL_top) = ra + b;
@@ -1099,6 +1135,38 @@ void LogStats() {
             100.0 * (double)g_opSamples[5] / n, 100.0 * (double)g_opSamples[7] / n,
             100.0 * (double)g_opSamples[6] / n, 100.0 * (double)g_opSamples[11] / n,
             100.0 * (double)g_opSamples[28] / n);
+    }
+    // What the scripts call, from the sampled CALLs.
+    if (g_callSamples < 500) {
+        Log("[LuaVmFast]   callees: %lu sampled CALL(s) so far, too few to say.", g_callSamples);
+    } else {
+        const double cn = (double)g_callSamples;
+        Log("[LuaVmFast]   callees over %lu sampled CALL(s) of %lu (one in about 64): %.1f%% C functions, "
+            "%.1f%% Lua functions, %.1f%% neither (a __call metamethod). Calls made by the client's own "
+            "interpreter are not seen.",
+            g_callSamples, g_callSeen, 100.0 * g_callSampledC / cn, 100.0 * g_callSampledLua / cn,
+            100.0 * g_callSampledOther / cn);
+        unsigned idx[kCfnSlots];
+        unsigned used = 0;
+        for (unsigned s = 0; s < kCfnSlots; ++s) if (g_cfn[s].f) idx[used++] = s;
+        for (unsigned x = 1; x < used; ++x) {                   // insertion sort, descending
+            unsigned v = idx[x], y = x;
+            while (y > 0 && g_cfn[idx[y - 1]].n < g_cfn[v].n) { idx[y] = idx[y - 1]; --y; }
+            idx[y] = v;
+        }
+        const double cc = g_callSampledC ? (double)g_callSampledC : 1.0;
+        double cum = 0.0;
+        for (unsigned r = 0; r < used && r < 15; ++r) {
+            const CfnSlot& e = g_cfn[idx[r]];
+            const double share = 100.0 * (double)e.n / cc;
+            cum += share;
+            Log("[LuaVmFast]     C function %p  %5.1f%% of C calls  (%lu)  cumulative %.1f%%%s",
+                e.f, share, e.n, cum,
+                ((uintptr_t)e.f >= 0x00401000 && (uintptr_t)e.f < 0x009DF000) ? "" : "  - outside wow.exe");
+        }
+        Log("[LuaVmFast]     %u distinct C function(s) seen%s. Addresses are the function itself; "
+            "name one by finding what the client registers it under.",
+            used, g_cfnLost ? " (the table was full, so some are missing)" : "");
     }
     // Which opcodes leave. A number here is the reason to transcribe that case
     // next; a zero is the reason not to.
