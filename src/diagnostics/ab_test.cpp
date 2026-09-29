@@ -403,6 +403,25 @@ void OnFrame() {
     Add(g_onNow ? g_on[g_rotIndex] : g_off[g_rotIndex], frameMs);
 }
 
+// Init runs after most modules have installed, and a module that registers
+// before g_active is set is told "no" by IsSubject and is never asked again:
+// its flag stayed false for the whole session, its hot path never stood aside,
+// and the report would say nothing was alternated. dllmain calls this after
+// ParticleTrackEval, FloorSplit and ParallelParticles, among others. The names
+// and flags were recorded when they registered, so the subject is chosen here
+// from those, the same way IsSubject would have chosen it.
+static void AdoptEarlyRegistrants() {
+    for (int i = 0; i < g_offeredCount; ++i) {
+        if (!g_flag[i]) continue;
+        if (!g_rotate && lstrcmpiA(g_subject, g_offered[i]) != 0) continue;
+        g_rotIndex = i;
+        g_claimed = true;
+        *g_flag[i] = true;
+        CountOpeningStint();
+        return;
+    }
+}
+
 bool Init() {
     if (!Config::g_settings.OptAbTest) return true;
 
@@ -446,6 +465,7 @@ bool Init() {
                 "session on one feature instead, put its name in wow_opt.ini "
                 "as AbTestSubject=<name>; the names it answers to are listed "
                 "in the periodic report below.");
+        AdoptEarlyRegistrants();
         return true;
     }
 
@@ -466,6 +486,7 @@ bool Init() {
         g_subject, g_periodMs / 1000, g_periodMs / 1000, kSettleFrames);
     Log("[AbTest]   the feature must still be enabled by its own switch. This "
         "decides when it does its work, not whether it installed.");
+    AdoptEarlyRegistrants();
     return true;
 }
 
