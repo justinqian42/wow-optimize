@@ -960,6 +960,28 @@ static void LoadMapSymbols() {
     if (g_mapSymCount == 0) lstrcpynA(g_mapWhy, "the symbol file held no usable lines", sizeof(g_mapWhy));
 }
 
+// Index of the first symbol sharing the address that owns this RVA, or -1.
+static int MapSymbolIndex(uint32_t rva) {
+    if (!g_mapSymCount) return -1;
+    int lo = 0, hi = g_mapSymCount - 1, best = -1;
+    while (lo <= hi) {
+        const int mid = (lo + hi) / 2;
+        if (g_mapSyms[mid].rva <= rva) { best = mid; lo = mid + 1; }
+        else hi = mid - 1;
+    }
+    if (best < 0) return -1;
+    while (best > 0 && g_mapSyms[best - 1].rva == g_mapSyms[best].rva) --best;
+    return best;
+}
+
+// One counter per symbol in the map, so a sample in our own DLL is credited to
+// the function it landed in. The 4 KB page buckets this replaces were labelled
+// with the function at the page's first byte, which is not where the samples
+// were: a tester profile put 3% on BatchColourConvert::Shutdown, a function that
+// runs once at exit, because the page it sits at the start of holds a hot one.
+static uint32_t* g_selfSymCounts = nullptr;
+static int       g_selfSymCap    = 0;
+
 // The function that owns this address, bounded by the next symbol, or null.
 static const char* ResolveMapSymbol(uintptr_t addr, uintptr_t* outDelta) {
     if (!g_mapSymCount || !g_selfBase || addr < g_selfBase || addr >= g_selfEnd) return nullptr;
@@ -1314,7 +1336,10 @@ static void DumpFineHistogram(const uint32_t* counts, int slots, int shift,
         char addr[48];
         uintptr_t slotAddr = addrBase + ((uintptr_t)idx[i] << shift);
         uintptr_t delta = 0;
-        const char* sym = (addrBase == 0)
+        // A 256-byte slot holds several functions and the name found at its first
+        // byte says nothing about where its samples are, so with the map loaded the
+        // per-function list above is the place for names and this one is offsets.
+        const char* sym = (addrBase == 0 && !g_mapSymCount)
                         ? ResolveSelfSymbol(g_selfBase + slotAddr, &delta) : nullptr;
         if (sym && delta < kSelfSymbolTrusted) snprintf(addr, sizeof(addr), "wowopt!%.20s", sym);
         // Past the trusted distance the address is the fact and the name is a
@@ -1509,6 +1534,13 @@ static void DumpResults() {
     memset(g_selfPageCounts, 0, sizeof(g_selfPageCounts));
     memset(g_selfFineCounts, 0, sizeof(g_selfFineCounts));
     memset(g_wowFineCounts, 0, sizeof(g_wowFineCounts));
+    LoadMapSymbols();
+    if (!g_selfSymCounts && g_mapSymCount) {
+        g_selfSymCounts = (uint32_t*)HighTables::Reserve(
+            "profiler_selfsym", sizeof(uint32_t) * (size_t)g_mapSymCount);
+        g_selfSymCap = g_selfSymCounts ? g_mapSymCount : 0;
+    }
+    if (g_selfSymCounts) memset(g_selfSymCounts, 0, sizeof(uint32_t) * (size_t)g_selfSymCap);
     // Deliberately NOT cleared here. The main histogram is rebuilt from the
     // ring on every dump; the loading one accumulates across the session,
     // because a load that happened twenty minutes ago is exactly the one
@@ -1598,6 +1630,10 @@ static void DumpResults() {
             uintptr_t off = eip - g_selfBase;
             uint32_t pg = (uint32_t)(off >> 12);
             if (pg < SELF_PAGES) g_selfPageCounts[pg]++;
+            if (g_selfSymCounts) {
+                const int si = MapSymbolIndex((uint32_t)off);
+                if (si >= 0 && si < g_selfSymCap) g_selfSymCounts[si]++;
+            }
             uint32_t fine = (uint32_t)(off >> SELF_FINE_SHIFT);
             if (fine < SELF_FINE_SLOTS) g_selfFineCounts[fine]++;
         } else {
@@ -1618,7 +1654,18 @@ static void DumpResults() {
     }
 
     // Emit one bucket per non-empty page of our own DLL (labelled "wowopt+0x..").
-    for (int p = 0; p < SELF_PAGES && bucketCount < MAX_BUCKETS; p++) {
+    if (g_selfSymCounts) {
+        // Per function, from the map. Each bucket sits at its function's first
+        // byte, so the label resolved from it names that function.
+        for (int si = 0; si < g_selfSymCap && bucketCount < MAX_BUCKETS; si++) {
+            if (!g_selfSymCounts[si]) continue;
+            buckets[bucketCount].addr  = g_selfBase + g_mapSyms[si].rva;
+            buckets[bucketCount].name  = nullptr;
+            buckets[bucketCount].count = g_selfSymCounts[si];
+            bucketCount++;
+        }
+    }
+    for (int p = 0; p < SELF_PAGES && bucketCount < MAX_BUCKETS && !g_selfSymCounts; p++) {
         if (!g_selfPageCounts[p]) continue;
         buckets[bucketCount].addr  = g_selfBase + ((uintptr_t)p << 12);
         buckets[bucketCount].name  = nullptr;   // labelled by self-offset at print time
@@ -1827,7 +1874,7 @@ static void DumpResults() {
             const char* sym = ResolveSelfSymbol(buckets[i].addr, &delta);
             // Bounded. The middle one reached 39 bytes into this 40 - correct
             // by one byte, which is not the same as correct.
-            if (sym && delta < kSelfSymbolTrusted) snprintf(label, sizeof(label), "wowopt!%.24s", sym);
+            if (sym && delta < kSelfSymbolTrusted) snprintf(label, sizeof(label), "wowopt!%.32s", sym);
             else if (sym) snprintf(label, sizeof(label), "wowopt+0x%05X after %.14s",
                                    (unsigned)(buckets[i].addr - g_selfBase), sym);
             else     snprintf(label, sizeof(label), "wowopt+0x%05X", (unsigned)(buckets[i].addr - g_selfBase));
