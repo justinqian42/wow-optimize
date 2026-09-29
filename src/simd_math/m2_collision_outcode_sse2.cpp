@@ -457,7 +457,7 @@ bool Init() {
     g_abSubject = AbTest::IsSubject("M2CollisionOutcode", &g_abSubject);
     SamplingProfiler::RegisterSelfSymbol("M2CollisionOutcode_Thunk", (const void*)&Thunk);
 
-    Log("[M2CollisionOutcode] ACTIVE on sub_82EC30 (0x%08X). Vectorized point-matrix transform and outcode classification (off by default)",
+    Log("[M2CollisionOutcode] ACTIVE on sub_82EC30 (0x%08X). Vectorized point-matrix transform and outcode classification",
         (unsigned)kBlockHead);
     return true;
 }

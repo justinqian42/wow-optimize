@@ -244,7 +244,7 @@ bool Init() {
     g_abSubject = AbTest::IsSubject("ParticleIntegrateFast", &g_abSubject);
     SamplingProfiler::RegisterSelfSymbol("ParticleIntegrate_Hook", (const void*)&Hook_ParticleIntegrate);
     g_active = true;
-    Log("[ParticleIntegrate] ACTIVE: sub_979BB0 hooked with exact double precision physics (off by default)");
+    Log("[ParticleIntegrate] ACTIVE: sub_979BB0 hooked with exact double precision physics");
     return true;
 }
 

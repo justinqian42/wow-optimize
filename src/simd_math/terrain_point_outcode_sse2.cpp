@@ -236,7 +236,7 @@ bool Init() {
 
     SamplingProfiler::RegisterSelfSymbol("TerrainPointOutcode", (const void*)&Hook_TerrainPointOutcode);
 
-    Log("[TerrainPointOutcode] ACTIVE on sub_7A61D0 (terrain point outcode in packed double). Off by default.");
+    Log("[TerrainPointOutcode] ACTIVE on sub_7A61D0 (terrain point outcode in packed double).");
     if (g_abSubject) {
         Log("[TerrainPointOutcode]   under A/B test: its OFF stints run the client's original function.");
     }

@@ -105,7 +105,7 @@ namespace Config {
         // executing time, the largest single entry in the profile. New, and it
         // rewrites pointer surgery in the client's layout list, so it is
         // opt-in until testers have run it.
-        bool OptLayoutRelinkFast  = false;
+        bool OptLayoutRelinkFast  = true;
         // Pins timingMethod to 2 and timingTestError to 0 whatever the client
         // asks. On by default because it has shipped that way for a long time;
         // it used to have no switch at all and lived inside CvarNullGuard.
@@ -175,7 +175,7 @@ namespace Config {
         bool OptSimdMatrixTransform = false;
         bool OptAsyncTexLoader = false;
         bool OptRcuObjMgr = false;
-        bool OptObjMgrEnumFast = false;
+        bool OptObjMgrEnumFast = true;
         bool OptFreezeCatcher = false;
         bool OptMpqOpenCensus = false;
         bool OptMpqNegativeCache = false;
@@ -345,13 +345,13 @@ namespace Config {
         // from the table header on every node of the chain. 2.22% of executing
         // time in a CPU-bound profile. Verifies against the client and retires
         // on one disagreement, so it is opt-in until a log shows it agreeing.
-        bool OptObjMgrFindFast = false;
+        bool OptObjMgrFindFast = true;
         // The per-bone quaternion interpolation (sub_982630), four components at
         // once instead of one at a time on the x87 stack. Not bit-exact: the
         // worst divergence measured over 12 million components is 2.98e-07,
         // under three float epsilon, and the result is renormalised right after.
         // Opt-in, and it verifies against the client before trusting itself.
-        bool OptQuatLerpSse2 = false;
+        bool OptQuatLerpSse2 = true;
         // 88% of the chunks this client compiles are source it already compiled
         // this session - 332 MB of repeated parsing, measured. A repeat reuses
         // the compiled Proto; the client still builds the closure, environment
@@ -364,7 +364,7 @@ namespace Config {
         bool OptLuaProtoCache = true;
         // The client's Lua interpreter, transcribed, with the string-key table
         // lookup inlined. Off: it is the function every line of Lua runs through.
-        bool OptLuaVmFast = false;
+        bool OptLuaVmFast = true;
         // The other 1868 ms of that same loading screen: source the session had
         // never seen, which no cache inside the process can help with. This one
         // keeps the compiled form on disk between sessions. Off by default -
@@ -372,12 +372,12 @@ namespace Config {
         // objects the client itself has no code to read back, so it wants field
         // evidence before it is anyone's default. Every chunk it rebuilds is
         // compared against a real parse until a few thousand have matched.
-        bool OptLuaBytecodeStore = false;
+        bool OptLuaBytecodeStore = true;
         // The object lookup every Lua call into a UI method starts with
         // (sub_4A81B0, 674 call sites). Four Lua API calls replaced by direct
         // reads, including the taint move lua_rawgeti performs. Opt-in, and it
         // checks itself against the client before trusting itself.
-        bool OptLuaThisFast = false;
+        bool OptLuaThisFast = true;
         // Animating models is 3.68 ms of a 24.5 ms frame in raid content, and no
         // single function in it exceeds 0.4% of self time, so only doing less of
         // it can help. Above a model budget each model updates every Nth frame
@@ -389,34 +389,34 @@ namespace Config {
         // compares per four. The bounds are plain floats with no arithmetic
         // applied, so this is bit-exact rather than close. Opt-in, and it
         // predicts the client's whole output and compares before trusting itself.
-        bool OptCollisionOutcode = false;
+        bool OptCollisionOutcode = true;
         // The 8-way set-associative BSP collision model cache lookup (sub_79B1F0).
         // Uses dual 128-bit SSE2 vector comparisons to test all 8 set slots
         // simultaneously with zero branch mispredictions and bitscan hit extraction.
-        bool OptCollisionModelCache = false;
-        bool OptCollisionRayOutcode = false;
-        bool OptRayTriangleSse2 = false;
+        bool OptCollisionModelCache = true;
+        bool OptCollisionRayOutcode = true;
+        bool OptRayTriangleSse2 = true;
         // The convex occluder volume sphere culling test (sub_7CCE00).
         // Uses 4-wide transposed SSE2 vector dot products to evaluate occluder
         // planes in parallel instead of serial scalar x87 loops.
-        bool OptOccluderSphere = false;
+        bool OptOccluderSphere = true;
         // The M2 animation track timeline keyframe binary search (sub_8284D0).
         // Evaluated across all bone translation, rotation, and scaling tracks.
         // Replaces serialized x87 float divisions and store forwarding stalls
         // with branch-optimized keyframe resolution and SSE math.
-        bool OptM2AnimFindKey = false;
+        bool OptM2AnimFindKey = true;
         // The bone matrix upload loop inside sub_829BA0, 3.35% of executing
         // time and the largest entry in the corrected profile with nothing
         // shipped against it. Twelve x87 load/store pairs a bone transpose a
         // 4x4 into three vec4s; four loads, seven shuffles and three stores do
         // the same. No arithmetic anywhere in it, so bit-exact by construction.
         // Opt-in, and it does the first bones both ways and compares.
-        bool OptBoneMatrixUpload = false;
+        bool OptBoneMatrixUpload = true;
         // The per-vertex and per-index fill in the client's UI batch draw,
         // sub_484B00. Predicts batches and compares them with what the client
         // writes before taking over.
-        bool OptUiBatchFill = false;
-        bool OptParticleFill = false;
+        bool OptUiBatchFill = true;
+        bool OptParticleFill = true;
         // Hands mimalloc a block of address space above 2GB so it grows there
         // instead of into the half a 32-bit client allocates from. Two tester
         // sessions ended with the low half down to a megabyte while the working
@@ -463,12 +463,12 @@ namespace Config {
         // become two packed compares and one movemask. No arithmetic in it at
         // all, so bit-exact rather than close. Opt-in, and it checks itself
         // against the client before it stops calling it.
-        bool OptAabbOverlap = false;
+        bool OptAabbOverlap = true;
         // Bounding box transformation (sub_7F9430 and sub_7F93D0), evaluated
         // across 22 callers during scene graph visibility traversal and culling.
         // Replaces 18 serialized x87 status-word transfers (fnstsw ax) and 9
         // data-dependent branches per box with hardware double-precision SSE2.
-        bool OptAabbTransform = false;
+        bool OptAabbTransform = true;
         // Vectorized color unpacking (sub_984C90 and sub_982970) and vector
         // dominant axis calculation (sub_9829B0). Converts packed BGRA/BGR bytes
         // into normalized floats using SSE2, and evaluates dominant axis via bitwise fabs.
@@ -480,18 +480,18 @@ namespace Config {
         // component - up to sixteen times a call. Packed double rounds where the
         // client rounds, so this is bit-exact. Opt-in, and it compares all
         // twenty-four output bytes against the client before trusting itself.
-        bool OptAnimQuatUnpack = false;
+        bool OptAnimQuatUnpack = true;
         // The Lua pool free (sub_855670). Every block returned to the client's
         // own Lua pool makes it walk that pool's chunks, two dependent loads
         // each, until one contains the pointer. Two tester freeze samples landed
         // on the compare inside that loop. Opt-in, and it predicts against the
         // client before it skips anything.
-        bool OptLuaPoolFast = false;
+        bool OptLuaPoolFast = true;
         // The vector animation track (sub_82B0A0). Eight call sites, six of
         // them inside the largest entry in the main-thread profile, against one
         // for the quaternion track. Opt-in, and it compares all twenty output
         // bytes against the client before trusting itself.
-        bool OptAnimVec3Track = false;
+        bool OptAnimVec3Track = true;
         // The render batch comparator (sub_824B70), 2.44% of executing time in
         // an uncapped tester profile. It derives one 16-bit key through five
         // dependent loads on every comparison inside a sort. Opt-in; the
@@ -500,11 +500,11 @@ namespace Config {
         // The opaque M2 batch sort: gathers what the comparator reads once per
         // record and runs the client's own heapsort on it. Verified per comparison
         // before it takes over; opt-in until a tester log shows it armed.
-        bool OptM2BatchSort = false;
+        bool OptM2BatchSort = true;
         // The collision polygon clip: answers the two decisions the client makes
         // after its distance pass and leaves a real clip to the client. Checked
         // against the client per call before it takes over; opt-in until run.
-        bool OptCollisionPolyClip = false;
+        bool OptCollisionPolyClip = true;
         // The cloud texture build: skips a pass whose inputs repeat a pass that
         // built the same rows, after proving on live data that the rebuild came
         // out byte for byte identical. Measures whether that ever happens.
@@ -520,7 +520,7 @@ namespace Config {
         // The per-particle track evaluation: the same arithmetic in SSE2 doubles,
         // with the client's round-to-nearest converts. Compared byte for byte
         // against the client per call before it answers; opt-in until run.
-        bool OptParticleTrackEval = false;
+        bool OptParticleTrackEval = true;
         // The shader constant shadow compare: one packed compare a register in place
         // of four x87 compares. No arithmetic in it, so the bits are the same by
         // construction; compared against the client per call before it answers.
@@ -528,26 +528,26 @@ namespace Config {
         // The colour block inside the M2 batch state setup: three clamps and three
         // converts with no x87 mode change. This one replaces client code by writing
         // into it rather than by a hook, so it verifies before it patches.
-        bool OptBatchColourConvert = false;
+        bool OptBatchColourConvert = true;
         // The float split at sub_5FE800: one truncate instead of two x87 control-word
         // loads, on a leaf called from 26 sites. Compared bit for bit against the
         // client per call before it answers; opt-in until run.
-        bool OptFloorSplit = false;
+        bool OptFloorSplit = true;
         bool OptSkyCloudTexels = false;
         // CFrustum::IsAABBVisible (sub_9839E0), 0.82% of executing time. Most
         // of it is eighteen sign tests and eighteen dependent loads to pick box
         // corners, which SSE2 does as a blend. Opt-in; the function is pure so
         // both answers are simply compared.
-        bool OptFrustumAabb = false;
+        bool OptFrustumAabb = true;
         // The segment/box test (sub_7F9480), 0.88% of executing time. The
         // profile's weight is on a `test ah` waiting for an `fnstsw ax` - the
         // x87 way of branching on a float compare, ten times over. Opt-in.
-        bool OptSegmentAabb = false;
+        bool OptSegmentAabb = true;
         // luaH_get (sub_85C470), 0.67% of executing time, almost all of it
         // deciding where to hand off. Answering "is this key an integer" costs
         // three memory round-trips and an fnstsw there. Opt-in; read-only, so
         // both answers are simply compared.
-        bool OptLuaHGetDispatch = false;
+        bool OptLuaHGetDispatch = true;
         // Holds the shadow cascade centre still for longer. Measured cause of
         // the flicker two testers report below extShadowQuality 5: cascade 0
         // recentres every two yards and each recentre leaves two thirds of the
@@ -631,13 +631,13 @@ namespace Config {
         // Replaces the two sixteen-float matrix slot copies in sub_82F0F0
         // with four SSE2 moves each. No arithmetic, so the bytes written are
         // the bytes read.
-        bool OptM2MatrixSlotSse2 = false;
+        bool OptM2MatrixSlotSse2 = true;
         // Replaces serialized sixteen-float matrix setup copies in sub_823130
         // (M2 batch render pass setup) with four SSE2 vector moves each.
-        bool OptM2BatchMatrixSse2 = false;
+        bool OptM2BatchMatrixSse2 = true;
         // Hardware double-precision SSE2 rewrite of the M2 scalar and color
         // animation track evaluators (sub_82AF40 and sub_82B340).
-        bool OptAnimScalarTrack = false;
+        bool OptAnimScalarTrack = true;
         // Hardware double-precision SSE2 rewrite of the M2 3D vector and scalar
         // cubic spline animation track evaluators (sub_82B460 and sub_82B8A0).
         bool OptAnimSplineTrack = false;
@@ -659,7 +659,7 @@ namespace Config {
         // 2.46% of main-thread execution in a tester's profile. Off by default
         // until a log shows the startup verification passing: it replaces a
         // culling routine, and a wrong answer is terrain that fails to draw.
-        bool OptHorizonOcclusionSse2 = false;
+        bool OptHorizonOcclusionSse2 = true;
         // Passive watcher on the receive path. On by default: disconnects are
         // the oldest unexplained complaint here, they happen once a session at
         // most, and a diagnostic that is off when the thing it watches for
@@ -682,34 +682,34 @@ namespace Config {
         bool OptUIRectSubdivide = false;
         bool OptSceneVisTraverse = false;
         bool OptParticlePhysics = false;
-        bool OptCollisionResetVisited = false;
-        bool OptUIStrataCompact = false;
-        bool OptDbcFastRle = false;
+        bool OptCollisionResetVisited = true;
+        bool OptUIStrataCompact = true;
+        bool OptDbcFastRle = true;
         bool OptPixelFormatBlit = false;
-        bool OptUIFrameRemove = false;
-        bool OptM2BatchCmpTransparent = false;
-        bool OptM2BatchCmpSolid = false;
+        bool OptUIFrameRemove = true;
+        bool OptM2BatchCmpTransparent = true;
+        bool OptM2BatchCmpSolid = true;
         bool OptParticleQuad = false;
-        bool OptParallelParticles = false;
-        bool OptHorizonTestAABB = false;
+        bool OptParallelParticles = true;
+        bool OptHorizonTestAABB = true;
         bool OptM2SkinProjection = false;
-        bool OptSStrHashFast = false;
+        bool OptSStrHashFast = true;
         bool OptReverbClearFast = false;
-        bool OptUILayoutRectFast = false;
-        bool OptUIStrataOverlapFast = false;
-        bool OptParticleIntegrateFast = false;
-        bool OptFastSinCos = false;
-        bool OptM2BatchCmpTop = false;
-        bool OptParticleEmitterActive = false;
+        bool OptUILayoutRectFast = true;
+        bool OptUIStrataOverlapFast = true;
+        bool OptParticleIntegrateFast = true;
+        bool OptFastSinCos = true;
+        bool OptM2BatchCmpTop = true;
+        bool OptParticleEmitterActive = true;
         bool OptCollisionFaceClip = false;
-        bool OptCollisionPolyCopy = false;
+        bool OptCollisionPolyCopy = true;
         bool OptMat3RotAxis = false;
-        bool OptM2MeshPickFast = false;
-        bool OptM2CollisionOutcode = false;
-        bool OptCollisionTriTest = false;
+        bool OptM2MeshPickFast = true;
+        bool OptM2CollisionOutcode = true;
+        bool OptCollisionTriTest = true;
         bool OptCollisionBoxTri = false;
-        bool OptM2RayHitSort = false;
-        bool OptTerrainPointOutcode = false;
+        bool OptM2RayHitSort = true;
+        bool OptTerrainPointOutcode = true;
         bool OptCollisionBspTraverse = false;
         bool OptSceneLightGrid = false;
         bool OptCollisionSweptBsp = false;

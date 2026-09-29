@@ -122,7 +122,7 @@ const uint8_t* ParticleAt(const uint8_t* em, uint32_t i) {
 
 constexpr int      kMaxWorkers    = 3;
 constexpr int      kMaxChunks     = kMaxWorkers + 1;
-constexpr uint32_t kMinParticles  = 48;         // below this the fork costs more than it saves
+constexpr uint32_t kMinParticles  = 32;         // below this the fork costs more than it saves
 constexpr uint32_t kMinPerChunk   = 16;
 constexpr unsigned kLearnEmitters = 2000;
 constexpr unsigned kResampleMask  = 255;
@@ -596,7 +596,7 @@ bool Init() {
     Log("[ParallelParticles] ACTIVE: emitters with %u or more particles are filled by the "
         "main thread and %d worker(s); the Gx lock, unlock and draw stay on the main "
         "thread. The first %u such emitters, and one in %u after, are also run the "
-        "client's way and compared byte for byte. Off by default, not measured in game.",
+        "client's way and compared byte for byte. On by default; it checks itself first.",
         kMinParticles, workers, kLearnEmitters, kResampleMask + 1);
     return true;
 }

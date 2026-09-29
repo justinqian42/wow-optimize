@@ -199,7 +199,7 @@ bool Init() {
     g_abSubject = AbTest::IsSubject("FastSinCos", &g_abSubject);
     SamplingProfiler::RegisterSelfSymbol("FastSinCos_Hook", (const void*)&Hook_SinCos);
     g_active = true;
-    Log("[FastSinCos] ACTIVE: sub_6F7A60 hooked with packed SSE2 polynomial derivation (off by default)");
+    Log("[FastSinCos] ACTIVE: sub_6F7A60 hooked with packed SSE2 polynomial derivation");
     return true;
 }
 
