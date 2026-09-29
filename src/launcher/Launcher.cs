@@ -140,6 +140,17 @@ namespace WowOptimizeLauncher {
             // this button must never turn it on.
             "LockTuningInitHook",
 
+            // Replace the collision walks the camera and line-of-sight tests go
+            // through, and have never compared an answer with the client's inside a
+            // game (their checks are on synthetic trees). A tester's first session
+            // with them on reported the camera resetting; they are the suspects, not
+            // a confirmed cause, and the only gameplay-visible replacements that
+            // nothing verifies live. Each is still its own tickbox. Take them out of
+            // this list to put them back.
+            "CollisionBspTraverse", "CollisionSweptBsp", "CollisionFrustumBsp",
+            "CollisionSegmentBsp", "CollisionBspLeaf", "CollisionSweptLeaf",
+            "CollisionSegmentLeaf", "CollisionSweptTri", "SceneEntityCollect",
+
             // Left off because something measured them and the answer was no.
             "CompatMode",          // slower on purpose; it repairs a broken connection
             "MatrixVectorSse2",    // measured against the client: 3.3 ns to its 2.5
@@ -1946,7 +1957,9 @@ namespace WowOptimizeLauncher {
                 + "frames by changing how it looks or sounds; the ones measured "
                 + "against the client and beaten; the frame limiter override; "
                 + "the Critical Section Hook, which stops a player running "
-                + "ReShade from entering the world and has no measured gain; and "
+                + "ReShade from entering the world and has no measured gain; the "
+                + "collision tree walks, which nothing checks against the game while "
+                + "you play and which are suspected of a camera that kept resetting; and "
                 + "No Client Patches, which turns every optimization off.\r\n\r\n"
                 + "Saved. Launch when ready.",
                 "Max Performance", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2017,8 +2030,9 @@ namespace WowOptimizeLauncher {
                 + "recording, so do not judge FPS by feel.\r\n\r\n"
                 + off.ToString() + " switches stay off on purpose (the ones that "
                 + "change how the game looks or sounds, the measured losses, the "
-                + "frame limiter override, the Critical Section Hook and No Client "
-                + "Patches). Press DEFAULT afterwards to go back to normal.\r\n\r\n"
+                + "frame limiter override, the Critical Section Hook, the collision "
+                + "tree walks and No Client Patches). Press DEFAULT afterwards to go "
+                + "back to normal.\r\n\r\n"
                 + "Saved.",
                 "Try the unproven ones", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
