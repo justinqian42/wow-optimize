@@ -70,6 +70,9 @@ constexpr long kArmMs   = 60;
 constexpr DWORD kWakeMs = 4;     // how often the watchdog looks
 constexpr DWORD kFastMs = 1;     // how often it samples once armed
 constexpr DWORD kSlowestMs = 64; // the floor on thinning; see the note below
+// First report from inside a frame that has not ended, then four times later
+// each time (3 s, 12 s, 48 s), so a long stall costs a few lines and no more.
+constexpr long kFirstInterimMs = 3000;
 
 constexpr int kRing = 512;
 
@@ -108,6 +111,38 @@ const char* Where(uintptr_t a) {
     return "other";
 }
 
+void PrintSamples(const char* what, long len, int take) {
+    // How much of the frame these samples actually cover. Printed because
+    // the ring thins rather than stopping, so the density is not uniform and
+    // the reader should not assume one sample per millisecond.
+    long spanTo = 0;
+    for (int i = 0; i < take; ++i) if (g_atMs[i] > spanTo) spanTo = g_atMs[i];
+    Log("[FreezeCatcher] %s %ld ms, %d sample(s) of where the main "
+        "thread was while it ran, reaching %ld ms into it (%.0f%%):",
+        what, len, take, spanTo, len > 0 ? 100.0 * (double)spanTo / (double)len : 0.0);
+
+    // Group by address without sorting in place - the ring is small and this
+    // runs once per caught frame, not per sample.
+    bool done[kRing];
+    memset(done, 0, sizeof(done));
+    for (int printed = 0; printed < 8; ++printed) {
+        int best = -1, bestCount = 0;
+        for (int i = 0; i < take; ++i) {
+            if (done[i]) continue;
+            int c = 0;
+            for (int j = 0; j < take; ++j)
+                if (!done[j] && g_eip[j] == g_eip[i]) ++c;
+            if (c > bestCount) { bestCount = c; best = i; }
+        }
+        if (best < 0) break;
+        Log("[FreezeCatcher]   %s!0x%08X  %d sample(s), first at %ld ms in",
+            Where(g_eip[best]), (unsigned)g_eip[best], bestCount,
+            g_atMs[best]);
+        for (int j = 0; j < take; ++j)
+            if (g_eip[j] == g_eip[best]) done[j] = true;
+    }
+}
+
 DWORD WINAPI WatchdogProc(LPVOID) {
     while (InterlockedCompareExchange(&g_running, 1, 1)) {
         const long start = g_frameStartMs;
@@ -134,9 +169,23 @@ DWORD WINAPI WatchdogProc(LPVOID) {
         // ends up sampled about every 16 ms across all of it, instead of every
         // millisecond across the first twelfth.
         DWORD interval = kFastMs;
+        long nextInterimMs = kFirstInterimMs;
         while (InterlockedCompareExchange(&g_running, 1, 1) &&
                g_frameStartMs == start) {
             const long at = NowMs() - start;
+
+            // A frame that never ends is reported by nobody: OnFrame prints
+            // only when the next boundary arrives, and a session that stops in
+            // the frame (a window closed on a black screen, a hang) leaves its
+            // samples in the ring and out of the log. Say where the main thread
+            // is while it is still there.
+            if (at >= nextInterimMs) {
+                const LONG have = g_count;
+                if (have > 0)
+                    PrintSamples("a frame still running after", at,
+                                 (int)(have < kRing ? have : kRing));
+                nextInterimMs *= 4;
+            }
             CONTEXT ctx;
             ctx.ContextFlags = CONTEXT_CONTROL;
             if (SuspendThread(g_main) != (DWORD)-1) {
@@ -192,36 +241,7 @@ void OnFrame() {
         g_samples += (unsigned long)(n < kRing ? n : kRing);
         if ((unsigned long)len > g_worstMs) g_worstMs = (unsigned long)len;
 
-        const int take = (int)(n < kRing ? n : kRing);
-        // How much of the frame these samples actually cover. Printed because
-        // the ring thins rather than stopping, so the density is not uniform and
-        // the reader should not assume one sample per millisecond.
-        long spanTo = 0;
-        for (int i = 0; i < take; ++i) if (g_atMs[i] > spanTo) spanTo = g_atMs[i];
-        Log("[FreezeCatcher] a frame of %ld ms, %d sample(s) of where the main "
-            "thread was while it ran, reaching %ld ms into it (%.0f%%):",
-            len, take, spanTo, len > 0 ? 100.0 * (double)spanTo / (double)len : 0.0);
-
-        // Group by address without sorting in place - the ring is small and this
-        // runs once per caught frame, not per sample.
-        bool done[kRing];
-        memset(done, 0, sizeof(done));
-        for (int printed = 0; printed < 8; ++printed) {
-            int best = -1, bestCount = 0;
-            for (int i = 0; i < take; ++i) {
-                if (done[i]) continue;
-                int c = 0;
-                for (int j = 0; j < take; ++j)
-                    if (!done[j] && g_eip[j] == g_eip[i]) ++c;
-                if (c > bestCount) { bestCount = c; best = i; }
-            }
-            if (best < 0) break;
-            Log("[FreezeCatcher]   %s!0x%08X  %d sample(s), first at %ld ms in",
-                Where(g_eip[best]), (unsigned)g_eip[best], bestCount,
-                g_atMs[best]);
-            for (int j = 0; j < take; ++j)
-                if (g_eip[j] == g_eip[best]) done[j] = true;
-        }
+        PrintSamples("a frame of", len, (int)(n < kRing ? n : kRing));
     }
 }
 
