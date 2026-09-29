@@ -1919,12 +1919,19 @@ namespace WowOptimizeLauncher {
         // replacement safe and cannot say what the frame time was spent on
         // answers half the question. The censuses stay off - they cost frames
         // and would move the very numbers this run is for.
+        // Every switch that Enable All leaves alone says so in its own description,
+        // with the reason; that sentence is the record, so it is what is read.
+        private static bool SkippedByEnableAll(SettingItem item) {
+            return item.Tooltip != null &&
+                   item.Tooltip.IndexOf("skipped by Enable All", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private void SetUpProvingRun() {
             int unproven = 0, on = 0, off = 0;
             // Counted by reason, so the message can say what it left off and
             // where to find it rather than leaving a tester to hunt for the
             // boxes that are still unticked.
-            int diagOff = 0, lostOff = 0, tradeOff = 0;
+            int diagOff = 0, lostOff = 0, tradeOff = 0, heldBack = 0;
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl == null) continue;
                 bool want;
@@ -1945,8 +1952,16 @@ namespace WowOptimizeLauncher {
                 } else if (item.Experimental) {
                     // Only the ones that are a replacement for something the
                     // client does. A census is experimental too and belongs off.
-                    want = Kinds.IsReplacement(item.Key);
+                    //
+                    // And not the ones whose own description says Enable All
+                    // skips them: each of those is under investigation for a
+                    // crash, an addon error or corrupted names, and a run that
+                    // switches them on can end in the very failure it was meant
+                    // to be immune to, taking the measurement with it. The
+                    // button used to turn on six of them.
+                    want = Kinds.IsReplacement(item.Key) && !SkippedByEnableAll(item);
                     if (want) unproven++;
+                    else if (Kinds.IsReplacement(item.Key)) heldBack++;
                 } else {
                     want = Kinds.HelpsSpeed(item.Key);
                 }
@@ -1974,8 +1989,10 @@ namespace WowOptimizeLauncher {
                 + "this run is for; " + lostOff.ToString() + " under TRIED, DIDN'T HELP, "
                 + "each measured against the game and beaten by it; " + tradeOff.ToString()
                 + " that buy frames by changing how the game looks or sounds, which is "
-                + "your call and not this button's; and the frame rate limiter, because a "
-                + "capped session measures nothing.\r\n\r\n"
+                + "your call and not this button's; " + heldBack.ToString() + " that their "
+                + "own descriptions say are under investigation for a crash or an addon "
+                + "error; and the frame rate limiter, because a capped session measures "
+                + "nothing.\r\n\r\n"
                 + "The A/B test is on too: every replacement is switched off and on "
                 + "together for 20 seconds at a time, and the log compares the frame "
                 + "times of the two halves, which says what they are worth as a set. "
