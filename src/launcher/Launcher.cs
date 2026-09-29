@@ -178,6 +178,17 @@ namespace WowOptimizeLauncher {
             }
             return true;
         }
+
+        // What LOGGING: FULL ticks: every switch on the DIAGNOSTICS and LOGGING
+        // tabs that only records. Three are left out on purpose. The A/B harness
+        // turns features on and off underneath you, No Client Patches removes the
+        // patches instead of describing them, and Lock Spin Counts changes how
+        // the game waits on a lock - it sits on the diagnostics tab but measures
+        // nothing.
+        public static bool RecordsForLogging(string key) {
+            if (key == "AbTest" || key == "NoClientPatches" || key == "LockSpinHooks") return false;
+            return In(DiagKeys, key) || In(LogKeys, key);
+        }
     }
 
     public class SettingItem {
@@ -1019,13 +1030,17 @@ namespace WowOptimizeLauncher {
             btnMaxPerf.Location = new Point(15, y);
             btnMaxPerf.Click += delegate { SetUpMaxPerformance(); };
             toolTip.SetToolTip(btnMaxPerf,
-                "Everything that makes the game faster, on. Everything that only "
-                + "measures it, off - a census or a profiler costs frames to produce "
-                + "a number.\r\n\r\n"
-                + "Also left off: the ones that buy frames by changing how the game "
-                + "looks or sounds, and the handful that were measured and lost. "
-                + "Each of those is still yours to tick; hover it to read what was "
-                + "measured.");
+                "Every switch that can make the game faster, on, including the "
+                + "replacements nobody has proven in a game yet and the ones under "
+                + "investigation for a crash or an addon error. Each replacement "
+                + "checks its answers against the game's and switches itself off at "
+                + "the first disagreement.\r\n\r\n"
+                + "Off: everything that only measures the game, the ones that buy "
+                + "frames by changing how it looks or sounds, the ones measured "
+                + "and beaten by the client, the frame limiter override, the "
+                + "Critical Section Hook (it breaks ReShade) and No Client Patches "
+                + "(it turns every optimization off). If the game misbehaves, "
+                + "press EVERYTHING OFF, then DEFAULT.");
             leftPanel.Controls.Add(btnMaxPerf);
             y += 38;
 
@@ -1058,14 +1073,15 @@ namespace WowOptimizeLauncher {
             btnProve.Location = new Point(15, y);
             btnProve.Click += delegate { SetUpProvingRun(); };
             toolTip.SetToolTip(btnProve,
-                "Everything MAX PERFORMANCE turns on, plus everything on the "
-                + "NOT PROVEN tab that replaces something the game does, plus the "
-                + "sampling profiler.\r\n\r\n"
-                + "Each of those replacements checks its own answers against the "
+                "Exactly what MAX PERFORMANCE turns on, plus the sampling profiler "
+                + "and the A/B test.\r\n\r\n"
+                + "Each replacement checks its own answers against the "
                 + "game's for thousands of calls before it answers anything, keeps "
                 + "checking one call in a few thousand after that, and switches "
                 + "itself off for the session at the first disagreement. The log "
-                + "says which armed, which retired and why.\r\n\r\n"
+                + "says which armed, which retired and why. The A/B test switches "
+                + "them all off and on together in 20 second stints and compares "
+                + "the frame times.\r\n\r\n"
                 + "This is the session that decides whether they ship on. Play "
                 + "normally for half an hour or more - a city, some combat - then "
                 + "send Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT "
@@ -1082,11 +1098,12 @@ namespace WowOptimizeLauncher {
             toolTip.SetToolTip(btnLogging,
                 "Turn this on, play until the thing goes wrong, then send "
                 + "Logs\\wow_optimize.log.\r\n\r\n"
-                + "It switches on the sampling profiler and the counters that say "
-                + "what the game was doing: where the main thread was, what was "
-                + "drawn, what was compiled, what the shadow state looked like. "
-                + "They cost frames, and that is the trade for a log that can "
-                + "answer a question.\r\n\r\n"
+                + "It switches on every recording switch under the LOGGING and "
+                + "DIAGNOSTICS tabs: the sampling profiler, the addon profilers, "
+                + "the censuses, the freeze catcher and the rest. They cost frames, "
+                + "and that is the trade for a log that can answer a question.\r\n\r\n"
+                + "Three diagnostics stay off because they do not record: the A/B "
+                + "test, No Client Patches and Lock Spin Counts.\r\n\r\n"
                 + "MAX PERFORMANCE and DEFAULT turn them all back off.");
             leftPanel.Controls.Add(btnLogging);
             y += 40;
@@ -1703,16 +1720,11 @@ namespace WowOptimizeLauncher {
         // only say that something happened. Every one of them records; none of
         // them changes what the game does.
         //
-        // Deliberately not in here: the A/B harness, which turns features on and
-        // off underneath you and would make a bug come and go, and No Client
-        // Patches, which removes the patches rather than describing them. Both
-        // are diagnostics and neither belongs in "I have a bug, record it".
-        private static readonly string[] FullLoggingKeys = new string[] {
-            "SessionLogs", "FlightRecorder", "NetDiag", "CpuTopology",
-            "SamplingProfiler", "AddonProfiler", "LuaCompileCensus",
-            "AnimCensus", "DrawCensus", "ShadowStateProbe"
-        };
-
+        // The list is Kinds.RecordsForLogging, which is read off the same
+        // classification the tabs use, so a switch that shows under DIAGNOSTICS
+        // or LOGGING is ticked here unless RecordsForLogging says why not. It
+        // used to be a hand-kept list that left half of the tab unticked.
+        //
         // SamplingProfiler is the one that costs the most and the one nothing
         // else turns on, so it is what the button reads its state from.
         private bool FullLoggingOn() {
@@ -1722,13 +1734,23 @@ namespace WowOptimizeLauncher {
 
         private void ToggleFullLogging() {
             bool turnOn = !FullLoggingOn();
-            for (int i = 0; i < FullLoggingKeys.Length; i++) {
-                SettingItem item = FindByKey(FullLoggingKeys[i]);
-                if (item != null && item.Ctrl != null) item.Ctrl.Checked = turnOn;
+            int touched = 0;
+            foreach (SettingItem item in settingsMap.Values) {
+                if (item.Ctrl == null || !Kinds.RecordsForLogging(item.Key)) continue;
+                item.Ctrl.Checked = turnOn;
+                touched++;
             }
             UpdateActiveModulesCount();
             SaveSettings();
             UpdateLoggingButton();
+            MessageBox.Show(
+                "Logging " + (turnOn ? "FULL" : "NORMAL") + ": " + touched.ToString()
+                + " recording switch(es) " + (turnOn ? "on" : "off") + ".\r\n\r\n"
+                + "Every switch under the LOGGING and DIAGNOSTICS tabs except three "
+                + "that are not recording: the A/B test (it flips features while you "
+                + "play), No Client Patches (it removes the patches) and Lock Spin "
+                + "Counts (it changes how locks wait).\r\n\r\nSaved.",
+                "Logging", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void UpdateLoggingButton() {
@@ -1865,37 +1887,56 @@ namespace WowOptimizeLauncher {
         // pressed it and got twelve profilers, a census on every draw call, and
         // an A/B harness rotating eighteen features every twenty seconds. That
         // button is gone; this one is what it was being mistaken for.
+        //
+        // One rule, shared with TRY THE UNPROVEN ONES, so the two buttons cannot
+        // disagree about what "everything" means. It includes the unproven
+        // replacements and the six that are under investigation for a crash,
+        // an addon error or corrupted names: a button that says maximum and
+        // leaves a dozen boxes unticked for reasons only the tooltips know is
+        // what made this preset unreadable. The reasons still are in the
+        // tooltips, and the message below names them.
+        private static bool WantedForSpeed(SettingItem item) {
+            // A limiter never buys frames. It changes when a frame is handed
+            // over, and a session that waits measures nothing.
+            if (item.Key == "FrameLimiter") return false;
+            if (!Kinds.HelpsSpeed(item.Key)) return false;
+            if (item.Experimental) return Kinds.IsReplacement(item.Key) || item.DefaultVal;
+            return true;
+        }
+
         private void SetUpMaxPerformance() {
-            int on = 0, off = 0, left = 0;
+            int on = 0, off = 0, unproven = 0, investigated = 0;
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl == null) continue;
-                bool want;
-                if (item.Experimental) {
-                    // Its own default, whichever way that points. This button
-                    // used to turn every one of these on - forty-eight of them,
-                    // including replacements that are off because nobody has run
-                    // them in a game yet. A switch that exists to be left off has
-                    // to survive the button that turns everything on, and the six
-                    // that are on by default have to survive it too, so neither is
-                    // decided here.
-                    want = item.DefaultVal;
-                    left++;
-                } else {
-                    want = Kinds.HelpsSpeed(item.Key);
-                }
+                bool want = WantedForSpeed(item);
                 item.Ctrl.Checked = want;
-                if (want) on++; else off++;
+                if (want) {
+                    on++;
+                    if (item.Experimental) unproven++;
+                    if (SkippedByEnableAll(item)) investigated++;
+                } else {
+                    off++;
+                }
             }
             UpdateActiveModulesCount();
             SaveSettings();
             MessageBox.Show(
-                on.ToString() + " features on, " + off.ToString() + " left off.\r\n\r\n"
-                + "Off: everything that measures the game, everything that buys "
-                + "frames by changing how it looks or sounds, and the few that "
-                + "were measured against the client and lost.\r\n\r\n"
-                + left.ToString() + " experimental switch(es) were left at their "
-                + "own default. Nobody has run them in a game yet, and a button "
-                + "called performance should not be the thing that turns them on.\r\n\r\n"
+                on.ToString() + " features on, " + off.ToString() + " off.\r\n\r\n"
+                + "On: every switch that can make the game faster, "
+                + unproven.ToString() + " of them still unproven. Each unproven "
+                + "replacement checks its answers against the game's before it "
+                + "answers anything and switches itself off at the first "
+                + "disagreement.\r\n\r\n"
+                + investigated.ToString() + " of the ones now on carry a warning "
+                + "in their own description (a crash report, an addon error or "
+                + "corrupted names under investigation). If the game misbehaves, "
+                + "press EVERYTHING OFF first, then DEFAULT, and send the log.\r\n\r\n"
+                + "Off: everything that only measures the game; the ones that buy "
+                + "frames by changing how it looks or sounds; the ones measured "
+                + "against the client and beaten; the frame limiter override; "
+                + "the Critical Section Hook, which stops a player running "
+                + "ReShade from entering the world and has no measured gain; and "
+                + "No Client Patches, which turns every optimization off.\r\n\r\n"
                 + "Saved. Launch when ready.",
                 "Max Performance", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -1906,96 +1947,58 @@ namespace WowOptimizeLauncher {
         
         
 
-        // The session that turns an unproven replacement into a proven one.
-        //
-        // Every switch on the NOT PROVEN tab was written against the disassembly,
-        // verified offline where the maths allows it, and never run in a game.
-        // They stay off for everyone until a log says otherwise, and nothing in
-        // this launcher asked for that log: MAX PERFORMANCE deliberately leaves
-        // them at their own default, which is off, so pressing every button in
-        // the tool still produced a session that measured none of them.
-        //
-        // The profiler comes with them, because a session that proves a
-        // replacement safe and cannot say what the frame time was spent on
-        // answers half the question. The censuses stay off - they cost frames
-        // and would move the very numbers this run is for.
         // Every switch that Enable All leaves alone says so in its own description,
         // with the reason; that sentence is the record, so it is what is read.
+        // Used to word the presets' messages; neither preset skips them.
         private static bool SkippedByEnableAll(SettingItem item) {
             return item.Tooltip != null &&
                    item.Tooltip.IndexOf("skipped by Enable All", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        // Exactly MAX PERFORMANCE, plus the two things that turn the session into
+        // a measurement: the sampling profiler and the A/B test, which switches
+        // every replacement off and on together in 20 second stints and compares
+        // the frame times of the two halves. The censuses stay off, because they
+        // cost frames and would move the numbers this run is for.
+        //
+        // This used to hold back the switches under investigation, on the
+        // reasoning that a crash takes the measurement with it. That made the
+        // button turn on a different set from MAX PERFORMANCE without saying
+        // which, and the crash is itself the answer the session exists to give.
         private void SetUpProvingRun() {
-            int unproven = 0, on = 0, off = 0;
-            // Counted by reason, so the message can say what it left off and
-            // where to find it rather than leaving a tester to hunt for the
-            // boxes that are still unticked.
-            int diagOff = 0, lostOff = 0, tradeOff = 0, heldBack = 0;
+            int unproven = 0, on = 0, off = 0, investigated = 0;
             foreach (SettingItem item in settingsMap.Values) {
                 if (item.Ctrl == null) continue;
-                bool want;
-                if (item.Key == "SamplingProfiler") {
-                    want = true;
-                } else if (item.Key == "AbTest") {
-                    // The same session then also says what the replacements are
-                    // worth: all of them switched off and on together, in
-                    // stints, with the frame times of the two halves compared.
-                    want = true;
-                } else if (item.Key == "FrameLimiter") {
-                    // A run that spends its frames waiting measures nothing: the
-                    // profile fills with the wait and every share in it is a
-                    // share of whatever is left. This one switch is the
-                    // difference between a log that answers the question and a
-                    // log that cannot.
-                    want = false;
-                } else if (item.Experimental) {
-                    // Only the ones that are a replacement for something the
-                    // client does. A census is experimental too and belongs off.
-                    //
-                    // And not the ones whose own description says Enable All
-                    // skips them: each of those is under investigation for a
-                    // crash, an addon error or corrupted names, and a run that
-                    // switches them on can end in the very failure it was meant
-                    // to be immune to, taking the measurement with it. The
-                    // button used to turn on six of them.
-                    want = Kinds.IsReplacement(item.Key) && !SkippedByEnableAll(item);
-                    if (want) unproven++;
-                    else if (Kinds.IsReplacement(item.Key)) heldBack++;
-                } else {
-                    want = Kinds.HelpsSpeed(item.Key);
-                }
+                bool want = item.Key == "SamplingProfiler" || item.Key == "AbTest"
+                    || WantedForSpeed(item);
                 item.Ctrl.Checked = want;
                 if (want) {
                     on++;
+                    if (item.Experimental && item.Key != "SamplingProfiler" && item.Key != "AbTest")
+                        unproven++;
+                    if (SkippedByEnableAll(item) && item.Key != "SamplingProfiler")
+                        investigated++;
                 } else {
                     off++;
-                    string kind = Kinds.Of(item.Key, item.Experimental);
-                    if (kind == Kinds.Diag || kind == Kinds.Log) diagOff++;
-                    else if (kind == Kinds.Lost) lostOff++;
-                    else if (kind == Kinds.Trade) tradeOff++;
                 }
             }
             UpdateActiveModulesCount();
             SaveSettings();
             MessageBox.Show(
-                unproven.ToString() + " unproven replacement(s) on, " + on.ToString()
-                + " features on in all.\r\n\r\n"
-                + "Each one checks its answers against the game's before it answers "
-                + "anything, and switches itself off at the first disagreement. "
-                + "Nothing here changes how the game looks or sounds.\r\n\r\n"
-                + "Left off on purpose: " + diagOff.ToString() + " under the "
-                + "DIAGNOSTICS tab, which cost frames and would move the very numbers "
-                + "this run is for; " + lostOff.ToString() + " under TRIED, DIDN'T HELP, "
-                + "each measured against the game and beaten by it; " + tradeOff.ToString()
-                + " that buy frames by changing how the game looks or sounds, which is "
-                + "your call and not this button's; " + heldBack.ToString() + " that their "
-                + "own descriptions say are under investigation for a crash or an addon "
-                + "error; and the frame rate limiter, because a capped session measures "
-                + "nothing.\r\n\r\n"
-                + "The A/B test is on too: every replacement is switched off and on "
-                + "together for 20 seconds at a time, and the log compares the frame "
-                + "times of the two halves, which says what they are worth as a set. "
+                on.ToString() + " features on: everything MAX PERFORMANCE turns on "
+                + "(" + unproven.ToString() + " unproven replacements among them), "
+                + "plus the sampling profiler and the A/B test.\r\n\r\n"
+                + investigated.ToString() + " of the replacements carry a warning in "
+                + "their own description (a crash report, an addon error or corrupted "
+                + "names under investigation). They are on because this session is "
+                + "the one that says whether they can ship. If the game crashes, "
+                + "send the log and the crash file, then press DEFAULT.\r\n\r\n"
+                + "Each replacement checks its answers against the game's before it "
+                + "answers anything, and switches itself off at the first "
+                + "disagreement. Nothing here changes how the game looks or sounds. "
+                + off.ToString() + " are off: the censuses, the look-and-sound "
+                + "trades, the measured losses, the frame limiter override, the "
+                + "Critical Section Hook and No Client Patches.\r\n\r\n"
                 + "Play somewhere busy for at least 45 minutes, then send "
                 + "Logs\\wow_optimize.log. Press MAX PERFORMANCE or DEFAULT to put "
                 + "it back.\r\n\r\nSaved. Launch when ready.",
