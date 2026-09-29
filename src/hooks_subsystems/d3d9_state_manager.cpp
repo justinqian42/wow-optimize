@@ -2162,6 +2162,15 @@ void D3D9StateManager_LogStats(void) {
                 "SetSamplerState or SetMaterial carried a value that was already "
                 "set. They only count now, because a 206 million call session "
                 "measured exactly zero.", ws);
+            // The sum above cannot say which of the four carries it, and the
+            // earlier zero and this figure disagree, so the split is printed.
+            Log("[D3D9State]   of those, by call: SetRenderState %lu of %lu, "
+                "SetTextureStageState %lu of %lu, SetSamplerState %lu of %lu, "
+                "SetMaterial %lu of %lu. Each is compared against this module's "
+                "cache, which is dropped every frame, so this is repetition inside "
+                "one frame.",
+                g_wouldSkip[0], g_statCalls[0], g_wouldSkip[1], g_statCalls[1],
+                g_wouldSkip[2], g_statCalls[2], g_wouldSkip[5], g_statCalls[5]);
         }
     }
     Log("[D3D9State]   SetTexture is never deduped, on purpose - a texture "
