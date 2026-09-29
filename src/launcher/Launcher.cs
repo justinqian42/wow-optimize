@@ -180,13 +180,18 @@ namespace WowOptimizeLauncher {
         }
 
         // What LOGGING: FULL ticks: every switch on the DIAGNOSTICS and LOGGING
-        // tabs that only records. Three are left out on purpose. The A/B harness
+        // tabs that only records. Four are left out on purpose. The A/B harness
         // turns features on and off underneath you, No Client Patches removes the
-        // patches instead of describing them, and Lock Spin Counts changes how
+        // patches instead of describing them, Lock Spin Counts changes how
         // the game waits on a lock - it sits on the diagnostics tab but measures
-        // nothing.
+        // nothing - and Addon CPU Profiler switches on the client's own script
+        // profiler. In a full-set session that profiler put 59% of the main
+        // thread's executing time inside one list walk in the client (sub_85B1C0,
+        // 0x0085B1CB), and both halves of the A/B comparison sat at the same slow
+        // frame time. Addon CPU by Sampling answers the same question without it.
         public static bool RecordsForLogging(string key) {
-            if (key == "AbTest" || key == "NoClientPatches" || key == "LockSpinHooks") return false;
+            if (key == "AbTest" || key == "NoClientPatches" || key == "LockSpinHooks"
+                || key == "AddonProfiler") return false;
             return In(DiagKeys, key) || In(LogKeys, key);
         }
     }
@@ -1101,11 +1106,13 @@ namespace WowOptimizeLauncher {
                 "Turn this on, play until the thing goes wrong, then send "
                 + "Logs\\wow_optimize.log.\r\n\r\n"
                 + "It switches on every recording switch under the LOGGING and "
-                + "DIAGNOSTICS tabs: the sampling profiler, the addon profilers, "
+                + "DIAGNOSTICS tabs: the sampling profiler, addon CPU by sampling, "
                 + "the censuses, the freeze catcher and the rest. They cost frames, "
                 + "and that is the trade for a log that can answer a question.\r\n\r\n"
-                + "Three diagnostics stay off because they do not record: the A/B "
-                + "test, No Client Patches and Lock Spin Counts.\r\n\r\n"
+                + "Four diagnostics stay off: the A/B test, No Client Patches and "
+                + "Lock Spin Counts do not record, and Addon CPU Profiler switches on "
+                + "the client's own script profiler, which spent most of one "
+                + "session's main-thread time in a single list walk.\r\n\r\n"
                 + "MAX PERFORMANCE and DEFAULT turn them all back off.");
             leftPanel.Controls.Add(btnLogging);
             y += 40;
@@ -1748,10 +1755,12 @@ namespace WowOptimizeLauncher {
             MessageBox.Show(
                 "Logging " + (turnOn ? "FULL" : "NORMAL") + ": " + touched.ToString()
                 + " recording switch(es) " + (turnOn ? "on" : "off") + ".\r\n\r\n"
-                + "Every switch under the LOGGING and DIAGNOSTICS tabs except three "
-                + "that are not recording: the A/B test (it flips features while you "
-                + "play), No Client Patches (it removes the patches) and Lock Spin "
-                + "Counts (it changes how locks wait).\r\n\r\nSaved.",
+                + "Every switch under the LOGGING and DIAGNOSTICS tabs except four: "
+                + "the A/B test (it flips features while you play), No Client "
+                + "Patches (it removes the patches), Lock Spin Counts (it changes "
+                + "how locks wait) and Addon CPU Profiler (the client's own script "
+                + "profiler, which costs more than everything else here; Addon CPU "
+                + "by Sampling answers the same question).\r\n\r\nSaved.",
                 "Logging", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
