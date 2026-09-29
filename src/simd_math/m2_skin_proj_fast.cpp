@@ -156,7 +156,10 @@ __declspec(safebuffers) static void Fast_M2SkinProj_ToBuffer(
     const uint16_t* const indexTable = *(const uint16_t* const*)((const char*)skinData + 8);
     const char* const vertices = *(const char* const*)(pM2Data + 0x40);
 
-    float matrix[16] = {
+    // The client's blend routine writes this with movaps, so it has to sit on a
+    // 16-byte boundary. An x86 stack local only gets 4, and the store faulted with
+    // the address 0xFFFFFFFF that a misaligned movaps reports.
+    alignas(16) float matrix[16] = {
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 1.0f, 0.0f,
