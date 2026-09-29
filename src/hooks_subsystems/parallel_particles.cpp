@@ -65,6 +65,7 @@
 #include "version.h"
 #include "session_verdict.h"
 #include "sampling_profiler.h"
+#include "ab_test.h"
 
 extern "C" void Log(const char* fmt, ...);
 
@@ -131,6 +132,7 @@ constexpr int      kSpins         = 4000;
 
 bool g_installed = false;
 bool g_dead      = false;
+bool g_abSubject = false;
 unsigned char g_saved[kPatchLen];
 uintptr_t g_rejoin = kRejoin;
 
@@ -145,7 +147,7 @@ __declspec(align(64)) uint8_t g_sink[kMaxChunks + 1][64];
 // Main-thread counters, read by the periodic report; lower bounds.
 unsigned long long g_emitters = 0, g_particles = 0;
 unsigned long long g_parallel = 0, g_parallelParticles = 0;
-unsigned long long g_small = 0, g_layout = 0, g_faults = 0, g_nan = 0;
+unsigned long long g_small = 0, g_layout = 0, g_faults = 0, g_nan = 0, g_control = 0;
 unsigned long long g_checked = 0;
 unsigned long long g_lastEmitters = 0, g_lastParallel = 0;
 
@@ -461,6 +463,11 @@ void Parallel(uint8_t* em, void* writerPtr, uint32_t count) {
 extern "C" void __cdecl ParallelParticles_RunLoop(uint8_t* em, void* writer, uint32_t count) {
     ++g_emitters;
     g_particles += count;
+    if (g_abSubject && AbTest::StandAside()) {
+        ++g_control;
+        ClientLoop(em, writer, count);
+        return;
+    }
     if (g_dead || count < kMinParticles || g_workers == 0) {
         if (!g_dead && g_workers) ++g_small;
         ClientLoop(em, writer, count);
@@ -583,6 +590,7 @@ bool Init() {
     VirtualProtect((void*)kPatchAt, kPatchLen, old, &ignored);
     FlushInstructionCache(GetCurrentProcess(), (void*)kPatchAt, kPatchLen);
     g_installed = true;
+    g_abSubject = AbTest::IsSubject("ParallelParticles", &g_abSubject);
 
     SamplingProfiler::RegisterSelfSymbol("ParallelParticles_Thunk", (const void*)&Thunk);
     Log("[ParallelParticles] ACTIVE: emitters with %u or more particles are filled by the "
@@ -631,6 +639,9 @@ void LogStats() {
         g_emitters, g_particles, g_parallel, g_parallelParticles, g_checked,
         g_small, kMinParticles, g_layout, g_nan, g_faults, de, dp,
         g_dead ? " [RETIRED - see above]" : "");
+    if (g_abSubject)
+        Log("[ParallelParticles] under A/B test: %llu emitter fill(s) ran the client's loop in "
+            "OFF stints. Plain counter, lower bound.", g_control);
 }
 
 }  // namespace ParallelParticles
