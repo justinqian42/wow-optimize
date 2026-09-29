@@ -85,6 +85,8 @@
 #include <windows.h>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
+#include <intrin.h>
 
 #include "lua_vm_fast.h"
 #include "MinHook.h"
@@ -236,6 +238,31 @@ unsigned long long g_slowGets = 0;
 unsigned long g_verified = 0;
 unsigned long g_hitSeq = 0;
 unsigned long g_bailOp[64] = {};
+
+// Which opcode the loop was executing at a sample. The loop already counts every
+// instruction in g_ops, so a sample costs one compare of that count's low word
+// against a target, and the histogram is touched about once in 128 instructions.
+// The gap to the next sample is jittered from the time stamp counter, 96 to 159
+// instructions: a fixed gap would land on the same position of every tight loop
+// whose body length divides it (a numeric for is three or four instructions), and
+// the histogram would then report that position as the whole loop.
+//
+// Plain counters, main thread only. The sample path is rare enough that an atomic
+// would be affordable, but nothing else reads these, so it would only add a lock
+// prefix to no purpose.
+constexpr unsigned kOpcodes = 38;                 // Lua 5.1, numbered as the client numbers them
+constexpr unsigned kSampleGapMin = 96;
+constexpr unsigned kSampleGapMask = 63;
+unsigned long g_opSamples[64] = {};
+unsigned long g_opSamplesTotal = 0;
+unsigned g_opNextSample = kSampleGapMin;
+
+const char* const kOpName[kOpcodes] = {
+    "MOVE", "LOADK", "LOADBOOL", "LOADNIL", "GETUPVAL", "GETGLOBAL", "GETTABLE", "SETGLOBAL",
+    "SETUPVAL", "SETTABLE", "NEWTABLE", "SELF", "ADD", "SUB", "MUL", "DIV", "MOD", "POW", "UNM",
+    "NOT", "LEN", "CONCAT", "JMP", "EQ", "LT", "LE", "TEST", "TESTSET", "CALL", "TAILCALL",
+    "RETURN", "FORLOOP", "FORPREP", "TFORLOOP", "SETLIST", "CLOSE", "CLOSURE", "VARARG"
+};
 
 constexpr unsigned long kVerifyFirst = 65536;
 constexpr unsigned long kResampleMask = 1023;
@@ -505,6 +532,11 @@ reentry:   // 0x00857CB0
         }
 
         ++g_ops;
+        if ((unsigned)g_ops == g_opNextSample) {
+            ++g_opSamples[op];
+            ++g_opSamplesTotal;
+            g_opNextSample = (unsigned)g_ops + kSampleGapMin + ((unsigned)__rdtsc() & kSampleGapMask);
+        }
         const unsigned a = (i >> 6) & 0xFF;
         const unsigned b = i >> 23;
         const unsigned c = (i >> 14) & 0x1FF;
@@ -1037,6 +1069,36 @@ void LogStats() {
         Log("[LuaVmFast]   %lu lookup(s) checked against the client's luaH_getstr, none "
             "differed%s.", g_verified,
             g_verified < kVerifyFirst ? " yet - still checking every one" : "");
+    }
+    // What the interpreter spends its instructions on, from the sampled histogram.
+    // A share is instructions, not time: a CALL and a MOVE count once each.
+    if (g_opSamplesTotal < 1000) {
+        Log("[LuaVmFast]   opcode mix: %lu sample(s) so far, too few to say (a share is read to "
+            "within about +-%.1f points at 1000).", g_opSamplesTotal, 100.0 * 0.5 / 31.6);
+    } else {
+        const double n = (double)g_opSamplesTotal;
+        unsigned order[kOpcodes];
+        for (unsigned k = 0; k < kOpcodes; ++k) order[k] = k;
+        for (unsigned x = 1; x < kOpcodes; ++x) {               // insertion sort, descending
+            unsigned v = order[x], y = x;
+            while (y > 0 && g_opSamples[order[y - 1]] < g_opSamples[v]) { order[y] = order[y - 1]; --y; }
+            order[y] = v;
+        }
+        Log("[LuaVmFast]   opcode mix over %lu sample(s), one in about 128 instructions, taken at "
+            "a jittered gap. A share is instructions executed here, not time. One standard error is "
+            "at most %.2f points.", g_opSamplesTotal, 100.0 * 0.5 / sqrt(n));
+        for (unsigned r = 0; r < 12; ++r) {
+            const unsigned o = order[r];
+            if (!g_opSamples[o]) break;
+            Log("[LuaVmFast]     %-9s %5.1f%%  (%lu)", kOpName[o], 100.0 * (double)g_opSamples[o] / n, g_opSamples[o]);
+        }
+        unsigned long beyond = 0;
+        for (unsigned o = kOpcodes; o < 64; ++o) beyond += g_opSamples[o];
+        if (beyond) Log("[LuaVmFast]     %lu sample(s) named an opcode above %u.", beyond, kOpcodes - 1);
+        Log("[LuaVmFast]     GETGLOBAL %.1f%% SETGLOBAL %.1f%% GETTABLE %.1f%% SELF %.1f%% CALL %.1f%%.",
+            100.0 * (double)g_opSamples[5] / n, 100.0 * (double)g_opSamples[7] / n,
+            100.0 * (double)g_opSamples[6] / n, 100.0 * (double)g_opSamples[11] / n,
+            100.0 * (double)g_opSamples[28] / n);
     }
     // Which opcodes leave. A number here is the reason to transcribe that case
     // next; a zero is the reason not to.
