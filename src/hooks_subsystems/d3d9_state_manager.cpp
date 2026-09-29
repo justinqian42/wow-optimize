@@ -2322,7 +2322,11 @@ void OnFrameD3D9StateManager(DWORD mainThreadId) {
     // roughly 125 fps. Hooked_Present carries the same invalidation and is a true
     // frame boundary at any frame rate; this call still matters for the OpenGL
     // swap path, where Present is never reached.
-    InvalidateAllCaches();
+    //
+    // Not while the render thread is active: the hooks that fill these caches then
+    // run on that thread, so clearing them from this one races their readers. The
+    // Present hook clears them there, once a frame.
+    if (!GxRT::IsActive()) InvalidateAllCaches();
 
     CheckWindowSizeChange();
 

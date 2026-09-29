@@ -184,6 +184,7 @@ uintptr_t*    g_patchedVt = nullptr;     // the vtable those thunks were written
 bool          g_armed = false;           // Init succeeded and no device has come through the hook yet
 bool          g_restartAsked = false;
 bool          g_restartReported = false;
+volatile bool g_deviceThroughHook = false;   // the client's device has been created by our hook at least once
 LARGE_INTEGER g_restartQpc;
 
 // ---- the render thread ----------------------------------------------------------
@@ -651,6 +652,7 @@ HRESULT __stdcall Hook_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE t
     // defined for the thread that made it.
     HRESULT hr = g_origCreateDevice(self, adapter, type, focus, flags | D3DCREATE_MULTITHREADED, pp, ppDev);
     if (FAILED(hr) || !ppDev || !*ppDev) return hr;
+    g_deviceThroughHook = true;
 
     // A second device replaces the first: stop queueing, let the thread finish what it has.
     if (g_active) { Drain(); InterlockedExchange(&g_active, 0); }
@@ -779,10 +781,16 @@ void OnMainThreadTick() {
         if (!g_restartReported &&
             (double)(now.QuadPart - g_restartQpc.QuadPart) * 1000.0 / (double)f.QuadPart >= kReportMs) {
             g_restartReported = true;
-            g_why = "the restart did not create a device through the hook";
-            Log("[GxRT] the device restart was requested %.0f ms ago and no device has come through the "
-                "hook since: %s. The client is running its own device; '/console gxRestart' can be tried by hand.",
-                kReportMs, g_why);
+            if (g_deviceThroughHook) {
+                g_why = "a device came through the hook but the render thread did not start";
+                Log("[GxRT] the device restart was requested %.0f ms ago: %s. The client is running on that "
+                    "device with its calls made directly.", kReportMs, g_why);
+            } else {
+                g_why = "the restart did not create a device through the hook";
+                Log("[GxRT] the device restart was requested %.0f ms ago and no device has come through the "
+                    "hook since: %s. The client is running its own device; '/console gxRestart' can be tried by hand.",
+                    kReportMs, g_why);
+            }
         }
         return;
     }
