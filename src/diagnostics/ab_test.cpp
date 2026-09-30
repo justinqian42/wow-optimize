@@ -409,6 +409,12 @@ void OnFrame() {
         g_phaseStart = now;
         g_settle = kSettleFrames;
 
+        // Dated, so a report of something odd on screen can be laid against the
+        // stints: a glitch that lands only in OFF or only in ON names the
+        // harness, and one that lands in both does not. Every twenty seconds
+        // or so, on the main thread, which is nothing next to the switch itself.
+        Log("[AbTest] %s stint begins", g_onNow ? "ON" : "OFF");
+
         // Hand the feature back and take the next one, when rotating. The
         // move happens on an ON boundary so every subject is left switched
         // on when it is not being measured, which is what its own setting
