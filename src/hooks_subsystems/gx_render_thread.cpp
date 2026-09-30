@@ -68,6 +68,9 @@ IDirect3DDevice9* g_dev = nullptr;
 unsigned long g_syncCalls[kSlots] = {};
 uint64_t    g_ticksDrain = 0;
 unsigned long g_drains = 0;
+unsigned long g_drainGaveUp = 0;       // drains abandoned after kDrainGiveUpMs
+unsigned long g_syncFromRuntime = 0;   // sync calls made by d3d9.dll itself, not drained
+constexpr DWORD kDrainGiveUpMs = 3000;
 uint64_t    g_ticksRingFull = 0;
 unsigned long g_waitsRingFull = 0;
 
@@ -332,9 +335,20 @@ void Drain() {
     if (g_dead) return;
     const uint64_t t0 = __rdtsc();
     unsigned spins = 0;
+    DWORD startMs = 0;
     while (R.rd != R.wr) {
         if (g_dead) break;
-        if (++spins < 20000) YieldProcessor(); else SwitchToThread();
+        if (++spins < 20000) { YieldProcessor(); continue; }
+        SwitchToThread();
+        // A ring that does not empty is a render thread that cannot run, and
+        // what stops it is a lock this thread holds further up its own stack.
+        // Waiting longer never helps, and a frozen window is worse than one
+        // call made out of order, so give up after a few seconds and say so.
+        if ((spins & 1023u) == 0) {
+            const DWORD now = GetTickCount();
+            if (!startMs) startMs = now;
+            else if (now - startMs > kDrainGiveUpMs) { ++g_drainGaveUp; break; }
+        }
     }
     g_ticksDrain += __rdtsc() - t0;
     ++g_drains;
@@ -536,9 +550,31 @@ HRESULT __stdcall T_Present(IDirect3DDevice9* d, const RECT* src, const RECT* ds
 }
 
 // ---- thunks: drain first ----------------------------------------------------------------
+// True when the address lies inside d3d9.dll. The native runtime calls back
+// through the public device vtable while it holds its own device lock: a
+// resource being destroyed releases its parent device that way. Draining there
+// waits for a render thread that is waiting for that lock, and the main thread
+// spun in SwitchToThread for as long as the tester left it running. The
+// runtime's own bookkeeping needs nothing from the ring, so those calls pass.
+bool InsideD3d9Runtime(uintptr_t addr) {
+    static uintptr_t lo = 0, hi = 0;
+    if (!lo) {
+        HMODULE m = GetModuleHandleW(L"d3d9.dll");
+        if (!m) return false;
+        const uint8_t* b = (const uint8_t*)m;
+        const IMAGE_NT_HEADERS* nt = (const IMAGE_NT_HEADERS*)(b + ((const IMAGE_DOS_HEADER*)b)->e_lfanew);
+        hi = (uintptr_t)b + nt->OptionalHeader.SizeOfImage;
+        lo = (uintptr_t)b;
+    }
+    return addr >= lo && addr < hi;
+}
+
+// The stub pushes the slot and calls this, so the caller's own return address
+// sits one word above the argument.
 void __cdecl SyncEnter(int slot) {
     if (!Live()) return;
     ++g_syncCalls[slot];
+    if (InsideD3d9Runtime(((const uintptr_t*)&slot)[1])) { ++g_syncFromRuntime; return; }
     Drain();
     if (slot == S_Reset) g_lastPresentHr = D3D_OK;
 }
@@ -892,6 +928,10 @@ void LogStats() {
         g_waitsRingFull, toMs(g_ticksRingFull));
     Log("[GxRT]   Clear with too many rectangles done in place: %lu. Present with a dirty region done in place: %lu.",
         g_clearFallbacks, g_presentFallbacks);
+    Log("[GxRT]   %lu sync call(s) came from inside d3d9.dll and were let through without a drain; "
+        "%lu drain(s) waited over %lu ms and were abandoned (a lock held above the drain, which is a "
+        "defect to report). Plain counters, lower bounds.",
+        g_syncFromRuntime, g_drainGaveUp, (unsigned long)kDrainGiveUpMs);
 
     // The slots that made the main thread wait, most-called first.
     int order[kSlots]; int n = 0;

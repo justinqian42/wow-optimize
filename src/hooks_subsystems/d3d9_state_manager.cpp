@@ -2000,7 +2000,7 @@ static bool TryFindAndPatchDevice() {
 // Public API
 bool IsD3D9DeviceHooked(void) { return g_deviceHooked; }
 void* D3D9StateManager_GetDevice(void) {
-    return (g_pDevice && IsReadable((uintptr_t)g_pDevice)) ? g_pDevice : nullptr;
+    return (g_pDevice && IsReadable((uintptr_t)g_pDevice) && *(const uintptr_t*)g_pDevice) ? g_pDevice : nullptr;
 }
 
 bool InstallD3D9StateManager(void) {
@@ -2272,19 +2272,41 @@ void D3D9StateManager_LogStats(void) {
 // robustness clamping instead of the garbage a real driver would show).
 // Poll the window's client rect every frame and treat a change the same as
 // a Reset.
+//
+// g_pDevice is the last device a hooked call was seen on, and a device restart
+// destroys it before the new one has made a call. Native Direct3D 9 zeroes the
+// object when it is destroyed, so the page is still readable and the first
+// dword, the vtable pointer, is null: the 3.20.0 test build died here, reading
+// address 0x24, two milliseconds after the render thread's restart on a
+// GeForce with the native runtime. DXVK leaves the old object intact, which is
+// why no earlier log showed it. The pointer is therefore not trusted until its
+// vtable is, and the one call made through it is guarded.
+static bool DeviceHasVtable(void* dev) {
+    if (!dev || !IsReadable((uintptr_t)dev)) return false;
+    const uintptr_t vt = *(const uintptr_t*)dev;
+    return vt && IsReadable(vt);
+}
+
+static bool QueryFocusWindow(void* dev, HWND* out) {
+    __try {
+        D3DDEVICE_CREATION_PARAMETERS params;
+        if (FAILED(((IDirect3DDevice9*)dev)->GetCreationParameters(&params)) ||
+            !params.hFocusWindow) return false;
+        *out = params.hFocusWindow;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 static void CheckWindowSizeChange() {
-    if (!g_pDevice || !IsReadable((uintptr_t)g_pDevice)) return;
+    if (!DeviceHasVtable(g_pDevice)) return;
 
     static HWND s_hwnd = nullptr;
     static int  s_lastWidth = -1;
     static int  s_lastHeight = -1;
 
-    if (!s_hwnd) {
-        D3DDEVICE_CREATION_PARAMETERS params;
-        IDirect3DDevice9* dev = (IDirect3DDevice9*)g_pDevice;
-        if (FAILED(dev->GetCreationParameters(&params)) || !params.hFocusWindow) return;
-        s_hwnd = params.hFocusWindow;
-    }
+    if (!s_hwnd && !QueryFocusWindow(g_pDevice, &s_hwnd)) return;
 
     RECT rect;
     if (!GetClientRect(s_hwnd, &rect)) return;
