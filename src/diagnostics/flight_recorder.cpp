@@ -96,6 +96,7 @@ LARGE_INTEGER g_last = {};
 bool     g_haveLast = false;
 
 int      g_markKey = 0;
+uint32_t g_manualMarks = 0;   // presses of the marker key, not automatic marks
 bool     g_keyWasDown = false;
 uint32_t g_marks = 0;
 
@@ -263,9 +264,14 @@ bool IsRecording() { return g_active; }
 void PollHotkey() {
     if (!g_active || !g_markKey) return;
     bool down = (GetAsyncKeyState(g_markKey) & 0x8000) != 0;
-    if (down && !g_keyWasDown) Mark("marker key pressed");
+    if (down && !g_keyWasDown) {
+        ++g_manualMarks;
+        Mark("marker key pressed");
+    }
     g_keyWasDown = down;
 }
+
+uint32_t ManualMarks() { return g_manualMarks; }
 
 bool Init() {
     if (!Config::g_settings.OptFlightRecorder) return true;

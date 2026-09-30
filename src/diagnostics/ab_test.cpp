@@ -67,6 +67,7 @@
 #include <intrin.h>
 
 #include "ab_test.h"
+#include "flight_recorder.h"
 #include "config.h"
 #include "session_verdict.h"
 #include "sampling_profiler.h"
@@ -171,6 +172,36 @@ int      g_offeredCount = 0;
 // and the stint counts printed per subject are what says whether there were
 // enough of them.
 bool     g_rotate = false;
+
+// AbTestSubject=sweep: find which replacement a visible glitch belongs to, in one
+// sitting, without frame times.
+//
+// The bundle switches sixty subjects together, so a glitch that lives in one of
+// them shows in every ON stint and none of the OFF ones and says nothing about
+// which. Halving by hand over the ini takes a tester one session a step. Here
+// exactly one subject stands aside per stint, the rest run as their switches say,
+// and a baseline stint with none standing aside sits between them. The player
+// stays where the glitch happens and presses the flight recorder's marker key each
+// time it does; a stint with no presses among stints that have them belongs to the
+// subject that stood aside in it. Only the collision, culling and camera family is
+// swept: those are the replacements whose answer the camera can be wrong on.
+bool     g_sweep = false;
+int      g_sweepAt = -1;                // offered index standing aside now; -1 is a baseline stint
+int      g_sweepNext = 0;               // where the search for the next subject resumes
+uint32_t g_sweepReached = 0;            // stand-aside calls made in the current stint
+uint32_t g_sweepMarksAtStart = 0;       // marker presses before the current stint began
+struct SweepRow { uint32_t stints, ms, marks, reached; };
+SweepRow g_sweepRow[kMaxOffered] = {};
+SweepRow g_sweepBase = {};
+bool     g_sweepNoneSaid = false;
+
+bool InSweepFamily(const char* n) {
+    static const char* const kPart[] = { "Collision", "Aabb", "Ray", "Terrain", "Horizon",
+                                         "Vis", "Scene", "M2Mesh", "Frustum", "Segment" };
+    for (const char* p : kPart) if (strstr(n, p)) return true;
+    return false;
+}
+
 int      g_rotIndex = 0;        // which offered subject is currently measured
 int      g_rotPairs = 0;        // completed ON/OFF pairs on the current subject
 
@@ -340,6 +371,10 @@ bool IsSubject(const char* name, bool* flag) {
     if (flag) g_flag[slot] = flag;
     if (!g_active) return false;
 
+    if (g_sweep) {              // the sweep hands the flag over one stint at a time
+        g_claimed = true;
+        return false;
+    }
     if (g_bundle) {
         g_claimed = true;
         CountOpeningStint();
@@ -370,6 +405,7 @@ bool IsSubject(const char* name, bool* flag) {
 
 bool StandAside() {
     if (g_onNow) return false;
+    if (g_sweep) { ++g_sweepReached; return true; }
     ++g_standAside[g_rotIndex];
     return true;
 }
@@ -389,8 +425,66 @@ void TickOut(unsigned long long t) {
     p.workTicks += d;
 }
 
+// The stint that just ended, then the next one: baseline, subject, baseline,
+// subject. Runs on the main thread from the frame boundary, and the flags it
+// writes are read from other threads exactly as the rotation's are.
+static void SweepFrame() {
+    const DWORD now = GetTickCount();
+    if (g_phaseStart == 0) {
+        g_phaseStart = now;
+        g_sweepMarksAtStart = FlightRecorder::ManualMarks();
+        Log("[AbTest] sweep: baseline stint begins (nothing stands aside)");
+        return;
+    }
+    if ((DWORD)(now - g_phaseStart) < g_periodMs) return;
+
+    const uint32_t marks = FlightRecorder::ManualMarks() - g_sweepMarksAtStart;
+    const uint32_t ms    = (uint32_t)(now - g_phaseStart);
+    if (g_sweepAt < 0) {
+        ++g_sweepBase.stints; g_sweepBase.ms += ms; g_sweepBase.marks += marks;
+        Log("[AbTest] sweep: baseline stint ended, %u marker press(es) in %u s", marks, ms / 1000);
+    } else {
+        SweepRow& r = g_sweepRow[g_sweepAt];
+        ++r.stints; r.ms += ms; r.marks += marks; r.reached += g_sweepReached;
+        Log("[AbTest] sweep: '%s' stood aside for %u s, reached %u time(s), %u marker press(es)",
+            g_offered[g_sweepAt], ms / 1000, g_sweepReached, marks);
+        if (g_flag[g_sweepAt]) *g_flag[g_sweepAt] = false;
+    }
+
+    g_phaseStart = now;
+    g_sweepMarksAtStart = FlightRecorder::ManualMarks();
+    g_sweepReached = 0;
+    g_settle = kSettleFrames;
+
+    const bool wasBaseline = g_sweepAt < 0;
+    g_sweepAt = -1;
+    g_onNow = true;
+    if (wasBaseline) {
+        for (int n = 0; n < g_offeredCount; ++n) {
+            const int i = (g_sweepNext + n) % g_offeredCount;
+            if (!g_flag[i] || !InSweepFamily(g_offered[i])) continue;
+            g_sweepAt = i;
+            g_sweepNext = i + 1;
+            break;
+        }
+        if (g_sweepAt < 0 && !g_sweepNoneSaid) {
+            g_sweepNoneSaid = true;
+            Log("[AbTest] sweep: no collision, culling or camera subject is registered, so "
+                "there is nothing to stand aside. Their own switches must be on.");
+        }
+    }
+    if (g_sweepAt >= 0) {
+        *g_flag[g_sweepAt] = true;
+        g_onNow = false;
+        Log("[AbTest] sweep: '%s' stands aside now", g_offered[g_sweepAt]);
+    } else {
+        Log("[AbTest] sweep: baseline stint begins (nothing stands aside)");
+    }
+}
+
 void OnFrame() {
     if (!g_active) return;
+    if (g_sweep) { SweepFrame(); return; }
 
     LARGE_INTEGER qnow;
     QueryPerformanceCounter(&qnow);
@@ -451,6 +545,7 @@ void OnFrame() {
 // and flags were recorded when they registered, so the subject is chosen here
 // from those, the same way IsSubject would have chosen it.
 static void AdoptEarlyRegistrants() {
+    if (g_sweep) return;        // flags are handed over one stint at a time
     if (g_bundle) {
         bool any = false;
         for (int i = 0; i < g_offeredCount; ++i) {
@@ -508,6 +603,22 @@ bool Init() {
             "harness take part; the list is in the report.",
             g_periodMs / 1000, g_periodMs / 1000);
         AdoptEarlyRegistrants();
+        return true;
+    }
+
+    if (lstrcmpiA(g_subject, "sweep") == 0) {
+        g_sweep = true;
+        g_active = true;
+        g_onNow = true;
+        g_periodMs = (DWORD)Config::g_settings.AbTestPeriodMs;
+        if (g_periodMs < 5000)   g_periodMs = 5000;
+        if (g_periodMs > 120000) g_periodMs = 120000;
+        Log("[AbTest] ACTIVE, sweep: for %u s at a time exactly one collision, culling or "
+            "camera replacement stands aside and the rest run as their switches say, with a "
+            "%u s baseline between. Stand where the glitch happens and press the marker key "
+            "(FlightRecorderKey) each time it does. A subject whose stint has no presses "
+            "among stints that do is the one to look at. No frame times are collected.",
+            g_periodMs / 1000, g_periodMs / 1000);
         return true;
     }
 
@@ -746,6 +857,32 @@ void LogStats() {
         // The one way to be switched on and not active is a machine with no
         // performance counter, and Init said so at the time.
         Log("[AbTest] switched on but not running - nothing measured");
+        return;
+    }
+
+    if (g_sweep) {
+        // Marker presses per minute, so stints of different length compare. A
+        // subject that has run one stint is a hint and the number says so.
+        auto rate = [](const SweepRow& r) {
+            return r.ms ? (double)r.marks * 60000.0 / (double)r.ms : 0.0;
+        };
+        Log("[AbTest] sweep result: baseline %u stint(s), %u press(es) in %u s = %.1f a minute.",
+            g_sweepBase.stints, g_sweepBase.marks, g_sweepBase.ms / 1000, rate(g_sweepBase));
+        int shown = 0;
+        for (int i = 0; i < g_offeredCount; ++i) {
+            const SweepRow& r = g_sweepRow[i];
+            if (!r.stints) continue;
+            ++shown;
+            Log("[AbTest] sweep result:   %-24s %u stint(s), %u s standing aside, reached %u time(s), "
+                "%u press(es) = %.1f a minute%s",
+                g_offered[i], r.stints, r.ms / 1000, r.reached, r.marks, rate(r),
+                r.reached == 0 ? "  (never reached: says nothing about this subject)" : "");
+        }
+        if (!shown)
+            Log("[AbTest] sweep result: no subject completed a stint. Not measured, not clean.");
+        Log("[AbTest] sweep result: a subject with presses near the baseline rate did not cause it; one "
+            "with none, over a stint it was reached in, is the suspect. One stint is a hint, two is "
+            "a finding.");
         return;
     }
 

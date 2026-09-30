@@ -30,6 +30,10 @@ bool IsRecording();
 // Edge-detects the marker key. Called from the frame boundary.
 void PollHotkey();
 
+// How many times the player has pressed the marker key this session. Read by the
+// A/B sweep, which lays the presses against the stint each one landed in.
+uint32_t ManualMarks();
+
 bool Init();
 void LogStats();
 
