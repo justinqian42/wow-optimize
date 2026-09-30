@@ -775,7 +775,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.HighPlacementMinKB      = GetPrivateProfileIntA("General", "HighPlacementMinKB", 1024, iniPath.c_str());
         if (g_settings.HighPlacementMinKB < 64)    g_settings.HighPlacementMinKB = 64;
         if (g_settings.HighPlacementMinKB > 65536) g_settings.HighPlacementMinKB = 65536;
-        g_settings.OptAabbOverlap         = GetPrivateProfileIntA("Graphics_Sound", "AabbOverlap", 1, iniPath.c_str()) != 0;
+        g_settings.OptAabbOverlap         = GetPrivateProfileIntA("Graphics_Sound", "AabbOverlap", 0, iniPath.c_str()) != 0;
         g_settings.OptAabbTransform       = GetPrivateProfileIntA("Graphics_Sound", "AabbTransform", 1, iniPath.c_str()) != 0;
         g_settings.OptColorUnpack         = GetPrivateProfileIntA("Graphics_Sound", "ColorUnpack", 0, iniPath.c_str()) != 0;
         g_settings.OptAnimQuatUnpack      = GetPrivateProfileIntA("Graphics_Sound", "AnimQuatUnpack", 1, iniPath.c_str()) != 0;
