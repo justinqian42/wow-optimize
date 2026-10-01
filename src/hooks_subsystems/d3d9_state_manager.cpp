@@ -2157,11 +2157,24 @@ void D3D9StateManager_LogStats(void) {
                 "that cannot fire is a return that bypasses D3D9 for no gain, "
                 "and this session agrees - zero would have been skipped.");
         } else {
-            Log("[D3D9State]   THE DEDUP IS WORTH PUTTING BACK ON THIS CLIENT: "
-                "%lu call(s) to SetRenderState, SetTextureStageState, "
-                "SetSamplerState or SetMaterial carried a value that was already "
-                "set. They only count now, because a 206 million call session "
-                "measured exactly zero.", ws);
+            // Any nonzero count used to print the verdict that the dedup was worth
+            // restoring. Sixty-three repeats in nine million calls is not that, and
+            // the line sat beside the figures that said so. The verdict now needs a
+            // share that could matter.
+            const unsigned long total = g_statCalls[0] + g_statCalls[1] +
+                                        g_statCalls[2] + g_statCalls[5];
+            const double share = total ? 100.0 * (double)ws / (double)total : 0.0;
+            if (share >= 1.0) {
+                Log("[D3D9State]   THE DEDUP MAY BE WORTH PUTTING BACK ON THIS CLIENT: "
+                    "%lu of %lu call(s) (%.1f%%) to SetRenderState, "
+                    "SetTextureStageState, SetSamplerState or SetMaterial carried a "
+                    "value that was already set. They only count now.", ws, total, share);
+            } else {
+                Log("[D3D9State]   %lu of %lu call(s) (%.4f%%) to SetRenderState, "
+                    "SetTextureStageState, SetSamplerState or SetMaterial carried a "
+                    "value that was already set. Too few to be worth skipping; "
+                    "they only count.", ws, total, share);
+            }
             // The sum above cannot say which of the four carries it, and the
             // earlier zero and this figure disagree, so the split is printed.
             Log("[D3D9State]   of those, by call: SetRenderState %lu of %lu, "

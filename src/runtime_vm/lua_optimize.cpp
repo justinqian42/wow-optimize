@@ -1672,6 +1672,11 @@ static void __cdecl Hooked_FrameScript_Execute(const char* code, const char* sou
     g_origFrameScript(code, source, unknown);
 }
 
+// Whether the detour is on FrameScript_Execute. The Init Complete block below
+// used to say "Lua interface: via FrameScript (safe)" whether or not it was, and
+// a client whose own extension already patches that function declines this hook.
+static bool g_frameScriptInjectHooked = false;
+
 static void InstallFrameScriptInjectionHook() {
     if (!Api.FrameScript_Execute) return;
     if (MH_CreateHook((void*)Api.FrameScript_Execute, (void*)Hooked_FrameScript_Execute,
@@ -1683,6 +1688,7 @@ static void InstallFrameScriptInjectionHook() {
         Log("[LuaOpt] FrameScript injection hook: enable FAILED");
         return;
     }
+    g_frameScriptInjectHooked = true;
     Log("[LuaOpt] FrameScript injection hook: ACTIVE (will inject markers on next addon load)");
 }
 
@@ -1758,7 +1764,9 @@ static void DoMainThreadInit() {
     Log("[LuaOpt]    Lua allocator:    %s", allocOk ? "mimalloc (REPLACED)" : "original (WoW pool)");
     Log("[LuaOpt]    GC optimized:     %s", gcOk ? "YES" : "NO");
     Log("[LuaOpt]    String table:     %s", strOk ? "PRE-SIZED" : "default");
-    Log("[LuaOpt]    Lua interface:    via FrameScript (safe)");
+    Log("[LuaOpt]    Marker injection on /reload: %s",
+        g_frameScriptInjectHooked ? "hooked at FrameScript_Execute"
+                                  : "NOT hooked - the DLL-loaded markers are not injected before addons load after a /reload");
     Log("[LuaOpt]    GC tiers (KB/f):");
     Log("[LuaOpt]      normal  = %d", Config.normalStepKB);
     Log("[LuaOpt]      combat  = %d", Config.combatStepKB);

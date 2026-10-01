@@ -4096,6 +4096,17 @@ static bool InstallGlobalAllocHooks() {
     return false;
 }
 
+// What the end-of-init summary prints for the five process-level settings
+// below. They used to be written into it as literals, so the table said OK for
+// a step that had not run, named a value the step never used, and still named
+// an FPS cap removal that leaves the cap where the client put it. Each step
+// records its own outcome; " -- " is "did not run".
+static const char* g_sumTimer      = " -- ";
+static const char* g_sumThreads    = " -- ";
+static const char* g_sumPriority   = " -- ";
+static const char* g_sumWorkingSet = " -- ";
+static const char* g_sumFpsCap     = " -- ";
+
 // ================================================================
 // 7f2. IsBadReadPtr / IsBadWritePtr - Fast Path
 // ================================================================
@@ -4814,6 +4825,7 @@ static void DetectMultiClient() {
 // because that is what everyone has been running.
 static void SetHighTimerResolution() {
     if (!Config::g_settings.OptTimerResolution) {
+        g_sumTimer = " off";
         Log("Timer resolution: left alone - TimerResolution is off, so the system "
             "timer keeps whatever period Windows or another process set. Frame "
             "pacing and the sleep hook are coarser for it; that is the trade.");
@@ -4821,9 +4833,9 @@ static void SetHighTimerResolution() {
     }
     typedef LONG (WINAPI* NtSetTimerRes_fn)(ULONG, BOOLEAN, PULONG);
     HMODULE h = GetModuleHandleA("ntdll.dll");
-    if (!h) return;
+    if (!h) { g_sumTimer = "FAIL"; return; }
     auto p = (NtSetTimerRes_fn)GetProcAddress(h, "NtSetTimerResolution");
-    if (!p) return;
+    if (!p) { g_sumTimer = "FAIL"; return; }
     ULONG actual;
     // Multi-client: 1.0ms to reduce CPU overhead
     // Single client: 0.5ms for best frame pacing
@@ -4833,6 +4845,7 @@ static void SetHighTimerResolution() {
         double actualMs = actual / 10000.0;
         // Sanity check: valid range is 0.5ms - 100ms (Wine/VM can return garbage)
         if (actualMs >= 0.1 && actualMs <= 100.0) {
+            g_sumTimer = " OK ";
             Log("Timer resolution: %.3f ms (requested %.3f ms%s)",
                 actualMs, requestedMs,
                 g_isMultiClient ? ", multi-client mode" : "");
@@ -4844,6 +4857,7 @@ static void SetHighTimerResolution() {
                 g_isMultiClient ? " (multi-client mode)" : "");
         }
     } else {
+        g_sumTimer = "FAIL";
         Log("WARNING: Timer resolution change failed");
     }
 }
@@ -4888,7 +4902,7 @@ static void OptimizeThreads() {
     DWORD mainTid = 0;
     ULONGLONG earliest = MAXULONGLONG;
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (hSnap == INVALID_HANDLE_VALUE) return;
+    if (hSnap == INVALID_HANDLE_VALUE) { g_sumThreads = "FAIL"; return; }
     THREADENTRY32 te = { sizeof(te) };
     if (Thread32First(hSnap, &te)) {
         do {
@@ -4906,17 +4920,18 @@ static void OptimizeThreads() {
         } while (Thread32Next(hSnap, &te));
     }
     CloseHandle(hSnap);
-    if (!mainTid) { Log("WARNING: Could not find main thread"); return; }
+    if (!mainTid) { g_sumThreads = "FAIL"; Log("WARNING: Could not find main thread"); return; }
 
     g_mainThreadId = mainTid;
 
     if (IsWine()) {
+        g_sumThreads = "SKIP";
         Log("Main thread %lu: ideal-core/priority SKIPPED (Wine/Rosetta)", mainTid);
         return;
     }
 
     HANDLE hMain = OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, FALSE, mainTid);
-    if (!hMain) return;
+    if (!hMain) { g_sumThreads = "FAIL"; return; }
     SYSTEM_INFO si; GetSystemInfo(&si);
     DWORD core = (si.dwNumberOfProcessors > 2) ? 1 : 0;
     SetThreadIdealProcessor(hMain, core);
@@ -4930,6 +4945,7 @@ static void OptimizeThreads() {
     CpuTopology::PinMainThread(hMain);
 
     CloseHandle(hMain);
+    g_sumThreads = " OK ";
     Log("Main thread %lu: ideal core %lu, priority ABOVE_NORMAL (of %lu cores)", mainTid, core, si.dwNumberOfProcessors);
 }
 
@@ -4989,14 +5005,17 @@ static void OptimizeProcess() {
         // FALSE = enable priority boost (Windows dynamic boost still active on top of our priority)
         // Note: SetProcessPriorityBoost(hProcess, TRUE) would DISABLE the boost
         SetProcessPriorityBoost(GetCurrentProcess(), FALSE);
+        g_sumPriority = " OK ";
         Log("Process: Above Normal priority set successfully");
     } else {
         // Fallback: try HIGH_PRIORITY_CLASS (may work without full admin in some cases)
         DWORD err = GetLastError();
         if (SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
             SetProcessPriorityBoost(GetCurrentProcess(), FALSE);
+            g_sumPriority = " OK ";
             Log("Process: High priority set (Above Normal requires admin, error %lu)", err);
         } else {
+            g_sumPriority = "FAIL";
             err = GetLastError();
             Log("Process: Failed to set priority (error %lu) - run WoW as administrator for Above Normal/High priority", err);
         }
@@ -5069,13 +5088,16 @@ static void OptimizeWorkingSet() {
         minWS = 256 * 1024 * 1024;    // 256 MB
         maxWS = 2048ULL * 1024 * 1024; // 2048 MB
     }
-    if (SetProcessWorkingSetSize(GetCurrentProcess(), minWS, maxWS))
+    if (SetProcessWorkingSetSize(GetCurrentProcess(), minWS, maxWS)) {
+        g_sumWorkingSet = " OK ";
         Log("Working set: min %u MB, max %u MB%s",
            (unsigned)(minWS / (1024 * 1024)),
            (unsigned)(maxWS / (1024 * 1024)),
             g_isMultiClient ? " (multi-client reduced)" : "");
-    else
+    } else {
+        g_sumWorkingSet = "FAIL";
         Log("WARNING: Working set failed (error %lu)", GetLastError());
+    }
 }
 
 // 15. mimalloc configuration.
@@ -5227,17 +5249,17 @@ static void TryRemoveFPSCap() {
         searchFrom = found + 1;
     }
 
-    if (addr && !WowOpt_ClientPatchAllowed((void*)(addr + 1))) {
-        Log("FPS cap: patch site found at 0x%08X and left alone (NoClientPatches)",
-            (unsigned)addr);
-    } else if (addr) {
-        DWORD old;
-        if (VirtualProtect((void*)(addr + 1), 4, PAGE_EXECUTE_READWRITE, &old)) {
-            *(uint32_t*)(addr + 1) = 200;  // stock cap — 999 breaks camera interpolation
-            VirtualProtect((void*)(addr + 1), 4, old, &old);
-            Log("FPS cap: stock value 200 preserved at 0x%08X (999 breaks camera interpolation)", (unsigned)addr);
-        }
+    // This used to write the value 200 over the 200 already there, labelled as a
+    // removal, which put a store into the client image that changed no byte and
+    // made a summary line say the cap had been lifted. Raising it to 999 breaks
+    // the camera's interpolation, so nothing is written: the site is found and
+    // reported, and the cap stays the client's own.
+    if (addr) {
+        g_sumFpsCap = " -- ";
+        Log("FPS cap: left at the client's own limit; the compare is at 0x%08X "
+            "(raising it breaks camera interpolation)", (unsigned)addr);
     } else {
+        g_sumFpsCap = "SKIP";
         Log("FPS cap: signature not found (may be a different build)");
     }
 }
@@ -9827,16 +9849,26 @@ static DWORD WINAPI MainThread(LPVOID param) {
         return ok ? " OK " : "FAIL";
     };
     Log("  [%s] Sleep hook (PreciseSleep)",    sleepOk     ? " OK " : "FAIL");
+#if CRASH_TEST_DISABLE_TICK_COUNT
+    Log("  [SKIP] GetTickCount and timeGetTime (compiled out)");
+#else
     Log("  [%s] GetTickCount (QPC)",           HookState(Config::g_settings.OptTimingFix, tickOk));
     Log("  [%s] timeGetTime (QPC sync)",       HookState(Config::g_settings.OptTimingFix, tgtOk));
+#endif
     Log("  [%s] Heap optimization (LFH)",      heapOk      ? " OK " : "FAIL");
-    Log("  [%s] ThreadId cache (TLS)",         HookState(Config::g_settings.OptThreadIdCache, tidOk));
+    // InstallThreadIdCacheHook installs nothing and says so; a switch left on
+    // used to turn this line into FAIL, which reads as a fault.
+    Log("  [SKIP] ThreadId cache (never installed: the native call is already cheap)");
     #if !CRASH_TEST_DISABLE_QPC_CACHE
         Log("  [%s] QPC cache (50us coalesce)",    HookState(Config::g_settings.OptTimingFix, qpcOk));
     #else
         Log("  [SKIP] QPC cache (crash isolation)");
     #endif        
-    Log("  [%s] IsBadPtr (fast VirtualQuery)", HookState(Config::g_settings.OptDebugApiHooks, bpOk));    
+#if CRASH_TEST_DISABLE_ISBADPTR
+    Log("  [SKIP] IsBadPtr (compiled out)");
+#else
+    Log("  [%s] IsBadPtr (fast VirtualQuery)", HookState(Config::g_settings.OptDebugApiHooks, bpOk));
+#endif
     Log("  [%s] CompareStringA (ASCII fast)",  HookState(Config::g_settings.OptStrStrSse2, cmpOk));
     Log("  [%s] MBT/WCT (SSE2 ASCII fast)",    mbwcOk      ? " OK " : "SKIP");
     Log("  [%s] CRT mem/str fast paths",        crtOk       ? " OK " : "SKIP");
@@ -9845,11 +9877,11 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("  [%s] GetSystemMetrics cache",         smCacheOk    ? " OK " : "SKIP");
     Log("  [%s] GetVersionExA cache",            verCacheOk   ? " OK " : "SKIP");
     Log("  [%s] IsDebuggerPresent no-op",        noDebugOk    ? " OK " : "SKIP");
-    Log("  [%s] Batch 8 kernel caches",         batch10Ok    ? " OK " : "SKIP");
-    Log("  [%s] Batch 20 kernel caches",        batch20Ok    ? " OK " : "SKIP");
-    Log("  [%s] Batch 24 kernel caches",        batch30Ok    ? " OK " : "SKIP");
-    Log("  [%s] Batch 35 kernel caches",        batch35Ok    ? " OK " : "SKIP");
-    Log("  [%s] Batch 38 kernel caches",        batch38Ok    ? " OK " : "SKIP");    
+    Log("  [%s] Kernel caches, group A",         batch10Ok    ? " OK " : "SKIP");
+    Log("  [%s] Kernel caches, group B",        batch20Ok    ? " OK " : "SKIP");
+    Log("  [%s] Kernel caches, group C",        batch30Ok    ? " OK " : "SKIP");
+    Log("  [%s] Kernel caches, group D",        batch35Ok    ? " OK " : "SKIP");
+    Log("  [%s] Kernel caches, group E",        batch38Ok    ? " OK " : "SKIP");    
 
     Log("  [%s] OutputDebugString (no-op)",    HookState(Config::g_settings.OptDebugApiHooks, debugOk));
     Log("  [%s] CriticalSection (spin+try)",   HookState(Config::g_settings.OptLockSpinHooks, csOk));
@@ -9865,7 +9897,10 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("  [%s] FlushFileBuffers (MPQ skip)",  HookState(Config::g_settings.OptFileIoHooks, flushOk));
     Log("  [%s] GetFileAttributesA (cache)",   HookState(Config::g_settings.OptFileIoHooks, faOk));
     Log("  [%s] SetFilePointer (64-bit)",      HookState(Config::g_settings.OptFileIoHooks, sfpOk));
-    Log("  [%s] GlobalAlloc (mimalloc GMEM_FIXED)", gaOk      ? " OK " : "FAIL");
+    // InstallGlobalAllocHooks is disabled in this build and always returns false;
+    // reporting that as FAIL made a decision look like a defect.
+    (void)gaOk;
+    Log("  [SKIP] GlobalAlloc (disabled in this build: it broke connections)");
     // Reported here because it was reported nowhere, and its absence let a
     // "hits=0 misses=0" line stand in for "this was never built in".
 #if TEST_DISABLE_LUA_BYTECODE_CACHE
@@ -9873,14 +9908,14 @@ static DWORD WINAPI MainThread(LPVOID param) {
 #else
     Log("  [%s] Lua bytecode cache (luaL_loadbuffer)", bytecodeOk ? " OK " : " -- ");
 #endif
-    Log("  [ OK ] Timer resolution (0.5ms)");
-    Log("  [ OK ] Thread affinity + priority");
-    if (g_isMultiClient)
-        Log("  [ OK ] Working set (64MB-512MB, multi-client)");
-    else
-        Log("  [ OK ] Working set (256MB-2GB)");
-    Log("  [ OK ] Process priority (Above Normal)");
-    Log("  [ OK ] FPS cap removal (200 -> 999)");
+    // Each of these records its own outcome. CompatMode skips the last four on
+    // purpose, which is "off", not a failure.
+    const bool compat = Config::g_settings.OptCompatMode;
+    Log("  [%s] Timer resolution",             g_sumTimer);
+    Log("  [%s] Thread ideal core and priority", compat ? " off" : g_sumThreads);
+    Log("  [%s] Process working set limits",   compat ? " off" : g_sumWorkingSet);
+    Log("  [%s] Process priority",             compat ? " off" : g_sumPriority);
+    Log("  [%s] FPS cap (the client's own limit is kept)", g_sumFpsCap);
     if (g_isMultiClient) {
         Log("  [ OK ] Multi-client mode (conservative timer + sleep)");
     }
@@ -9899,7 +9934,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     Log("  [%s] Lua PushString (intern)",     luaPushStringOk ? " OK " : "SKIP");
     Log("  [%s] Lua RawGetI (int-key)",       luaRawGetIOk ? " OK " : "SKIP");
     Log("  [%s] CombatLog full cache",        combatLogFullCacheOk ? " OK " : "SKIP");
-    Log("  [%s] D3D9 State Manager (15 hooks)",   d3d9StateOk ? " OK " : "SKIP");
+    Log("  [%s] D3D9 State Manager",   d3d9StateOk ? " OK " : "SKIP");
     Log("  [%s] Render Hooks (anim+backbuffer)",    renderHooksOk ? " OK " : "SKIP");
     Log("  [%s] SIMD Hooks (SSE2 matrix+frustum)", simdHooksOk ? " OK " : "SKIP");
     Log("  [%s] Logic Hooks (CT+UI+heartbeat) - installs no hooks, see above",

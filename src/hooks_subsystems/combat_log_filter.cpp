@@ -25,6 +25,7 @@
 
 #include "combat_log_filter.h"
 #include "event_coalescer.h"
+#include "loading_state.h"
 #include "config.h"
 #include <string.h>
 #include <stdio.h>
@@ -46,6 +47,16 @@ namespace CombatLogFilter {
     bool Init() {
         if (!Config::g_settings.OptCombatLogFilter) {
             g_active = false;
+            return true;
+        }
+        // The filter has no hook of its own. It is called from the event-signal
+        // detour LoadingState installs, so with that detour absent it would print
+        // ACTIVE below and never see an event.
+        if (!LoadingState::IsInstalled()) {
+            g_active = false;
+            Log("[CombatLogFilter] NOT active: it runs from the FrameScript_SignalEvent "
+                "detour, and that detour is not installed on this client (the reason "
+                "is under LoadingState above). Nothing is filtered.");
             return true;
         }
         g_active = true;

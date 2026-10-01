@@ -1268,8 +1268,14 @@ void ReportFeatureActivity() {
     }
 
     if (silent > 0) {
-        Log("[Features] Enabled but never ran (%d) - these report their own activity,"
-            " so a zero here means the code path was not reached:", silent);
+        // "never ran ... the code path was not reached" was wrong for a module
+        // that is reached and hands every call back: the DBC lookup cache logged
+        // this line beside a report of 3.8 million calls it had declined. A zero
+        // here is "no counted work", and the module's own line says whether it
+        // was called at all.
+        Log("[Features] Enabled, but no counted work was recorded (%d) - a zero here "
+            "does not mean the code was never reached, because a module that "
+            "declines every call also reads zero. Its own report says which:", silent);
         for (int i = 0; i < count; i++) {
             if (s_features[i].active && s_features[i].counted && s_features[i].hits == 0) {
                 Log("[Features]     %s", s_features[i].name);

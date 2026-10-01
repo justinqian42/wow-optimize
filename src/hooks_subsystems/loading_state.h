@@ -18,6 +18,13 @@ ClientWriteBatch::WriteFn GetClientWriter();
     bool Init();
     void Shutdown();
 
+    // Whether the detour is on the client's function. Another module that needs
+    // its events - the combat log filter rides the same detour - asks this
+    // instead of assuming Init() succeeded: on a client whose own extension has
+    // already patched FrameScript_SignalEvent it declines, and everything that
+    // depended on it silently does nothing.
+    bool IsInstalled();
+
     // True between PLAYER_LEAVING_WORLD and PLAYER_ENTERING_WORLD.
     bool IsLoading();
 

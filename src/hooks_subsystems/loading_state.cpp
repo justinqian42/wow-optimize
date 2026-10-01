@@ -516,4 +516,8 @@ bool IsLoading() {
     return g_isLoading != 0;
 }
 
+bool IsInstalled() {
+    return g_origSignalEvent != nullptr;
+}
+
 } // namespace LoadingState
