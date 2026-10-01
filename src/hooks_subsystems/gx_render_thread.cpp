@@ -720,8 +720,33 @@ HRESULT __stdcall Hook_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE t
     return hr;
 }
 
+// True when the d3d9.dll this process loaded is Windows' own, found in the system
+// directory. DXVK and wined3d ship theirs beside the game. Native Direct3D 9 has
+// frozen the main thread after the restart on every machine it was run on: one
+// frame never ended, 266,000 buffer locks drained the ring one at a time and two
+// frames were presented in two minutes. So the render thread starts on a
+// translation layer's runtime and not on that one.
+bool NativeRuntimeLoaded() {
+    HMODULE m = GetModuleHandleW(L"d3d9.dll");
+    if (!m) return false;
+    wchar_t mod[MAX_PATH] = {}, sys[MAX_PATH] = {};
+    if (!GetModuleFileNameW(m, mod, MAX_PATH)) return false;
+    const UINT n = GetSystemDirectoryW(sys, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return false;
+    return _wcsnicmp(mod, sys, n) == 0 && mod[n] == L'\\';
+}
+
+bool g_nativeRefused = false;
+
 void HookCreateDeviceOn(IDirect3D9* d3d) {
-    if (g_createDeviceHooked || !d3d) return;
+    if (g_createDeviceHooked || g_nativeRefused || !d3d) return;
+    if (NativeRuntimeLoaded()) {
+        g_nativeRefused = true;
+        g_armed = false;
+        g_why = "the game is using Windows' own Direct3D 9, where this froze the main thread";
+        Log("[GxRT] not started: %s. The device is created the client's way and nothing is queued.", g_why);
+        return;
+    }
     uintptr_t* vt = *(uintptr_t**)d3d;
     if (!vt || (uintptr_t)vt < 0x10000) return;
     void* fn = (void*)vt[16];                       // IDirect3D9::CreateDevice
