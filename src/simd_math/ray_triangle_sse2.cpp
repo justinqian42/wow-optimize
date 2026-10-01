@@ -194,6 +194,9 @@ struct Channel {
     unsigned long caught;
 };
 
+// Read on the hot paths, written by the A/B harness. File scope on purpose.
+static bool g_abSubject = false;
+
 static Channel g_ch16    = { "16-bit",      "RayTriIntersect16_SSE2", kTarget16,    nullptr, false, false, false, false, -1, 0, 0, 0, 0, 0 };
 static Channel g_ch32    = { "32-bit",      "RayTriIntersect32_SSE2", kTarget32,    nullptr, false, false, false, false, -1, 0, 0, 0, 0, 0 };
 static Channel g_chPlane = { "RayPlane",    "RayPlaneIntersect_SSE2", kTargetPlane, nullptr, false, false, false, false, -1, 0, 0, 0, 0, 0 };
@@ -342,7 +345,7 @@ inline int Hooked_TestImpl(const void* ray, const void* verts, const void* tri,
         // cannot see it.
         const unsigned long long t = AbTest::TickIn();
         int r;
-        if (ch.abSubject && AbTest::StandAside()) {
+        if (g_abSubject && AbTest::StandAside()) {
             ++ch.stood;
             r = orig(ray, verts, tri, outT, outUV, tol);
             if (r & 0xFF) ++ch.hits;
@@ -367,7 +370,7 @@ inline int Hooked_TestImpl(const void* ray, const void* verts, const void* tri,
         return r;
     }
 
-    if (ch.abSubject && AbTest::StandAside()) {
+    if (g_abSubject && AbTest::StandAside()) {
         ++ch.stood;
         return orig(ray, verts, tri, outT, outUV, tol);
     }
@@ -553,7 +556,7 @@ char __cdecl Hooked_RayPlane(const float* ray, const float* plane,
     if (!checking) {
         const unsigned long long t = AbTest::TickIn();
         int r;
-        if (g_chPlane.abSubject && AbTest::StandAside()) {
+        if (g_abSubject && AbTest::StandAside()) {
             ++g_chPlane.stood;
             r = orig(ray, plane, outT, outPoint, tol);
             if (r & 0xFF) ++g_chPlane.hits;
@@ -576,7 +579,7 @@ char __cdecl Hooked_RayPlane(const float* ray, const float* plane,
         return (char)r;
     }
 
-    if (g_chPlane.abSubject && AbTest::StandAside()) {
+    if (g_abSubject && AbTest::StandAside()) {
         ++g_chPlane.stood;
         return orig(ray, plane, outT, outPoint, tol);
     }
@@ -706,7 +709,7 @@ char __cdecl Hooked_PointInPoly(const float* pt, const float* verts,
     if (!checking) {
         const unsigned long long t = AbTest::TickIn();
         int r;
-        if (g_chPoly.abSubject && AbTest::StandAside()) {
+        if (g_abSubject && AbTest::StandAside()) {
             ++g_chPoly.stood;
             r = orig(pt, verts, count, axis);
             if (r & 0xFF) ++g_chPoly.hits;
@@ -723,7 +726,7 @@ char __cdecl Hooked_PointInPoly(const float* pt, const float* verts,
         return (char)r;
     }
 
-    if (g_chPoly.abSubject && AbTest::StandAside()) {
+    if (g_abSubject && AbTest::StandAside()) {
         ++g_chPoly.stood;
         return orig(pt, verts, count, axis);
     }
@@ -879,8 +882,14 @@ bool Init() {
             "the width this was written for is not the width the client is "
             "using. Read the FpuState lines above.");
 
-    bool abSubject = false;
-    abSubject = AbTest::IsSubject("RayTriangleSse2", &abSubject);
+    // The harness keeps the address it is given and writes to it for the whole
+    // session, so the flag has to outlive this function. It was a local here: the
+    // harness wrote a byte into a dead stack frame every stint, and each channel
+    // took a copy of the value at registration, which is false when this runs
+    // before the harness starts, so none of the four ever stood aside. The sweep
+    // reported this module "never reached" for that reason, and it is the
+    // collision test the camera goes through.
+    g_abSubject = AbTest::IsSubject("RayTriangleSse2", &g_abSubject);
 
     // Self-tests against in-memory original code if present
     SelfTestRayPlaneIntersect();
@@ -897,7 +906,6 @@ bool Init() {
                                 (void**)&g_ch16.origTest) == MH_OK) {
             if (WO_EnableHook((void*)kTarget16) == MH_OK) {
                 g_ch16.installed = true;
-                g_ch16.abSubject = abSubject;
                 g_ch16.benchSlot = SelfBench::Register("RayTri16");
                 SamplingProfiler::RegisterSelfSymbol(g_ch16.symbolName, (const void*)&Hooked_Test16);
                 Log("[RayTriangle] ACTIVE on 16-bit indices (0x%08X), the shared "
@@ -918,7 +926,6 @@ bool Init() {
                                 (void**)&g_ch32.origTest) == MH_OK) {
             if (WO_EnableHook((void*)kTarget32) == MH_OK) {
                 g_ch32.installed = true;
-                g_ch32.abSubject = abSubject;
                 g_ch32.benchSlot = SelfBench::Register("RayTri32");
                 SamplingProfiler::RegisterSelfSymbol(g_ch32.symbolName, (const void*)&Hooked_Test32);
                 Log("[RayTriangle] ACTIVE on 32-bit indices (0x%08X), terrain/mesh "
@@ -939,7 +946,6 @@ bool Init() {
                                 (void**)&g_chPlane.origTest) == MH_OK) {
             if (WO_EnableHook((void*)kTargetPlane) == MH_OK) {
                 g_chPlane.installed = true;
-                g_chPlane.abSubject = abSubject;
                 g_chPlane.benchSlot = SelfBench::Register("RayPlane");
                 SamplingProfiler::RegisterSelfSymbol(g_chPlane.symbolName, (const void*)&Hooked_RayPlane);
                 Log("[RayTriangle] ACTIVE on RayPlaneIntersect (0x%08X), ray-plane "
@@ -960,7 +966,6 @@ bool Init() {
                                 (void**)&g_chPoly.origTest) == MH_OK) {
             if (WO_EnableHook((void*)kTargetPoly) == MH_OK) {
                 g_chPoly.installed = true;
-                g_chPoly.abSubject = abSubject;
                 g_chPoly.benchSlot = SelfBench::Register("PointInPoly");
                 SamplingProfiler::RegisterSelfSymbol(g_chPoly.symbolName, (const void*)&Hooked_PointInPoly);
                 Log("[RayTriangle] ACTIVE on PointInPolygon2D (0x%08X), polygon raycast "
@@ -975,7 +980,7 @@ bool Init() {
         }
     }
 
-    if (abSubject) {
+    if (g_abSubject) {
         Log("[RayTriangle]   under A/B test, timed directly with rdtsc.");
     }
     return g_ch16.installed || g_ch32.installed || g_chPlane.installed || g_chPoly.installed;
