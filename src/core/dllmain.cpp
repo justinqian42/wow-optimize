@@ -63,6 +63,7 @@
 #include "mimalloc_high_arena.h"
 #include "high_placement.h"
 #include "camera_replay.h"
+#include "camera_watch.h"
 #include "client_write_batch.h"
 #include "aabb_overlap_sse2.h"
 #include "anim_quat_unpack_sse2.h"
@@ -5945,6 +5946,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaCompileCensus::LogStats", LuaCompileCensus::LogStats());
     STAT_TIME("FlightRecorder::LogStats", FlightRecorder::LogStats());
     STAT_TIME("CameraReplay::LogStats", CameraReplay::LogStats());
+    STAT_TIME("CameraWatch::LogStats", CameraWatch::LogStats());
     STAT_TIME("AbTest::LogStats", AbTest::LogStats());
     STAT_TIME("AnimCensus::LogStats", AnimCensus::LogStats());
     STAT_TIME("PredictivePrefetch::LogStats", PredictivePrefetch::LogStats());
@@ -6261,6 +6263,7 @@ extern "C" void WowOpt_OnFrameBoundary() {
     FrameBench::FlushAutoMark();
     FlightRecorder::PollHotkey();
     CameraReplay::OnFrame();
+    CameraWatch::OnFrame();
     AbTest::OnFrame();
 
     // A presented frame is the honest proof that the main thread is alive.
