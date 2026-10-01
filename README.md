@@ -502,6 +502,7 @@ Then inject after WoW starts.
 The optimization suite is compatible with any standard or customized WotLK 3.3.5a client (build 12340), including private servers using custom executables:
 * **Warmane** (Icecrown, Lordaeron, Onyxia) — **STRICTLY PROHIBITED (WILL RESULT IN A PERMANENT BAN)**
 * **Project Ascension** (supporting custom `Ascension.exe` launches)
+* **Arden WoW** (supporting `Arden.exe` and `ArdenWoW.exe` launches). The client carries its own `Extensions.dll`, which already patches a few of the same client functions, so the matching optimizations here stand aside and the log lists them.
 * **WoW Circle** - **On WoW Circle the DLL gets you disconnected** - Turning on **No Client Patches** in the launcher stops it, and
 also turns every optimization off.   
 Or use the `!LuaBoost` addon without the DLL.
