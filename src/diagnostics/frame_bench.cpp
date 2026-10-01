@@ -38,6 +38,7 @@ static uint64_t  g_gaps = 0;
 static double    g_longestGapMs = 0.0;
 
 static uint32_t  g_buckets[BUCKET_COUNT];
+static uint64_t  g_background  = 0;     // frames left out because the window was not in focus
 static uint32_t  g_overflow    = 0;
 static uint64_t  g_frames      = 0;
 static double    g_sumMs       = 0.0;
@@ -353,6 +354,23 @@ void FlushAutoMark() {
     FlightRecorder::Mark(why);
 }
 
+bool GameInFocus() {
+    // One foreground query per twentieth of a second is plenty and keeps this off
+    // the per-frame path at high frame rates.
+    static DWORD  s_checkedAt = 0;
+    static bool   s_focused   = true;
+    const DWORD now = GetTickCount();
+    if ((DWORD)(now - s_checkedAt) < 50) return s_focused;
+    s_checkedAt = now;
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    if (fg) GetWindowThreadProcessId(fg, &pid);
+    // No foreground window at all is a lock screen or a switch in progress, and
+    // is not play either.
+    s_focused = (pid == GetCurrentProcessId());
+    return s_focused;
+}
+
 void OnPresent(Source src) {
     if (!g_ready) return;
 
@@ -367,6 +385,8 @@ void OnPresent(Source src) {
     // loading screen is discarded for the same reason: the gap is load time, not
     // frame time, and one cold zone load would own the whole tail.
     if (prev == 0 || LuaOpt::IsLoadingMode()) return;
+
+    if (!GameInFocus()) { ++g_background; return; }
 
     double ms = (double)(now.QuadPart - prev) * 1000.0 / (double)g_freq.QuadPart;
 
@@ -441,6 +461,10 @@ void Report(const char* reason) {
         ConfigFingerprint(), WOW_OPTIMIZE_VERSION_STR);
     Log("[FrameBench]   session:  avg %.2f ms (%.1f fps)   p50 %.2f   p95 %.2f   p99 %.2f   p99.9 %.2f   max %.2f",
         avg, avg > 0.0 ? 1000.0 / avg : 0.0, pct[0], pct[1], pct[2], pct[3], g_maxMs);
+    if (g_background)
+        Log("[FrameBench]   %llu frame(s) were left out because the game window was not in "
+            "focus, where the client locks itself to 30 frames a second. They are not in any "
+            "figure here.", (unsigned long long)g_background);
     Log("[FrameBench]   janky frames: >33ms %.0f (%.2f%%)  >50ms %.0f (%.2f%%)  >100ms %.0f (%.2f%%)",
         g_over33,  100.0 * g_over33  / (double)g_frames,
         g_over50,  100.0 * g_over50  / (double)g_frames,

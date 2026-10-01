@@ -19,6 +19,13 @@ enum class Source {
 
 void Init();
 
+// True while one of this process's windows has the foreground. The client locks
+// itself to 30 frames a second when it does not, so a session spent in the
+// background is a session of 33 ms frames that say nothing about the game, and a
+// log from one was once read as a GPU limit. Anything that measures frame time
+// asks this and leaves those frames out. Read every few frames, not every call.
+bool GameInFocus();
+
 // Called once per presented frame. Cost is one QueryPerformanceCounter and one
 // histogram increment.
 void OnPresent(Source src);

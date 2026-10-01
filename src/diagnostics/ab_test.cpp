@@ -68,6 +68,7 @@
 
 #include "ab_test.h"
 #include "flight_recorder.h"
+#include "frame_bench.h"
 #include "config.h"
 #include "session_verdict.h"
 #include "sampling_profiler.h"
@@ -589,6 +590,9 @@ void OnFrame() {
     if (first)         { ++g_dropped; return; }   // no previous frame to measure from
     if (g_settle > 0)  { --g_settle; ++g_dropped; return; }
     if (frameMs <= 0.0 || frameMs > 2000.0) { ++g_dropped; return; }  // a load, not a frame
+    // The client locks itself to 30 frames a second without focus. Those frames land
+    // in whichever half the stint was in and say nothing about either.
+    if (!FrameBench::GameInFocus()) { ++g_dropped; return; }
 
     Add(g_onNow ? g_on[g_rotIndex] : g_off[g_rotIndex], frameMs);
 }
