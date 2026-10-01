@@ -194,6 +194,8 @@ struct SweepRow { uint32_t stints, ms, marks, reached; };
 SweepRow g_sweepRow[kMaxOffered] = {};
 SweepRow g_sweepBase = {};
 bool     g_sweepNoneSaid = false;
+int      g_sweepSinceBase = 0;          // subject stints since the last baseline
+constexpr int kSweepBaselineEvery = 4;
 
 bool InSweepFamily(const char* n) {
     static const char* const kPart[] = { "Collision", "Aabb", "Ray", "Terrain", "Horizon",
@@ -457,9 +459,13 @@ static void SweepFrame() {
     g_settle = kSettleFrames;
 
     const bool wasBaseline = g_sweepAt < 0;
+    if (wasBaseline) g_sweepSinceBase = 0; else ++g_sweepSinceBase;
     g_sweepAt = -1;
     g_onNow = true;
-    if (wasBaseline) {
+    // A baseline after every few subjects rather than every one: a glitch that
+    // repeats every few seconds needs only a reference now and then, and a
+    // tester gives up on a sweep that takes longer than a few minutes.
+    if (wasBaseline || g_sweepSinceBase < kSweepBaselineEvery) {
         for (int n = 0; n < g_offeredCount; ++n) {
             const int i = (g_sweepNext + n) % g_offeredCount;
             if (!g_flag[i] || !InSweepFamily(g_offered[i])) continue;
