@@ -57,11 +57,11 @@ namespace {
 // yard from the character has been told the fraction is nearly zero.
 //
 // When that happens this runs the same trace again, with the same inputs
-// and in the same frame, three ways: as it was, with every replacement that
-// registered with the A/B test standing aside, and, if that answer differs, with
-// each of them standing aside alone. The log says what each gave. A replacement
-// outside the A/B test cannot be switched here, so "every one standing aside
-// still hits" means the cause is the client, the geometry or one of those.
+// and in the same frame: as it was, with every replacement that registered with
+// the A/B test standing aside, with each of them standing aside alone, and as it
+// was once more. Answers are compared by fraction, since a hit at 0.0 and a hit at
+// 0.19 are both hits and only one of them zooms the camera. The log says what
+// each gave. A replacement outside the A/B test cannot be switched here.
 //
 // The trace is the client's own query, called the way the camera calls it, from
 // the main thread, and it writes only its fraction. It runs at most a dozen
@@ -80,7 +80,11 @@ const uintptr_t kCameraCalls[3] = { 0x00605F05, 0x00606103, 0x0060625B };
 DWORD g_mainTid     = 0;
 bool  g_inDiag      = false;
 unsigned long g_diagRuns = 0, g_diagSkipped = 0, g_traces = 0, g_suspicious = 0;
-constexpr unsigned long kMaxDiag = 12;
+constexpr unsigned long kMaxDiag = 24;
+// One burst of identical traces used the whole budget in an earlier build, so a
+// second diagnosis waits at least this long after the last.
+constexpr DWORD kDiagGapMs = 8000;
+DWORD g_lastDiagTick = 0;
 constexpr float kSuspect = 0.03f;
 
 // The trace writes the hit point to its third argument, a hit record to its
@@ -96,54 +100,65 @@ void Diagnose(const float* from, const float* to, int flags, float frac0) {
         *frac = 1.0f;
         return (unsigned char)orig_Trace(from, to, hit, frac, flags, nullptr);
     };
+    // A fraction is what the camera uses, so two answers are the same when the
+    // fractions are, hit or miss aside.
+    auto differs = [](float a, float b) { return (a > b ? a - b : b - a) > 0.001f; };
 
-    int aside = -1;
-    float fAside = 1.0f;
+    float fFirst = 1.0f;
+    run(&fFirst);
+
+    float fAside = 1.0f, fLast = 1.0f;
     char named[640] = {};
     int namedCount = 0;
     const bool begun = AbTest::DiagBegin();
     if (begun) {
         AbTest::DiagSelect(-1);
-        aside = run(&fAside);
-        if (!aside) {
-            const int n = AbTest::DiagCount();
-            for (int i = 0; i < n; ++i) {
-                const char* name = nullptr;
-                if (!AbTest::DiagSubject(i, &name)) continue;
-                AbTest::DiagSelect(i);
-                float fi;
-                if (!run(&fi)) {
-                    ++namedCount;
-                    const size_t used = strlen(named);
-                    if (used + strlen(name) + 3 < sizeof(named)) {
-                        if (used) strcat(named, ", ");
-                        strcat(named, name);
-                    }
+        run(&fAside);
+        const int n = AbTest::DiagCount();
+        for (int i = 0; i < n; ++i) {
+            const char* name = nullptr;
+            if (!AbTest::DiagSubject(i, &name)) continue;
+            AbTest::DiagSelect(i);
+            float fi = 1.0f;
+            run(&fi);
+            if (differs(fi, fFirst)) {
+                ++namedCount;
+                char item[96];
+                wsprintfA(item, "%s %d.%04d", name, (int)fi, (int)((fi - (int)fi) * 10000.0f));
+                const size_t used = strlen(named);
+                if (used + strlen(item) + 3 < sizeof(named)) {
+                    if (used) strcat(named, ", ");
+                    strcat(named, item);
                 }
             }
         }
         AbTest::DiagEnd();
     }
+    run(&fLast);
 
-    float fAsIs;
-    const int asIs = run(&fAsIs);
-
-    Log("[CameraWatch] trace #%lu hit at fraction %.4f, from %.1f %.1f %.1f to %.1f %.1f %.1f, "
-        "flags %08X. Again as it was: %s (%.4f). With every replacement standing aside: %s.",
+    Log("[CameraWatch] trace #%lu: the camera's call gave fraction %.4f, from %.1f %.1f %.1f to "
+        "%.1f %.1f %.1f, flags %08X. Run again at once as it was: %.4f. With every replacement "
+        "standing aside: %s. As it was once more afterwards: %.4f.",
         g_diagRuns, (double)frac0, (double)from[0], (double)from[1], (double)from[2],
         (double)to[0], (double)to[1], (double)to[2], (unsigned)flags,
-        asIs ? "hit" : "miss", (double)fAsIs,
-        !begun ? "not run (no A/B test)"
-               : aside ? "hit again (fraction %.4f)" : "NO HIT");
-    if (begun && aside)
-        Log("[CameraWatch]   standing aside gave fraction %.4f, so the hit is not made by any "
-            "replacement that is in the A/B test.", (double)fAside);
-    if (begun && !aside) {
-        if (namedCount)
-            Log("[CameraWatch]   standing aside alone turns the hit into a miss: %s", named);
+        (double)fFirst, begun ? "see next line" : "not run (no A/B test)", (double)fLast);
+    if (begun) {
+        char lead[64];
+        wsprintfA(lead, "%d.%04d", (int)fAside, (int)((fAside - (int)fAside) * 10000.0f));
+        if (differs(frac0, fFirst))
+            Log("[CameraWatch]   the same call gave %.4f a moment later with nothing changed, so "
+                "its answer depends on state the first call used up or left behind.",
+                (double)fFirst);
+        if (differs(fAside, fFirst))
+            Log("[CameraWatch]   every replacement standing aside gives fraction %s against %.4f "
+                "as it was, so the answer comes from the replacements.", lead, (double)fFirst);
         else
-            Log("[CameraWatch]   no single replacement changes it; it needs more than one, or "
-                "one that is not in the A/B test.");
+            Log("[CameraWatch]   every replacement standing aside gives fraction %s, the same as "
+                "it was, so the answer is not made by a replacement in the A/B test.", lead);
+        if (namedCount)
+            Log("[CameraWatch]   standing aside alone changes the answer: %s", named);
+        else
+            Log("[CameraWatch]   no single replacement standing aside alone changes the answer.");
     }
     g_inDiag = false;
 }
@@ -158,7 +173,9 @@ char __cdecl Hooked_Trace(const float* from, const float* to, float* hitPoint,
         (ret == kCameraCalls[0] || ret == kCameraCalls[1] || ret == kCameraCalls[2]) &&
         GetCurrentThreadId() == g_mainTid && AbTest::Running()) {
         ++g_suspicious;
-        if (g_diagRuns < kMaxDiag) {
+        const DWORD now = GetTickCount();
+        if (g_diagRuns < kMaxDiag && (g_diagRuns == 0 || now - g_lastDiagTick >= kDiagGapMs)) {
+            g_lastDiagTick = now;
             // The re-runs overwrite what the client's call produced, so keep it.
             float savedHit[3] = {};
             if (hitPoint) { savedHit[0] = hitPoint[0]; savedHit[1] = hitPoint[1]; savedHit[2] = hitPoint[2]; }
