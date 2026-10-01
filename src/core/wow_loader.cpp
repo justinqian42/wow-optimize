@@ -20,6 +20,18 @@ static bool FileExists(const char* path) {
     return (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY));
 }
 
+// The clients this loader starts, in the order it looks for them. Arden.exe and
+// ArdenWoW.exe are the same 3.3.5a build 12340 image under another name: the
+// hook prologues were compared byte for byte against it.
+static const char* const kGameExes[] = { "Wow.exe", "Arden.exe", "ArdenWoW.exe" };
+
+static const char* FindGameExe() {
+    for (const char* name : kGameExes) {
+        if (FileExists(name)) return name;
+    }
+    return nullptr;
+}
+
 static bool InjectDLL(HANDLE hProcess, const char* dllPath) {
     // Get full path
     char fullPath[MAX_PATH];
@@ -77,9 +89,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
 {
     // Check that we're in the WoW folder
-    if (!FileExists("Wow.exe")) {
-        ShowError("Wow.exe not found.\n\n"
-                  "Place wow_loader.exe in the same folder as Wow.exe.");
+    const char* gameExe = FindGameExe();
+    if (!gameExe) {
+        ShowError("Wow.exe, Arden.exe or ArdenWoW.exe not found.\n\n"
+                  "Place wow_loader.exe in the same folder as the game.");
         return 1;
     }
 
@@ -124,21 +137,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     // Build command line (Wow.exe + any pass-through arguments)
     char cmdLine[MAX_PATH * 2];
     if (passThrough[0]) {
-        sprintf(cmdLine, "Wow.exe %s", passThrough);
+        sprintf(cmdLine, "%s %s", gameExe, passThrough);
     } else {
-        strcpy(cmdLine, "Wow.exe");
+        strcpy(cmdLine, gameExe);
     }
 
-    // Launch Wow.exe in SUSPENDED state
+    // Launch the game in SUSPENDED state
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
 
-    if (!CreateProcessA("Wow.exe", cmdLine, NULL, NULL, FALSE,
+    if (!CreateProcessA(gameExe, cmdLine, NULL, NULL, FALSE,
                          CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
         DWORD err = GetLastError();
-        ShowErrorFmt("Failed to launch Wow.exe (error %lu).\n\n"
-                     "Try running wow_loader.exe as Administrator.", err);
+        char failMsg[256];
+        sprintf(failMsg, "Failed to launch %s (error %%lu).\n\n"
+                         "Try running wow_loader.exe as Administrator.", gameExe);
+        ShowErrorFmt(failMsg, err);
         return 1;
     }
 
@@ -153,8 +168,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         GetLocalTime(&st);
         fprintf(log, "[%02d:%02d:%02d] wow_loader started\n",
                 st.wHour, st.wMinute, st.wSecond);
-        fprintf(log, "[%02d:%02d:%02d] Wow.exe PID: %lu\n",
-                st.wHour, st.wMinute, st.wSecond, pi.dwProcessId);
+        fprintf(log, "[%02d:%02d:%02d] %s PID: %lu\n",
+                st.wHour, st.wMinute, st.wSecond, gameExe, pi.dwProcessId);
     }
 
     // Inject the DLL
@@ -178,8 +193,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (log) {
         SYSTEMTIME st;
         GetLocalTime(&st);
-        fprintf(log, "[%02d:%02d:%02d] Wow.exe resumed\n",
-                st.wHour, st.wMinute, st.wSecond);
+        fprintf(log, "[%02d:%02d:%02d] %s resumed\n",
+                st.wHour, st.wMinute, st.wSecond, gameExe);
         fclose(log);
     }
 

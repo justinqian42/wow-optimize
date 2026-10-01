@@ -2320,7 +2320,7 @@ namespace WowOptimizeLauncher {
             string wowPath = Path.Combine(exeDir, "wow.exe");
 
             if (!File.Exists(wowPath)) {
-                string[] alternateNames = { "Ascension.exe", "run.exe", "WoWCircle.exe", "wow-64.exe", "Sirus.exe" };
+                string[] alternateNames = { "Arden.exe", "ArdenWoW.exe", "Ascension.exe", "run.exe", "WoWCircle.exe", "wow-64.exe", "Sirus.exe" };
                 foreach (string altName in alternateNames) {
                     string altPath = Path.Combine(exeDir, altName);
                     if (File.Exists(altPath)) {
@@ -2330,14 +2330,14 @@ namespace WowOptimizeLauncher {
                 }
             }
 
-            // Fallback: search for any .exe containing "wow" or "ascension" that isn't the launcher/loader itself
+            // Fallback: search for any .exe containing "wow", "arden" or "ascension" that isn't the launcher/loader itself
             if (!File.Exists(wowPath)) {
                 try {
                     string[] files = Directory.GetFiles(exeDir, "*.exe");
                     foreach (string file in files) {
                         string name = Path.GetFileName(file).ToLower();
                         if (name != "wow_optimize_launcher.exe" && name != "wow_loader.exe" && 
-                            (name.Contains("wow") || name.Contains("ascension") || name.Contains("circle") || name.Contains("sirus"))) {
+                            (name.Contains("wow") || name.Contains("arden") || name.Contains("ascension") || name.Contains("circle") || name.Contains("sirus"))) {
                             wowPath = file;
                             break;
                         }
@@ -2348,7 +2348,7 @@ namespace WowOptimizeLauncher {
             }
 
             if (!File.Exists(wowPath)) {
-                MessageBox.Show("Could not find wow.exe, Ascension.exe, or another valid game executable in the current directory: " + exeDir + "\n\nPlease place the launcher in your World of Warcraft directory.", "Execution Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Could not find wow.exe, Arden.exe, Ascension.exe, or another valid game executable in the current directory: " + exeDir + "\n\nPlease place the launcher in your World of Warcraft directory.", "Execution Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
