@@ -8536,6 +8536,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2AnimStride::Install();
     M2AnimReuse::Init();
     CameraReplay::Init();
+    CameraWatch::Init();
     AabbOverlap::Init();
     AabbTransform::Init();
     ColorUnpack::Init();

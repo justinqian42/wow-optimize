@@ -31,7 +31,11 @@
 #endif
 #include <windows.h>
 #include <cstdint>
+#include <cstring>
+#include <intrin.h>
 
+#include "MinHook.h"
+#include "version.h"
 #include "camera_watch.h"
 #include "ab_test.h"
 #include "flight_recorder.h"
@@ -41,6 +45,138 @@ extern "C" void Log(const char* fmt, ...);
 
 namespace CameraWatch {
 namespace {
+
+// ---------------------------------------------------------------------------
+// The trace behind the pull-in
+//
+// sub_605D60 asks the world one question to decide how far back the camera may
+// sit: sub_77F310(from, to, size, &fraction, flags, 0), which is a jump to
+// sub_7A3B70. It returns true when the segment hits something and writes how
+// far along the segment the hit is, 1.0 meaning not at all. The camera then
+// multiplies its distance by that fraction. A camera that lands a tenth of a
+// yard from the character has been told the fraction is nearly zero.
+//
+// When that happens this runs the same trace again, with the same inputs
+// and in the same frame, three ways: as it was, with every replacement that
+// registered with the A/B test standing aside, and, if that answer differs, with
+// each of them standing aside alone. The log says what each gave. A replacement
+// outside the A/B test cannot be switched here, so "every one standing aside
+// still hits" means the cause is the client, the geometry or one of those.
+//
+// The trace is the client's own query, called the way the camera calls it, from
+// the main thread, and it writes only its fraction. It runs at most a dozen
+// times a session.
+// ---------------------------------------------------------------------------
+typedef char (__cdecl* Trace_fn)(const float* from, const float* to, float* hitPoint,
+                                 float* fraction, int flags, void* hitInfo);
+Trace_fn orig_Trace = nullptr;
+const uintptr_t kTrace = 0x007A3B70;
+
+// The three places in the camera code that call it, as the address the call
+// returns to: sub_605D60 twice and sub_6061D0 once. The trace has twenty callers
+// and only these are the camera's.
+const uintptr_t kCameraCalls[3] = { 0x00605F05, 0x00606103, 0x0060625B };
+
+DWORD g_mainTid     = 0;
+bool  g_inDiag      = false;
+unsigned long g_diagRuns = 0, g_diagSkipped = 0, g_traces = 0, g_suspicious = 0;
+constexpr unsigned long kMaxDiag = 12;
+constexpr float kSuspect = 0.03f;
+
+// The trace writes the hit point to its third argument, a hit record to its
+// last, and two globals that name what it hit. So every re-run gets scratch
+// space of its own and no hit record, and the last one is the call the client
+// made, with the client's inputs, so the globals end where the camera expects.
+void Diagnose(const float* from, const float* to, int flags, float frac0) {
+    g_inDiag = true;
+    ++g_diagRuns;
+
+    auto run = [&](float* frac) -> int {
+        float hit[3] = {};
+        *frac = 1.0f;
+        return (unsigned char)orig_Trace(from, to, hit, frac, flags, nullptr);
+    };
+
+    int aside = -1;
+    float fAside = 1.0f;
+    char named[640] = {};
+    int namedCount = 0;
+    const bool begun = AbTest::DiagBegin();
+    if (begun) {
+        AbTest::DiagSelect(-1);
+        aside = run(&fAside);
+        if (!aside) {
+            const int n = AbTest::DiagCount();
+            for (int i = 0; i < n; ++i) {
+                const char* name = nullptr;
+                if (!AbTest::DiagSubject(i, &name)) continue;
+                AbTest::DiagSelect(i);
+                float fi;
+                if (!run(&fi)) {
+                    ++namedCount;
+                    const size_t used = strlen(named);
+                    if (used + strlen(name) + 3 < sizeof(named)) {
+                        if (used) strcat(named, ", ");
+                        strcat(named, name);
+                    }
+                }
+            }
+        }
+        AbTest::DiagEnd();
+    }
+
+    float fAsIs;
+    const int asIs = run(&fAsIs);
+
+    Log("[CameraWatch] trace #%lu hit at fraction %.4f, from %.1f %.1f %.1f to %.1f %.1f %.1f, "
+        "flags %08X. Again as it was: %s (%.4f). With every replacement standing aside: %s.",
+        g_diagRuns, (double)frac0, (double)from[0], (double)from[1], (double)from[2],
+        (double)to[0], (double)to[1], (double)to[2], (unsigned)flags,
+        asIs ? "hit" : "miss", (double)fAsIs,
+        !begun ? "not run (no A/B test)"
+               : aside ? "hit again (fraction %.4f)" : "NO HIT");
+    if (begun && aside)
+        Log("[CameraWatch]   standing aside gave fraction %.4f, so the hit is not made by any "
+            "replacement that is in the A/B test.", (double)fAside);
+    if (begun && !aside) {
+        if (namedCount)
+            Log("[CameraWatch]   standing aside alone turns the hit into a miss: %s", named);
+        else
+            Log("[CameraWatch]   no single replacement changes it; it needs more than one, or "
+                "one that is not in the A/B test.");
+    }
+    g_inDiag = false;
+}
+
+char __cdecl Hooked_Trace(const float* from, const float* to, float* hitPoint,
+                          float* frac, int flags, void* hitInfo) {
+    const uintptr_t ret = (uintptr_t)_ReturnAddress();
+    ++g_traces;
+    const float before = frac ? *frac : 1.0f;
+    const char r = orig_Trace(from, to, hitPoint, frac, flags, hitInfo);
+    if (r && frac && !g_inDiag && *frac < kSuspect && before >= 0.99f &&
+        (ret == kCameraCalls[0] || ret == kCameraCalls[1] || ret == kCameraCalls[2]) &&
+        GetCurrentThreadId() == g_mainTid && AbTest::Running()) {
+        ++g_suspicious;
+        if (g_diagRuns < kMaxDiag) {
+            // The re-runs overwrite what the client's call produced, so keep it.
+            float savedHit[3] = {};
+            if (hitPoint) { savedHit[0] = hitPoint[0]; savedHit[1] = hitPoint[1]; savedHit[2] = hitPoint[2]; }
+            const float savedFrac = *frac;
+            __try {
+                Diagnose(from, to, flags, savedFrac);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                g_inDiag = false;
+                AbTest::DiagEnd();
+            }
+            *frac = savedFrac;
+            if (hitPoint) { hitPoint[0] = savedHit[0]; hitPoint[1] = savedHit[1]; hitPoint[2] = savedHit[2]; }
+        } else {
+            ++g_diagSkipped;
+        }
+    }
+    return r;
+}
 
 const uintptr_t kWorldFrame     = 0x00B7436C;
 const uintptr_t kWorldCameraOff = 0x7E20;
@@ -64,6 +200,8 @@ unsigned long g_frames[2]   = {};          // [0] replacements off, [1] on or no
 unsigned long g_events[2]   = {};
 unsigned long g_unread      = 0;
 unsigned long g_logged      = 0;
+unsigned long g_collapseLogged = 0;
+unsigned long g_collapses[2] = {};   // pull-ins to under a yard, by half
 float         g_worstDrop   = 0.0f;
 DWORD         g_longestMs   = 0;
 
@@ -83,7 +221,31 @@ bool ReadCamera(float* dist, unsigned* flags) {
 
 }  // namespace
 
+void Init() {
+    if (!Config::g_settings.OptAbTest) return;
+    __try {
+        const unsigned char* p = (const unsigned char*)kTrace;
+        if (!(p[0] == 0x55 && p[1] == 0x8B && p[2] == 0xEC && p[3] == 0x83 && p[4] == 0xEC && p[5] == 0x18)) {
+            Log("[CameraWatch] trace re-run NOT installed: 0x%08X does not start with the bytes "
+                "of build 12340", (unsigned)kTrace);
+            return;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return;
+    }
+    if (MH_CreateHook((void*)kTrace, (void*)Hooked_Trace, (void**)&orig_Trace) != MH_OK ||
+        WO_EnableHook((void*)kTrace) != MH_OK) {
+        orig_Trace = nullptr;
+        Log("[CameraWatch] trace re-run NOT installed: the world trace could not be hooked");
+        return;
+    }
+    Log("[CameraWatch] trace re-run installed on 0x%08X: a camera trace that hits within "
+        "%.0f%% of its length is run again with replacements standing aside, to name the "
+        "one that made it.", (unsigned)kTrace, (double)kSuspect * 100.0);
+}
+
 void OnFrame() {
+    if (!g_mainTid) g_mainTid = GetCurrentThreadId();
     if (!Config::g_settings.OptFlightRecorder) return;
 
     float d = 0.0f;
@@ -102,23 +264,27 @@ void OnFrame() {
         if (d >= g_eventFrom * kFarEnough) {
             const DWORD ms = GetTickCount() - g_eventStart;
             if (ms > g_longestMs) g_longestMs = ms;
-            if (g_logged <= (unsigned long)kMaxLogged)
+            if (g_logged + g_collapseLogged <= (unsigned long)kMaxLogged + 200ul)
                 Log("[CameraWatch]   back to %.1f yd after %lu ms", d, (unsigned long)ms);
             g_inEvent = false;
         }
     } else if (g_prev >= kMinBefore && g_prev - d >= kMinDrop) {
         ++g_events[half];
+        if (d < 1.0f) ++g_collapses[half];
         if (g_prev - d > g_worstDrop) g_worstDrop = g_prev - d;
         g_inEvent    = true;
         g_eventFrom  = g_prev;
         g_eventStart = GetTickCount();
-        if (g_logged < (unsigned long)kMaxLogged) {
-            ++g_logged;
+        // Every collapse to the character is kept; the partial ones, which are
+        // what walls do, stop being listed after a few.
+        const bool collapse = d < 1.0f;
+        if (collapse ? g_collapseLogged < 200ul : g_logged < (unsigned long)kMaxLogged) {
+            if (collapse) ++g_collapseLogged; else ++g_logged;
             Log("[CameraWatch] camera pulled in from %.1f to %.1f yd in one frame "
                 "(flags %08X, %s)", g_prev, d, flags,
                 !AbTest::Running() ? "no A/B test running"
                                    : half ? "replacements ON" : "replacements OFF");
-            if (g_logged <= (unsigned long)kMaxMarked)
+            if (g_logged + g_collapseLogged <= (unsigned long)kMaxMarked)
                 FlightRecorder::Mark("camera pulled in");
         }
     }
@@ -139,6 +305,12 @@ void LogStats() {
         g_events[0] + g_events[1], (double)kMinDrop, g_events[1], g_frames[1],
         g_events[0], g_frames[0], (double)g_worstDrop, (unsigned long)g_longestMs,
         g_unread);
+    Log("[CameraWatch]   of those, pulled in to under a yard from the character (the zoom to "
+        "the character): ON %lu, OFF %lu.", g_collapses[1], g_collapses[0]);
+    if (orig_Trace)
+        Log("[CameraWatch]   the world trace ran %lu times, %lu hit within %.0f%% of their length "
+            "from a clear start, %lu of those were run again and %lu left alone.",
+            g_traces, g_suspicious, (double)kSuspect * 100.0, g_diagRuns, g_diagSkipped);
     if (g_frames[0] && g_frames[1]) {
         Log("[CameraWatch]   per 100000 frames: ON %.1f, OFF %.1f. Walls give the same "
             "rate in both halves; a rate that differs is what to follow. A handful of "

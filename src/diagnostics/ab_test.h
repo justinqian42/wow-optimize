@@ -47,6 +47,18 @@ bool StandAside();
 unsigned long long TickIn();
 void TickOut(unsigned long long t);
 
+// Re-running one call with chosen replacements standing aside. For a caller that
+// has seen a result it doubts and wants to know which replacement produced it:
+// DiagBegin remembers the state of every registered flag, DiagSelect(-1) makes
+// all of them stand aside and DiagSelect(i) makes only the i-th, and DiagEnd
+// puts everything back. Main thread only, and only while a test is running;
+// DiagBegin returns false otherwise and the rest must not be called.
+bool DiagBegin();
+void DiagSelect(int index);        // -1: every subject stands aside
+void DiagEnd();
+int  DiagCount();                  // registered subjects that handed over a flag
+bool DiagSubject(int index, const char** name);   // false for an empty slot
+
 // One presented frame. Called from the frame boundary; it reads the clock
 // itself so it does not depend on another module being switched on.
 void OnFrame();

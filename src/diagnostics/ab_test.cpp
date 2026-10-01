@@ -417,6 +417,43 @@ bool IsSubject(const char* name, bool* flag) {
     return true;
 }
 
+// The state DiagBegin saves, so DiagEnd can put every flag back exactly.
+static bool g_diagOn = false;
+static bool g_diagSavedOn = true;
+static bool g_diagSaved[kMaxOffered];
+
+bool DiagBegin() {
+    if (!g_active || g_diagOn) return false;
+    for (int i = 0; i < g_offeredCount; ++i)
+        g_diagSaved[i] = g_flag[i] ? *g_flag[i] : false;
+    g_diagSavedOn = g_onNow;
+    g_diagOn = true;
+    return true;
+}
+
+void DiagSelect(int index) {
+    if (!g_diagOn) return;
+    g_onNow = false;     // StandAside answers yes for any flag that is set
+    for (int i = 0; i < g_offeredCount; ++i)
+        if (g_flag[i]) *g_flag[i] = (index < 0) || (i == index);
+}
+
+void DiagEnd() {
+    if (!g_diagOn) return;
+    for (int i = 0; i < g_offeredCount; ++i)
+        if (g_flag[i]) *g_flag[i] = g_diagSaved[i];
+    g_onNow = g_diagSavedOn;
+    g_diagOn = false;
+}
+
+int DiagCount() { return g_offeredCount; }
+
+bool DiagSubject(int index, const char** name) {
+    if (index < 0 || index >= g_offeredCount || !g_flag[index]) return false;
+    if (name) *name = g_offered[index];
+    return true;
+}
+
 bool StandAside() {
     if (g_onNow) return false;
     if (g_sweep) { ++g_sweepReached; return true; }

@@ -5,6 +5,10 @@
 // camera_watch.cpp.
 namespace CameraWatch {
 
+// Hooks the client's world trace when the A/B test is on, to re-run a doubtful
+// camera result with replacements standing aside. See camera_watch.cpp.
+void Init();
+
 // Called from the presented-frame boundary, after the camera has been updated.
 void OnFrame();
 
