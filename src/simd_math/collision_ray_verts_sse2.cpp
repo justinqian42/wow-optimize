@@ -59,6 +59,12 @@ constexpr int kMaxVerts = 452;
 typedef int (__fastcall* findModel_fn)(void* cache, void* edx,
                                        int a0, int a4, void* p1, void* p2, void* p3);
 
+// The client's routine answers in AL alone (xor al, al / mov al, 1, and a test al,
+// al at its own call site). Declared int so the whole of EAX can be seen: only
+// the low byte is the answer. Read as a whole, the upper bytes, which still hold a
+// pointer or an index from the middle of the routine on a "no hit" exit, made a
+// miss look like a hit; t starts at 0.0, so that was a hit at fraction 0 and it
+// zoomed the camera to the character.
 typedef int (__cdecl* RayTriIntersect16_fn)(const void* ray, const void* verts,
                                             const void* tri, void* outT, void* outUV,
                                             float eps);
@@ -72,6 +78,9 @@ bool g_abSubject = false;
 
 unsigned long g_calls = 0;
 unsigned long long g_verts = 0, g_tris = 0;
+// Calls on which the client's ray-triangle test said no in AL while EAX was not
+// zero. Each one would have been taken as a hit when the whole register was read.
+unsigned long g_rayTriCalls = 0, g_rayTriGarbage = 0;
 
 inline uint32_t RD32(uintptr_t a) { return *(const uint32_t*)a; }
 inline uint16_t RD16(uintptr_t a) { return *(const uint16_t*)a; }
@@ -205,10 +214,13 @@ char __fastcall Hook_Collision_ClipVertsToBox(void* thisPtr, void* /*edx*/, int 
         uint8_t cc = codes[RD16(tri + kM_triVerts + 4)];
         if (((ca & cb & cc) & 0x3F) == 0) {
             float t = 0.0f;
-            if (rayTri((const void*)(thisF + 12),
-                       (const void*)((uintptr_t)model + 8),
-                       (const void*)(tri + kM_triVerts),
-                       &t, nullptr, 0.0020000001f)) {
+            const int rayRes = rayTri((const void*)(thisF + 12),
+                                      (const void*)((uintptr_t)model + 8),
+                                      (const void*)(tri + kM_triVerts),
+                                      &t, nullptr, 0.0020000001f);
+            ++g_rayTriCalls;
+            if ((rayRes & 0xFF) == 0 && rayRes != 0) ++g_rayTriGarbage;
+            if ((rayRes & 0xFF) != 0) {
                 if (t >= 0.0f && (double)t <= (double)thisF[19]) {
                     thisF[19] = t;
                     *(uint16_t*)kNearArray = idx;
@@ -282,6 +294,12 @@ void LogStats() {
     }
     Log("CollisionRayVerts: %lu calls, %llu vertices classified, %llu triangles evaluated.",
         g_calls, g_verts, g_tris);
+    if (g_rayTriCalls)
+        Log("CollisionRayVerts: the client's ray-triangle test ran %lu times here and said no with "
+            "a non-zero EAX on %lu of them. Plain counters, lower bounds. The answer is read from "
+            "AL, so none of those was taken as a hit.", g_rayTriCalls, g_rayTriGarbage);
+    else
+        Log("CollisionRayVerts: not measured: no triangle reached the ray-triangle test.");
 }
 
 } // namespace CollisionRayVerts
