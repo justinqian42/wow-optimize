@@ -24,7 +24,7 @@ The current public build is focused on real frametime stability, long-session sm
 ---
 
 ## Table of Contents
-* [What's New in v3.20.0](#whats-new-in-v3200)
+* [What's New in v3.21.0](#whats-new-in-v3210)
 * [Send me your log](#send-me-your-log)
   * [Measuring rather than reporting](#if-you-want-to-measure-something-rather-than-report-a-bug)
 * [Reviews & Acknowledgments](#reviews)
@@ -39,53 +39,71 @@ The current public build is focused on real frametime stability, long-session sm
 
 ---
 
-## What's New in v3.20.0
+## What's New in v3.21.0
 
 ### Fixed
 
-* **`math.random` could return exactly 1.0.** This tool replaces
-  `math.random` with a faster version, and that version returned 1.0 about
-  once in 32,768 calls, which the game's own never does. QuestHelper's routing
-  printed `no nod :(` each time. The same version drew from a generator that
-  was never seeded, so every addon got the same "random" numbers in every
-  session. It now uses the game's own generator and formula, checked against
-  the game's output for every value that generator can produce. Reported by
-  Feles Noctis.
-* **The Lua compile cache no longer switches itself off** when the name of a
-  script it has already seen moves in memory. It drops that one entry instead.
-* **DXVK is recognised from the details of `d3d9.dll` again** when the other
-  checks do not find it. A typo in a file path had kept that check from ever
-  running.
+* **The camera no longer zooms into the character.** The *Collision Pick-Ray
+  Outcode Rejection* replacement read the game's ray-triangle answer from a whole
+  register, where the game reports it in the low byte only. On a miss the rest of
+  the register held leftover data, which read as a hit at distance zero, and the
+  camera pulled in to a tenth of a yard. It was rare and only happened with that
+  switch on. Found from a tester log in which the same camera trace returned 0.0
+  once and 0.19 a moment later with nothing changed. Reported by prince.
+* **The D3D9 render thread stays off Windows' own Direct3D 9.** On that runtime
+  it blanked the screen at its device restart and then left the login screen
+  frozen. Reported by Cris. On DXVK it works as before.
+* **Several replacements that are off by default were corrected** after tester
+  sessions: the string replacements read 16 bytes past the end of a string into
+  an unmapped page, one UI replacement unbalanced the stack, two crashed on
+  alignment or on registers the client sets up, and the collision tree walks now
+  leave in the client's order when their stack fills.
+* **Reports say what happened.** The startup summary, four feature reports and
+  the launcher descriptions had lines the logs contradicted. They were corrected,
+  and the replacements that did nothing in measured sessions moved to DIDN'T HELP.
+
+### Replacements on by default
+
+* **The replacements that agreed with the game's own answers in tester sessions
+  are on now.** They cover vector maths, animation tracks, collision tests,
+  culling tests, Lua table lookups, the UI batch fill and particle geometry.
+  Each one checks its answers against the game's before it answers, and switches
+  itself off at the first difference. Installs that never wrote the key get the
+  new defaults. Saving in the launcher writes every key, so a saved profile keeps
+  what it had.
+* **Parallel Particle Fill** builds particle geometry on worker threads for
+  emitters of 32 particles or more. It stays off under Wine and Rosetta.
+* Replacements measured slower than the game's own routine, or that switched
+  themselves off in every session, are off and listed under DIDN'T HELP.
+
+### New
+
+* **Arden WoW** is supported. The launcher and loader start `Arden.exe` and
+  `ArdenWoW.exe`. Its `Extensions.dll` patches a few of the same functions, so
+  the matching replacements stand aside and the log lists them.
+* **D3D9 Render Thread** *(experimental, off by default)* runs the game's
+  Direct3D calls on a thread of its own. It has been run on DXVK.
+* **A/B Test bundle mode** switches every replacement you have on together,
+  20 seconds on and 20 seconds off, so one session measures them as a set.
+  Frames recorded while the game window is in the background are left out.
+* **Camera watch.** When the camera is pulled in, the log says by how much,
+  whether the replacements were on or off, and for a pull-in to the character it
+  re-runs the trace with each replacement standing aside to name the one
+  responsible.
 
 ### Launcher
 
-* **Switches not yet proven in a game have their own tab, NOT PROVEN.** The
-  other tabs list what is known to work. DIDN'T HELP holds what was measured
-  and lost, and DIAGNOSTICS the switches that only measure.
-* **Switching tabs is immediate.** Every click used to rebuild every tab.
-* **The status box says READY, NOT LOADED or MAY NOT LOAD,** with the reason
-  underneath. Opened straight from the zip, the launcher now says to extract
-  the files first.
-* **TRY THE UNPROVEN ONES** turns on every unproven replacement and the
-  profiler, for a session that tests them. Each replacement checks its answers
-  against the game's own and switches itself off at the first difference.
-* **Ask Windows For A Half-Millisecond Timer can be switched off.** While the
-  game runs, Windows applies that timer setting to the whole machine.
-* Search keeps the group headings, so the `[+]` `[!]` symbol legend is gone.
-
-### New, off by default
-
-* **New replacements** for collision, particles, model animation, draw-order
-  sorting, UI layout and sound. They are on the NOT PROVEN tab, and none of
-  them runs unless you tick it.
+* **TRY THE UNPROVEN ONES** is the single button for a testing session, and the
+  three preset buttons each follow one rule and say what they did.
+* **Search shows matches on other tabs,** so a switch on a tab that is not open is
+  no longer reported as missing.
 
 ### Reports
 
-* **The download has a new file, `wow_optimize.sym`.** Next to
-  `wow_optimize.dll` it lets a profile name this tool's own functions. The game
-  runs the same without it; the profile is less precise.
-* **A caught Lua error names the addon it came from,** and a repeated error is
-  no longer written out line after line.
+* **The profile is summed by game subsystem** next to the per-function list.
+* **A frame that has not ended is reported while it runs,** with where the main
+  thread is inside it.
+* **The low 2 GB census names who is fragmenting it.**
 
 ---
 
