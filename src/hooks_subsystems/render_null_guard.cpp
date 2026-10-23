@@ -167,14 +167,30 @@ static void* g_orig4B6550 = nullptr;
 static volatile LONG g_asyncWaitSuppressed = 0;
 static volatile LONG g_asyncReentrantWaitSuppressed = 0;
 static bool g_guard4B6550Active = false;
+static bool g_optHighPlacementClientActive = false;
+
+static inline bool IsValidUserPointer(uintptr_t p) {
+    if (p < 0x10000) return false;
+    if (p < 0x7FFE0000) return true;
+    if (!g_optHighPlacementClientActive) return false;
+    if (p < 0x80010000 || p >= 0xFFFE0000) return false;
+    return true;
+}
 
 __declspec(naked) static void Hooked_4B6550() {
     __asm {
         cmp esi, 0x10000
         jb skip_wait
+        cmp esi, 0x7FFE0000
+        jb check_esi_content
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je skip_wait
+        cmp esi, 0x80010000
+        jb skip_wait
         cmp esi, 0xFFFE0000
         jae skip_wait
 
+    check_esi_content:
         cmp dword ptr [esi], 0xFFFFFFFF
         je skip_wait
 
@@ -184,9 +200,16 @@ __declspec(naked) static void Hooked_4B6550() {
 
         cmp eax, 0x10000
         jb sanitize_and_skip
+        cmp eax, 0x7FFE0000
+        jb check_s_waiting
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je sanitize_and_skip
+        cmp eax, 0x80010000
+        jb sanitize_and_skip
         cmp eax, 0xFFFE0000
         jae sanitize_and_skip
 
+    check_s_waiting:
         // If s_waiting != 0 (at 0x00B4A26C), AsyncFileReadWait is already active!
         // Calling sub_4BA060 will trigger the fatal assertion "AsyncFileReadWait(): s_waiting != FALSE".
         // Skip the blocking wait and return safely.
@@ -200,14 +223,28 @@ __declspec(naked) static void Hooked_4B6550() {
         mov dword ptr [esi + 0x40], 0
         cmp dword ptr [esi + 0x5C], 0x10000
         jb check_gxtex
+        cmp dword ptr [esi + 0x5C], 0x7FFE0000
+        jb check_gxtex
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je zero_atlas
+        cmp dword ptr [esi + 0x5C], 0x80010000
+        jb zero_atlas
         cmp dword ptr [esi + 0x5C], 0xFFFE0000
         jb check_gxtex
+    zero_atlas:
         mov dword ptr [esi + 0x5C], 0
     check_gxtex:
         cmp dword ptr [esi + 0x44], 0x10000
         jb finish_sanitize
+        cmp dword ptr [esi + 0x44], 0x7FFE0000
+        jb finish_sanitize
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je zero_gxtex
+        cmp dword ptr [esi + 0x44], 0x80010000
+        jb zero_gxtex
         cmp dword ptr [esi + 0x44], 0xFFFE0000
         jb finish_sanitize
+    zero_gxtex:
         mov dword ptr [esi + 0x44], 0
     finish_sanitize:
         inc dword ptr [g_asyncWaitSuppressed]
@@ -259,7 +296,7 @@ static volatile LONG g_textureWildSanitized = 0;
 static bool g_guard4B6CB0Active = false;
 
 __declspec(safebuffers) static void* __cdecl Hooked_4B6CB0(void* texture, int wait, void* status) {
-    if (!texture || (uintptr_t)texture < 0x10000 || (uintptr_t)texture >= 0xFFFE0000) {
+    if (!texture || !IsValidUserPointer((uintptr_t)texture)) {
         return nullptr;
     }
 
@@ -273,15 +310,15 @@ __declspec(safebuffers) static void* __cdecl Hooked_4B6CB0(void* texture, int wa
     uintptr_t* pAtlas = (uintptr_t*)((uintptr_t)texture + 0x5C);
 
     bool sanitized = false;
-    if (*pAsync && (*pAsync < 0x10000 || *pAsync >= 0xFFFE0000)) {
+    if (*pAsync && !IsValidUserPointer(*pAsync)) {
         *pAsync = 0;
         sanitized = true;
     }
-    if (*pAtlas && (*pAtlas < 0x10000 || *pAtlas >= 0xFFFE0000)) {
+    if (*pAtlas && !IsValidUserPointer(*pAtlas)) {
         *pAtlas = 0;
         sanitized = true;
     }
-    if (*pGxTex && (*pGxTex < 0x10000 || *pGxTex >= 0xFFFE0000)) {
+    if (*pGxTex && !IsValidUserPointer(*pGxTex)) {
         *pGxTex = 0;
         sanitized = true;
     }
@@ -325,18 +362,18 @@ static volatile LONG g_textureAsyncNullSuppressed = 0;
 static bool g_guard4B7E80Active = false;
 
 __declspec(safebuffers) static int __cdecl Hooked_4B7E80(void* texture) {
-    if (!texture || (uintptr_t)texture < 0x10000 || (uintptr_t)texture >= 0xFFFE0000) {
+    if (!texture || !IsValidUserPointer((uintptr_t)texture)) {
         return 0;
     }
 
     void* asyncObj = *(void**)((char*)texture + 0x40);
-    if (!asyncObj || (uintptr_t)asyncObj < 0x10000 || (uintptr_t)asyncObj >= 0xFFFE0000) {
+    if (!asyncObj || !IsValidUserPointer((uintptr_t)asyncObj)) {
         InterlockedIncrement(&g_textureAsyncNullSuppressed);
         return 0;
     }
 
     void* buffer = *(void**)((char*)asyncObj + 0x04);
-    if (!buffer || (uintptr_t)buffer < 0x10000 || (uintptr_t)buffer >= 0xFFFE0000) {
+    if (!buffer || !IsValidUserPointer((uintptr_t)buffer)) {
         InterlockedIncrement(&g_textureAsyncNullSuppressed);
         return 0;
     }
@@ -376,7 +413,7 @@ static volatile LONG g_fileWaitCorruptedSuppressed = 0;
 static bool g_guard4BA060Active = false;
 
 __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
-    if (!req || (uintptr_t)req < 0x10000 || (uintptr_t)req >= 0xFFFE0000) {
+    if (!req || !IsValidUserPointer((uintptr_t)req)) {
         return 0;
     }
 
@@ -418,9 +455,16 @@ __declspec(naked) static void Hooked_7B5020() {
     __asm {
         cmp ecx, 0x10000
         jb invalid_list
+        cmp ecx, 0x7FFE0000
+        jb valid_list
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je invalid_list
+        cmp ecx, 0x80010000
+        jb invalid_list
         cmp ecx, 0xFFFE0000
         jae invalid_list
 
+    valid_list:
         jmp dword ptr [g_orig7B5020]
 
     invalid_list:
@@ -545,13 +589,44 @@ static inline bool IsValidCodePointer(const void* ptr) {
     if (!ptr) return false;
     uintptr_t fnAddr = (uintptr_t)ptr;
     if (fnAddr < 0x10000 || fnAddr >= 0xFFFE0000) return false;
+    if (!g_optHighPlacementClientActive && fnAddr >= 0x7FFE0000) return false;
 
     // Fast path: wow.exe code section (.text) is always committed executable code:
     if (fnAddr >= 0x00401000 && fnAddr < 0x009DF000) {
         return true;
     }
 
-    // Slow path for external / JIT / DLL code: must be committed with EXECUTE rights:
+    // Fast path: wow_optimize.dll module code:
+    static uintptr_t s_dllBase = 0;
+    static uintptr_t s_dllEnd = 0;
+    if (s_dllBase == 0) {
+        HMODULE hSelf = NULL;
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)&IsValidCodePointer, &hSelf);
+        if (hSelf) {
+            const IMAGE_DOS_HEADER* dos = (const IMAGE_DOS_HEADER*)hSelf;
+            const IMAGE_NT_HEADERS* nt = (const IMAGE_NT_HEADERS*)((const uint8_t*)hSelf + dos->e_lfanew);
+            s_dllBase = (uintptr_t)hSelf;
+            s_dllEnd = s_dllBase + nt->OptionalHeader.SizeOfImage;
+        }
+    }
+    if (fnAddr >= s_dllBase && fnAddr < s_dllEnd) {
+        return true;
+    }
+
+    struct CodeRegionCache {
+        uintptr_t start;
+        uintptr_t end;
+    };
+    static thread_local CodeRegionCache s_codeCache[4] = {};
+    static thread_local size_t s_codeIndex = 0;
+
+    for (size_t i = 0; i < 4; ++i) {
+        if (fnAddr >= s_codeCache[i].start && fnAddr < s_codeCache[i].end) {
+            return true;
+        }
+    }
+
     MEMORY_BASIC_INFORMATION mbi = {};
     if (!VirtualQuery(ptr, &mbi, sizeof(mbi))) {
         return false;
@@ -560,7 +635,13 @@ static inline bool IsValidCodePointer(const void* ptr) {
         return false;
     }
     const DWORD kExecFlags = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
-    return (mbi.Protect & kExecFlags) != 0;
+    if ((mbi.Protect & kExecFlags) == 0) {
+        return false;
+    }
+
+    s_codeCache[s_codeIndex & 3] = { (uintptr_t)mbi.BaseAddress, (uintptr_t)mbi.BaseAddress + mbi.RegionSize };
+    ++s_codeIndex;
+    return true;
 }
 
 static inline bool IsValidReadablePointer(const void* ptr, size_t size) {
@@ -568,10 +649,24 @@ static inline bool IsValidReadablePointer(const void* ptr, size_t size) {
     uintptr_t addr = (uintptr_t)ptr;
     if (addr < 0x10000 || addr >= 0xFFFE0000) return false;
     if (addr + size < addr || addr + size >= 0xFFFE0000) return false;
+    if (!g_optHighPlacementClientActive && (addr + size) > 0x7FFE0000) return false;
 
     // Fast path: wow.exe static data / bss
     if (addr >= 0x00401000 && (addr + size) <= 0x00E00000) {
         return true;
+    }
+
+    struct RegionCache {
+        uintptr_t start;
+        uintptr_t end;
+    };
+    static thread_local RegionCache s_regionCache[4] = {};
+    static thread_local size_t s_cacheIndex = 0;
+
+    for (size_t i = 0; i < 4; ++i) {
+        if (addr >= s_regionCache[i].start && (addr + size) <= s_regionCache[i].end) {
+            return true;
+        }
     }
 
     MEMORY_BASIC_INFORMATION mbi = {};
@@ -587,10 +682,36 @@ static inline bool IsValidReadablePointer(const void* ptr, size_t size) {
     if ((uintptr_t)mbi.BaseAddress + mbi.RegionSize < addr + size) {
         return false;
     }
+
+    s_regionCache[s_cacheIndex & 3] = { (uintptr_t)mbi.BaseAddress, (uintptr_t)mbi.BaseAddress + mbi.RegionSize };
+    ++s_cacheIndex;
     return true;
 }
 
 __declspec(safebuffers) static int __cdecl Hooked_992DA0(int a1, unsigned int a2, unsigned int a3) {
+    // Fast path: MRU glyph rasterizer structure cache
+    static thread_local int s_lastA1 = 0;
+    static thread_local uintptr_t s_lastSizeObj = 0;
+    static thread_local uintptr_t s_lastSlotObj = 0;
+    static thread_local uintptr_t s_lastDriver = 0;
+    static thread_local uintptr_t s_lastTable = 0;
+    static thread_local void* s_lastRenderFn = nullptr;
+
+    if (a1 == s_lastA1 && a1 != 0) {
+        uintptr_t sizeObj = *(uintptr_t*)(a1 + 0x58);
+        uintptr_t slotObj = *(uintptr_t*)(a1 + 0x54);
+        uintptr_t driver  = *(uintptr_t*)(a1 + 0x60);
+        if (sizeObj == s_lastSizeObj && slotObj == s_lastSlotObj && driver == s_lastDriver && driver != 0) {
+            uintptr_t rTable = *(uintptr_t*)(driver + 0x14);
+            if (rTable == s_lastTable && rTable != 0) {
+                void* renderFn = *(void**)(rTable + 0x50);
+                if (renderFn == s_lastRenderFn && renderFn != nullptr) {
+                    return g_orig992DA0(a1, a2, a3);
+                }
+            }
+        }
+    }
+
     if (!IsValidReadablePointer((const void*)a1, 0x64)) {
         return 35;
     }
@@ -655,6 +776,13 @@ __declspec(safebuffers) static int __cdecl Hooked_992DA0(int a1, unsigned int a2
             InterlockedIncrement(&g_nullGlyphRasterizerSuppressed);
             return 35;
         }
+
+        s_lastA1 = a1;
+        s_lastSizeObj = sizeObj;
+        s_lastSlotObj = slotObj;
+        s_lastDriver = driver;
+        s_lastTable = rTable;
+        s_lastRenderFn = renderFn;
     }
 
     return g_orig992DA0(a1, a2, a3);
@@ -700,12 +828,34 @@ static bool g_guard9911A0Active = false;
 
 __declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned int charcode) {
     if (!face) return 0;
+
+    // Fast path: MRU font face cache to avoid querying known valid face structures
+    static thread_local void* s_lastFace = nullptr;
+    static thread_local void* s_lastCharmap = nullptr;
+    static thread_local void* s_lastDriver = nullptr;
+    static thread_local void* s_lastClazz = nullptr;
+    static thread_local void* s_lastGetCharIndex = nullptr;
+
+    uintptr_t pFace = (uintptr_t)face;
+    if (face == s_lastFace) {
+        void* charmap = *(void**)(pFace + 0x5C);
+        void* driver  = *(void**)(pFace + 0x60);
+        if (charmap == s_lastCharmap && driver == s_lastDriver && driver != nullptr) {
+            void* clazz = *(void**)((uintptr_t)driver + 0x14);
+            if (clazz == s_lastClazz && clazz != nullptr) {
+                void* get_char_index = *(void**)((uintptr_t)clazz + 0x54);
+                if (get_char_index == s_lastGetCharIndex && get_char_index != nullptr) {
+                    return g_orig9911A0(face, charcode);
+                }
+            }
+        }
+    }
+
     if (!IsValidReadablePointer(face, 0x64)) {
         InterlockedIncrement(&g_nullGetCharIndexSuppressed);
         return 0;
     }
 
-    uintptr_t pFace = (uintptr_t)face;
     void* charmap = *(void**)(pFace + 0x5C);
     if (!charmap || !IsValidReadablePointer(charmap, 4)) {
         return 0; // standard FT returns 0 if charmap is null
@@ -729,6 +879,12 @@ __declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned in
         return 0;
     }
 
+    s_lastFace = face;
+    s_lastCharmap = charmap;
+    s_lastDriver = driver;
+    s_lastClazz = clazz;
+    s_lastGetCharIndex = get_char_index;
+
     return g_orig9911A0(face, charcode);
 }
 
@@ -738,6 +894,8 @@ bool InstallRenderNullGuard()
         Log("[RenderGuard] DISABLED via configuration - sub_873060, sub_4B6550, sub_4B6CB0, sub_4BA060, sub_4F5980 and sub_992DA0 run unguarded");
         return true;
     }
+
+    g_optHighPlacementClientActive = Config::g_settings.OptHighPlacementClient;
 
     void* target = (void*)0x00873060;
     unsigned char* p = (unsigned char*)target;

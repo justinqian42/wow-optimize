@@ -2557,6 +2557,27 @@ static void TrueSleep(DWORD ms) {
     }
 }
 
+static void SafeOrigSleep(DWORD ms) {
+    if (!orig_Sleep) {
+        TrueSleep(ms);
+        return;
+    }
+
+    // Protect against dangling hooks left behind by external modules (e.g. Byster, overlays)
+    // that unloaded or unhooked dynamically without cleanly unchaining.
+    uintptr_t fnAddr = (uintptr_t)orig_Sleep;
+    if (fnAddr < 0x10000 || fnAddr >= 0x7FFE0000) {
+        TrueSleep(ms);
+        return;
+    }
+
+    __try {
+        orig_Sleep(ms);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        TrueSleep(ms);
+    }
+}
+
 static void WINAPI hooked_Sleep(DWORD ms) {
     if (WOWOPT_FOREIGN_CALLER()) {
         // A module that is neither the client nor this DLL (the Direct3D layer, a driver, an overlay)
@@ -2566,10 +2587,10 @@ static void WINAPI hooked_Sleep(DWORD ms) {
         if (g_mainThreadId != 0 && GetCurrentThreadId() == g_mainThreadId) {
             ++g_mainForeignSleeps;
             SleepTimer foreignTimer((uintptr_t)_ReturnAddress(), ms);
-            orig_Sleep(ms);
+            SafeOrigSleep(ms);
             return;
         }
-        orig_Sleep(ms);
+        SafeOrigSleep(ms);
         return;
     }
     if (g_mainThreadId != 0 && GetCurrentThreadId() == g_mainThreadId) {
@@ -2604,13 +2625,13 @@ static void WINAPI hooked_Sleep(DWORD ms) {
         }
 
         if (ms == 0) {
-            orig_Sleep(0);
+            SafeOrigSleep(0);
             return;
         }
 
         if (Config::g_settings.OptSleepPrecision && ms <= 3) {
             if (IsWine() || IsRosetta() || !LuaOpt::IsInitialized() || LuaOpt::IsLoadingMode() || LuaOpt::IsReloading() || LuaOpt::IsSwapping()) {
-                orig_Sleep(ms);
+                SafeOrigSleep(ms);
                 return;
             }
 
@@ -2633,27 +2654,31 @@ static void WINAPI hooked_Sleep(DWORD ms) {
             double smoothed = FrameBench::SmoothedFrameMs();
             if (smoothed > SPIN_ABORT_FRAME_MS) {
                 ++g_spinSkipped;
-                orig_Sleep(ms);
+                SafeOrigSleep(ms);
                 return;
             }
 
             ++g_spinTaken;
             PreciseSleep((double)ms);
+            // Pass a zero-millisecond tick to chained foreign hooks (Byster, Discord overlay,
+            // RivaTuner, etc.) so their frame watchdogs and pacing heartbeats do not starve and
+            // unload their modules mid-game.
+            SafeOrigSleep(0);
             return;
         }
         // The sleep has to be made while sleepTimer is alive. It used to follow the closing brace of
         // this block, so every sleep that did not take one of the returns above (all of them longer
         // than 3 ms) was timed after the timer was gone and filed as 0.00 ms.
-        orig_Sleep(ms);
+        SafeOrigSleep(ms);
         return;
     } else {
         if (ms == 0) {
-            orig_Sleep(0);
+            SafeOrigSleep(0);
             return;
         }
     }
 
-    orig_Sleep(ms);
+    SafeOrigSleep(ms);
 }
 
 static bool InstallSleepHook() {
