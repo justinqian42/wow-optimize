@@ -226,7 +226,7 @@ endif()
 FetchContent_Declare(
     mimalloc
     GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
-    GIT_TAG        v3.5.3
+    GIT_TAG        v3.6.0
 )
 set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
