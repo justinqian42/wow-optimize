@@ -784,6 +784,7 @@ namespace Config {
         bool OptUIFrameLevelFast = false;
         bool OptAsyncTimeFast = false;
         bool OptUIAnimUpdateFast = false;
+        bool OptGxDeviceTextureFast = false;
     };
 
 

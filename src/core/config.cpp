@@ -304,6 +304,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "UIFrameLevelFast", &Settings::OptUIFrameLevelFast },
     { "System", "AsyncTimeFast", &Settings::OptAsyncTimeFast },
     { "UI_Lua", "UIAnimUpdateFast", &Settings::OptUIAnimUpdateFast },
+    { "Graphics_Sound", "GxDeviceTextureFast", &Settings::OptGxDeviceTextureFast },
 };
 
 
@@ -1004,6 +1005,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptUIFrameLevelFast     = GetPrivateProfileIntA("UI_Lua", "UIFrameLevelFast", 0, iniPath.c_str()) != 0;
         g_settings.OptAsyncTimeFast        = GetPrivateProfileIntA("System", "AsyncTimeFast", 0, iniPath.c_str()) != 0;
         g_settings.OptUIAnimUpdateFast     = GetPrivateProfileIntA("UI_Lua", "UIAnimUpdateFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptGxDeviceTextureFast  = GetPrivateProfileIntA("Graphics_Sound", "GxDeviceTextureFast", 0, iniPath.c_str()) != 0;
     }
 
 }
