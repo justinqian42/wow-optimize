@@ -511,13 +511,8 @@ __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
         return 0;
     }
 
-    // Offset +0x21 is isComplete / m_isProcessed in CAsyncObject
-    if (*((const uint8_t*)req + 0x21) != 0) {
-        if (*(const uint32_t*)0x00B4A204 == 0 && *(uint32_t*)0x00B4A26C != 0) {
-            *(uint32_t*)0x00B4A26C = 0;
-        }
-        return 1;
-    }
+    typedef int (__cdecl* PollHandler_fn)(int, int);
+    const PollHandler_fn PollHandler = (PollHandler_fn)0x004B9B20;
 
     // If s_waiting (0x00B4A26C) is non-zero BUT s_asyncWaitObject (0x00B4A204) is NULL,
     // then s_waiting was leaked by Blizzard's early-return bug at 0x004BA097! Heal it immediately.
@@ -525,20 +520,24 @@ __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
         *(uint32_t*)0x00B4A26C = 0;
     }
 
+    // Offset +0x21 is isComplete / m_isProcessed in CAsyncObject
+    if (*((const uint8_t*)req + 0x21) != 0) {
+        // Even if the I/O marked this request complete (+0x21 != 0), its completion callback
+        // (such as CMapObj's sub_7D8050) may not have been dispatched yet. Callers like sub_7AE1C0
+        // loop on `for (e = mapObj[119]; e; e = mapObj[119]) sub_4BA060(e);` waiting for the
+        // completion callback to unlink e and zero mapObj[119]. Pump completions so the callback
+        // runs and unlinks the request.
+        PollHandler(0, 0);
+        return 1;
+    }
+
     // If s_asyncWaitObject != 0 (genuinely re-entrant wait during another wait's callback):
     if (*(const uint32_t*)0x00B4A26C != 0 && *(const uint32_t*)0x00B4A204 != 0) {
         InterlockedIncrement(&g_fileWaitReentrantSuppressed);
 
-        // We CANNOT simply return 0! Callers like sub_7AE1C0 loop on
-        // `for (e = readList.Head(); e; e = readList.Head()) sub_4BA060(e);`
-        // If we return without completing req, the caller spins in an infinite loop!
-        // Instead, pump sub_4B9B20 directly to process completed items:
-        typedef int (__cdecl* PollHandler_fn)();
-        const PollHandler_fn PollHandler = (PollHandler_fn)0x004B9B20;
-
         uint32_t spinCount = 0;
         while (*((const uint8_t*)req + 0x21) == 0 && spinCount < 10000) {
-            PollHandler();
+            PollHandler(0, 0);
             if (*((const uint8_t*)req + 0x21) != 0) {
                 break;
             }
@@ -546,6 +545,8 @@ __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
             ++spinCount;
         }
 
+        // Run poll handler once more to ensure completion callback was dispatched
+        PollHandler(0, 0);
         return *((const uint8_t*)req + 0x21) != 0 ? 1 : 0;
     }
 
@@ -557,6 +558,9 @@ __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
     if (*(const uint32_t*)0x00B4A204 == 0 && *(uint32_t*)0x00B4A26C != 0) {
         *(uint32_t*)0x00B4A26C = 0;
     }
+
+    // Ensure any completed callbacks are pumped so owner lists are updated immediately
+    PollHandler(0, 0);
 
     return result;
 }
