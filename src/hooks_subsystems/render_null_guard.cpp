@@ -982,10 +982,79 @@ __declspec(naked) static void Hooked_6848A0() {
     }
 }
 
+// ----------------------------------------------------------------------------
+// DeviceClearTarget guard (sub_683320 @ 0x00683320)
+//
+// In stock 3.3.5a build 12340:
+// sub_683320 is a __thiscall method on CGxDevice (this in ECX, retn 4):
+//     void __thiscall sub_683320(CGxDevice* this, void* target)
+//
+// On function entry:
+//     0x00683320: push ebp
+//     0x00683321: mov ebp, esp
+//     0x00683323: mov eax, [ebp+8]   ; target
+//     0x00683326: xor ecx, ecx
+//     0x00683328: mov [eax+34h], ecx ; <-- CRASH if target is null!
+//     0x0068332B: mov [eax+30h], ecx
+//     0x0068332E: pop ebp
+//     0x0068332F: retn 4
+//
+// Root Cause:
+// During /reload or UI frame teardown, sub_4EFCA0 iterates and detaches textures
+// from their render targets. It queries the surface via TextureGetGxTex:
+//     sub_4B6CB0(texture, 1, 0)
+// If the texture was already unloaded or unbacked, sub_4B6CB0 returns null (0).
+// sub_4EFCA0 passes this 0 without checking to sub_6813F0, which calls
+// sub_683320(0). sub_683320 unconditionally writes to [0 + 34h], crashing with
+// ACCESS_VIOLATION (0xC0000005) at 0x00683328 writing to 0x00000034.
+// This crash during /reload aborts UI reinitialization, causing broken action bar
+// panels ("умирают панели") and getting stuck on a black loading screen.
+//
+// Guard:
+// Naked ASM hook on sub_683320 that validates target ([esp+4]). If target is null
+// or outside valid address space, increment g_nullClearTargetSuppressed, set eax = 0,
+// and return immediately with ret 4.
+// Zero /GS cookies, zero SEH frames.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget683320 = 0x00683320;
+static const unsigned char kExpectedPrologue683320[8] = {
+    0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x33, 0xC9
+};
+
+static void* g_orig683320 = nullptr;
+static volatile LONG g_nullClearTargetSuppressed = 0;
+static bool g_guard683320Active = false;
+
+__declspec(naked) static void Hooked_683320() {
+    __asm {
+        // [esp+4] = target
+        mov eax, [esp+4]
+        cmp eax, 0x10000
+        jb invalid_target
+        cmp eax, 0x7FFE0000
+        jb valid_target
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je invalid_target
+        cmp eax, 0x80010000
+        jb invalid_target
+        cmp eax, 0xFFFE0000
+        jae invalid_target
+
+    valid_target:
+        jmp dword ptr [g_orig683320]
+
+    invalid_target:
+        inc dword ptr [g_nullClearTargetSuppressed]
+        xor eax, eax
+        ret 4
+    }
+}
+
 bool InstallRenderNullGuard()
 {
     if (!Config::g_settings.OptRenderNullGuard) {
-        Log("[RenderGuard] DISABLED via configuration - sub_873060, sub_4B6550, sub_4B6CB0, sub_4BA060, sub_4F5980, sub_6848A0 and sub_992DA0 run unguarded");
+        Log("[RenderGuard] DISABLED via configuration - sub_873060, sub_4B6550, sub_4B6CB0, sub_4BA060, sub_4F5980, sub_6848A0, sub_683320 and sub_992DA0 run unguarded");
         return true;
     }
 
@@ -1152,6 +1221,21 @@ bool InstallRenderNullGuard()
         }
     }
 
+    void* target683320 = (void*)kTarget683320;
+    if (WowOpt_ClientPatchAllowed(target683320)) {
+        if (memcmp(target683320, kExpectedPrologue683320, sizeof(kExpectedPrologue683320)) == 0) {
+            if (MH_CreateHook(target683320, (void*)Hooked_683320, (void**)&g_orig683320) == MH_OK &&
+                MH_EnableHook(target683320) == MH_OK) {
+                g_guard683320Active = true;
+                Log("[RenderGuard] DeviceClearTarget guard ACTIVE on sub_683320 @ 0x%08X", (unsigned)kTarget683320);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget683320);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget683320);
+        }
+    }
+
     return true;
 }
 
@@ -1233,6 +1317,11 @@ void RenderNullGuard_LogStats()
     if (g_nullViewportTargetSuppressed > 0) {
         Log("[RenderGuard] %ld invalid DeviceSetViewport calls SUPPRESSED on sub_6848A0 (Null target crash at 0x006848A9 prevented)",
             (long)g_nullViewportTargetSuppressed);
+    }
+
+    if (g_nullClearTargetSuppressed > 0) {
+        Log("[RenderGuard] %ld invalid DeviceClearTarget calls SUPPRESSED on sub_683320 (Null target crash at 0x00683328 prevented)",
+            (long)g_nullClearTargetSuppressed);
     }
 }
 
