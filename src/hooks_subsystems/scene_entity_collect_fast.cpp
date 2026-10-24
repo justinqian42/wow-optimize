@@ -83,38 +83,46 @@ __forceinline void LinkIfUnlinked(uintptr_t node) {
 
 __declspec(safebuffers) __forceinline
 void Collect(const uint32_t* a1, uint32_t a2, const volatile uint32_t* frame) {
+    int mode_with_guid = -1;
+    if (a2 & 0x00100000)      mode_with_guid = 3;
+    else if (a2 & 0x00600000) mode_with_guid = 0;
+
+    int mode_no_guid = -1;
+    if (a2 & 1) {
+        mode_no_guid = 3;
+    } else if (a2 & 0x0E) {
+        mode_no_guid = (a2 & 8) ? 2 : (int)((a2 >> 24) & 1);
+    }
+
+    const uint32_t currentFrame = *frame;
+    const uint32_t linkStride = a1[0] + 4;
     uintptr_t curr = a1[2];
+
     while (curr != 0 && (curr & 1) == 0) {
-        _mm_prefetch((const char*)(uintptr_t)At<uint32_t>(curr, a1[0] + 4), _MM_HINT_T0);
+        _mm_prefetch((const char*)(uintptr_t)At<uint32_t>(curr, linkStride), _MM_HINT_T0);
 
         const uintptr_t entity = At<uint32_t>(curr, 4);
         do {
             if ((a2 & 0x01000000) && At<uint8_t>(entity, 0x25) != 0) break;
             const uint32_t flags = At<uint32_t>(entity, 0x0C);
             if ((flags & 0x100) || (int8_t)(uint8_t)flags >= 0) break;
-            if (At<uint32_t>(entity, 0x2C) == *frame) break;
+            if (At<uint32_t>(entity, 0x2C) == currentFrame) break;
             const uintptr_t node = At<uint32_t>(entity, 0x34);
             if (node == 0) break;
 
-            int mode = -1;
-            if ((At<uint32_t>(entity, 0xB8) | At<uint32_t>(entity, 0xBC)) != 0) {
-                if (a2 & 0x00100000)      mode = 3;
-                else if (a2 & 0x00600000) mode = 0;
-            } else if (a2 & 1) {
-                mode = 3;
-            } else if (a2 & 0x0E) {
-                mode = (a2 & 8) ? 2 : (int)((a2 >> 24) & 1);
-            }
+            const int mode = ((At<uint32_t>(entity, 0xB8) | At<uint32_t>(entity, 0xBC)) != 0)
+                ? mode_with_guid : mode_no_guid;
+
             if (mode >= 0 && (At<uint8_t>(node, 0x10) & 1)) {
                 LinkIfUnlinked(node);
                 At<uint32_t>(node, 0x2D4) = (uint32_t)mode;
                 At<uint32_t>(node, 0x2E0) = (uint32_t)entity;
                 At<uint32_t>(node, 0x2E4) = 0;
             }
-            At<uint32_t>(entity, 0x2C) = *frame;                     // 0x007A2938
+            At<uint32_t>(entity, 0x2C) = currentFrame;                     // 0x007A2938
         } while (false);
 
-        curr = At<uint32_t>(curr, a1[0] + 4);                        // 0x007A2943
+        curr = At<uint32_t>(curr, linkStride);                        // 0x007A2943
     }
 }
 
