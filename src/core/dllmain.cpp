@@ -2376,10 +2376,13 @@ static void MainThreadPump() {
     UpdateMainThreadActivity();
 
     // Never pump frame-level logic, Lua ticks, or maintenance while the main thread
-    // is blocked inside AsyncFileReadWait (s_waiting != 0 at 0x00B4A26C). The engine
-    // is suspended waiting on an unresolved file read and is not at a frame boundary.
-    if (*(const uint32_t*)0x00B4A26C != 0) {
+    // is actively blocked inside AsyncFileReadWait's polling loop (s_asyncWaitObject != 0 at 0x00B4A204).
+    // If s_asyncWaitObject is null, no wait is polling; heal any leaked s_waiting flag.
+    if (*(const uint32_t*)0x00B4A204 != 0) {
         return;
+    }
+    if (*(const uint32_t*)0x00B4A26C != 0) {
+        *(uint32_t*)0x00B4A26C = 0;
     }
 
 #if HAVE_SERVER_SYNC_COMPAT
@@ -2619,7 +2622,7 @@ static void WINAPI hooked_Sleep(DWORD ms) {
         // (such as Byster's hook on Sleep) causes them to treat the file wait as a
         // completed frame and inspect uninitialized unit/world structures, triggering
         // null-pointer crashes in the overlay. Direct these internal waits to TrueSleep.
-        if (asker == 0x004BAEB6 || *(const uint32_t*)0x00B4A26C != 0) {
+        if (asker == 0x004BAEB6 || *(const uint32_t*)0x00B4A204 != 0) {
             TrueSleep(ms);
             return;
         }

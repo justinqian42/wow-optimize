@@ -210,13 +210,16 @@ __declspec(naked) static void Hooked_4B6550() {
         jae sanitize_and_skip
 
     check_s_waiting:
-        // If s_waiting != 0 (at 0x00B4A26C), AsyncFileReadWait is already active!
-        // Calling sub_4BA060 will trigger the fatal assertion "AsyncFileReadWait(): s_waiting != FALSE".
-        // Skip the blocking wait and return safely.
+        // Only skip if an active wait is ACTUALLY in its polling loop (s_asyncWaitObject at 0x00B4A204 != 0)
+        // AND s_waiting != 0. If s_asyncWaitObject is null, no wait is polling!
+        mov edx, 0x00B4A204
+        cmp dword ptr [edx], 0
+        jz proceed_to_orig
         mov edx, 0x00B4A26C
         cmp dword ptr [edx], 0
         jnz reentrant_skip
 
+    proceed_to_orig:
         jmp dword ptr [g_orig4B6550]
 
     sanitize_and_skip:
@@ -417,17 +420,54 @@ __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
         return 0;
     }
 
-    // Offset +0x21 is isComplete in the AsyncObject
+    // Offset +0x21 is isComplete / m_isProcessed in CAsyncObject
     if (*((const uint8_t*)req + 0x21) != 0) {
+        if (*(const uint32_t*)0x00B4A204 == 0 && *(uint32_t*)0x00B4A26C != 0) {
+            *(uint32_t*)0x00B4A26C = 0;
+        }
         return 1;
     }
 
-    if (*(const uint32_t*)0x00B4A26C != 0) {
+    // If s_waiting (0x00B4A26C) is non-zero BUT s_asyncWaitObject (0x00B4A204) is NULL,
+    // then s_waiting was leaked by Blizzard's early-return bug at 0x004BA097! Heal it immediately.
+    if (*(const uint32_t*)0x00B4A204 == 0 && *(uint32_t*)0x00B4A26C != 0) {
+        *(uint32_t*)0x00B4A26C = 0;
+    }
+
+    // If s_asyncWaitObject != 0 (genuinely re-entrant wait during another wait's callback):
+    if (*(const uint32_t*)0x00B4A26C != 0 && *(const uint32_t*)0x00B4A204 != 0) {
         InterlockedIncrement(&g_fileWaitReentrantSuppressed);
+
+        // We CANNOT simply return 0! Callers like sub_7AE1C0 loop on
+        // `for (e = readList.Head(); e; e = readList.Head()) sub_4BA060(e);`
+        // If we return without completing req, the caller spins in an infinite loop!
+        // Instead, pump sub_4B9B20 directly to process completed items:
+        typedef int (__cdecl* PollHandler_fn)();
+        const PollHandler_fn PollHandler = (PollHandler_fn)0x004B9B20;
+
+        uint32_t spinCount = 0;
+        while (*((const uint8_t*)req + 0x21) == 0 && spinCount < 10000) {
+            PollHandler();
+            if (*((const uint8_t*)req + 0x21) != 0) {
+                break;
+            }
+            Sleep(1);
+            ++spinCount;
+        }
+
         return *((const uint8_t*)req + 0x21) != 0 ? 1 : 0;
     }
 
-    return g_orig4BA060(req);
+    // Normal path: not re-entrant. Run original function.
+    int result = g_orig4BA060(req);
+
+    // On exit from client sub_4BA060:
+    // If client exited through 0x004BA09D without decrementing s_waiting, heal it!
+    if (*(const uint32_t*)0x00B4A204 == 0 && *(uint32_t*)0x00B4A26C != 0) {
+        *(uint32_t*)0x00B4A26C = 0;
+    }
+
+    return result;
 }
 
 // ----------------------------------------------------------------------------
