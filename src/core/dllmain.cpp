@@ -157,6 +157,7 @@
 #include "simd_math/spline_seg_length_fast.h"
 #include "simd_math/map_obj_query_fast.h"
 #include "runtime_vm/lua_table_traverse_fast.h"
+#include "runtime_vm/lua_gc_sweeplist_fast.h"
 
 #include "world_vis_traverse_sse2.h"
 #include "ui_strata_opt.h"
@@ -6220,6 +6221,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("SplineSegLengthFast::LogStats", SplineSegLengthFast::LogStats());
     STAT_TIME("MapObjQueryFast::LogStats", MapObjQueryFast::LogStats());
     STAT_TIME("LuaTableTraverseFast::LogStats", LuaTableTraverseFast::LogStats());
+    STAT_TIME("LuaGCSweeplistFast::LogStats", LuaGCSweeplistFast::LogStats());
 
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
@@ -9006,6 +9008,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     SplineSegLengthFast::Init();
     MapObjQueryFast::Init();
     LuaTableTraverseFast::Init();
+    LuaGCSweeplistFast::Init();
 
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
@@ -12065,6 +12068,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             SplineSegLengthFast::Shutdown();
             MapObjQueryFast::Shutdown();
             LuaTableTraverseFast::Shutdown();
+            LuaGCSweeplistFast::Shutdown();
 
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

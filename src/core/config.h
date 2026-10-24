@@ -780,6 +780,7 @@ namespace Config {
         bool OptSplineSegLengthFast = false;
         bool OptMapObjQueryFast = false;
         bool OptLuaTableTraverseFast = false;
+        bool OptLuaGCSweeplistFast = false;
     };
 
 
