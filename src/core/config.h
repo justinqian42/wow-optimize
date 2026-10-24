@@ -783,6 +783,7 @@ namespace Config {
         bool OptLuaGCSweeplistFast = false;
         bool OptUIFrameLevelFast = false;
         bool OptAsyncTimeFast = false;
+        bool OptUIAnimUpdateFast = false;
     };
 
 

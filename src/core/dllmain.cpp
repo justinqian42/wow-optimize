@@ -160,6 +160,7 @@
 #include "runtime_vm/lua_gc_sweeplist_fast.h"
 #include "hooks_subsystems/ui_frame_level_fast.h"
 #include "hooks_subsystems/async_time_fast.h"
+#include "hooks_subsystems/ui_anim_update_fast.h"
 
 #include "world_vis_traverse_sse2.h"
 #include "ui_strata_opt.h"
@@ -6226,6 +6227,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("LuaGCSweeplistFast::LogStats", LuaGCSweeplistFast::LogStats());
     STAT_TIME("UIFrameLevelFast::LogStats", UIFrameLevelFast::LogStats());
     STAT_TIME("AsyncTimeFast::LogStats", AsyncTimeFast::LogStats());
+    STAT_TIME("UIAnimUpdateFast::LogStats", UIAnimUpdateFast::LogStats());
 
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
@@ -9015,6 +9017,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     LuaGCSweeplistFast::Init();
     UIFrameLevelFast::Init();
     AsyncTimeFast::Init();
+    UIAnimUpdateFast::Init();
 
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
@@ -12077,6 +12080,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             LuaGCSweeplistFast::Shutdown();
             UIFrameLevelFast::Shutdown();
             AsyncTimeFast::Shutdown();
+            UIAnimUpdateFast::Shutdown();
 
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

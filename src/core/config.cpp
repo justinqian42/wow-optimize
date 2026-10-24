@@ -303,6 +303,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "LuaGCSweeplistFast", &Settings::OptLuaGCSweeplistFast },
     { "UI_Lua", "UIFrameLevelFast", &Settings::OptUIFrameLevelFast },
     { "System", "AsyncTimeFast", &Settings::OptAsyncTimeFast },
+    { "UI_Lua", "UIAnimUpdateFast", &Settings::OptUIAnimUpdateFast },
 };
 
 
@@ -1002,6 +1003,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptLuaGCSweeplistFast   = GetPrivateProfileIntA("UI_Lua", "LuaGCSweeplistFast", 0, iniPath.c_str()) != 0;
         g_settings.OptUIFrameLevelFast     = GetPrivateProfileIntA("UI_Lua", "UIFrameLevelFast", 0, iniPath.c_str()) != 0;
         g_settings.OptAsyncTimeFast        = GetPrivateProfileIntA("System", "AsyncTimeFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIAnimUpdateFast     = GetPrivateProfileIntA("UI_Lua", "UIAnimUpdateFast", 0, iniPath.c_str()) != 0;
     }
 
 }
