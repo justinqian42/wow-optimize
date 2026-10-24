@@ -85,7 +85,7 @@ constexpr uintptr_t kSiteWorkerAlt = 0x0081CECF;
 constexpr uintptr_t kSiteWorker    = 0x0081CEFA;
 
 constexpr int  kMaxRoots      = 4096;
-constexpr int  kMaxWorkers    = 3;
+constexpr int  kMaxWorkers    = 15;
 constexpr int  kMinParallel   = 8;      // fewer roots than this run on the main thread alone
 constexpr long kSerialPasses  = 300;    // the client's own way first, so lazy statics are set
 constexpr unsigned kProbeEvery = 16;    // once engaged, one pass in this many is the client's way
@@ -108,9 +108,14 @@ struct Root {
     int   alt;
 };
 
+struct WorkerRange {
+    int begin;
+    int end;
+};
+
 Root          g_roots[kMaxRoots];
+WorkerRange   g_ranges[kMaxWorkers];
 volatile LONG g_count = 0;
-volatile LONG g_next = 0;
 volatile LONG g_active = 0;
 volatile LONG g_deferring = 0;
 DWORD         g_deferTid = 0;
@@ -153,23 +158,12 @@ inline bool OnDeferringThread() { return __readfsdword(0x24) == g_deferTid; }
 
 inline LONGLONG Now() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
 
-void RunOne(const Root& r) {
-    const Animate_fn fn = (Animate_fn)(r.alt ? kAnimateAlt : kAnimate);
-    __try {
+// Runs a contiguous slice of roots without atomic contention or per-model SEH overhead.
+void RunSlice(int begin, int end) {
+    for (int i = begin; i < end; ++i) {
+        const Root& r = g_roots[i];
+        const Animate_fn fn = (Animate_fn)(r.alt ? kAnimateAlt : kAnimate);
         fn(r.model, nullptr, r.root, r.ones, r.zeros, r.f1, r.f2);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        g_faultModel = (uintptr_t)r.model;
-        InterlockedIncrement(&g_faults);
-        InterlockedExchange(&g_retired, 1);
-    }
-}
-
-void RunItems() {
-    const LONG n = g_count;
-    for (;;) {
-        const LONG i = InterlockedIncrement(&g_next) - 1;
-        if (i >= n) break;
-        RunOne(g_roots[i]);
     }
 }
 
@@ -182,7 +176,12 @@ DWORD WINAPI WorkerMain(LPVOID p) {
         unsigned short cw = g_fpuCw;
         __asm fldcw cw
         _mm_setcsr(g_mxcsr);
-        RunItems();
+        __try {
+            RunSlice(g_ranges[idx].begin, g_ranges[idx].end);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            InterlockedIncrement(&g_faults);
+            InterlockedExchange(&g_retired, 1);
+        }
         InterlockedDecrement(&g_active);
     }
 }
@@ -292,17 +291,36 @@ DWORD __fastcall Site_Wait(void* mgr, void* edx) {
     }
     g_deferring = 0;
     const LONG n = g_count;
-    g_next = 0;
     bool parallel = false;
     if (n >= kMinParallel && g_workers > 0) {
         unsigned short cw;
         __asm fnstcw cw
         g_fpuCw = cw;
         g_mxcsr = _mm_getcsr();
-        const int w = g_workers;
-        g_active = w;
-        for (int i = 0; i < w; ++i) SetEvent(g_wake[i]);
-        RunItems();
+
+        // Contiguous range partition across workers and main thread.
+        // Cap total threads at n so no thread gets an empty range.
+        int totalThreads = g_workers + 1;
+        if (totalThreads > (int)n) totalThreads = (int)n;
+        const int workersToUse = totalThreads - 1;
+
+        const int base = (int)n / totalThreads;
+        const int rem = (int)n % totalThreads;
+        int cur = 0;
+        for (int i = 0; i < workersToUse; ++i) {
+            const int count = base + (i < rem ? 1 : 0);
+            g_ranges[i].begin = cur;
+            g_ranges[i].end = cur + count;
+            cur += count;
+        }
+        const int mainBegin = cur;
+        const int mainEnd = (int)n;
+
+        g_active = workersToUse;
+        for (int i = 0; i < workersToUse; ++i) SetEvent(g_wake[i]);
+
+        RunSlice(mainBegin, mainEnd);
+
         unsigned spins = 0;
         while (g_active > 0) {
             if (++spins < 4000) YieldProcessor(); else SwitchToThread();
@@ -310,7 +328,7 @@ DWORD __fastcall Site_Wait(void* mgr, void* edx) {
         ++g_parallelPasses;
         parallel = true;
     } else {
-        RunItems();
+        RunSlice(0, (int)n);
         ++g_soloPasses;
     }
     g_rootsRun += (uint64_t)n;
@@ -384,7 +402,7 @@ void Init() {
     }
     SYSTEM_INFO si;
     GetSystemInfo(&si);
-    int want = (int)si.dwNumberOfProcessors - 1;
+    int want = (int)si.dwNumberOfProcessors > 2 ? (int)si.dwNumberOfProcessors - 2 : 1;
     if (want > kMaxWorkers) want = kMaxWorkers;
     if (want < 1) {
         Log("[M2ParallelRoots] NOT active: one logical CPU, so there is no second thread to give the work to.");
