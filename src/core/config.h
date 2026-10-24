@@ -787,6 +787,7 @@ namespace Config {
         bool OptGxDeviceTextureFast = false;
         bool OptUIRenderCoordFast = false;
         bool OptGxTextureWrapFast = false;
+        bool OptUIAnchorCheckFast = false;
     };
 
 
