@@ -78,10 +78,10 @@ constexpr uintptr_t kPixelCopy  = 0x00C5EFE8;
 constexpr uintptr_t kPixelLow   = 0x00C5FFEC;
 constexpr uintptr_t kPixelHigh  = 0x00C5FFE8;
 
-// push ebp / mov ebp,esp / mov eax,[ebp+8] / mov edx,[ebp+10h] / push ebx /
+// push ebp / mov ebp,esp / mov eax,[ebp+0Ch] / mov edx,[ebp+10h] / push ebx /
 // mov ecx,eax / push esi / shl ecx,4
 const unsigned char kPrologue[16] = {
-    0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x8B, 0x55,
+    0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x0C, 0x8B, 0x55,
     0x14, 0x53, 0x8B, 0xC8, 0x56, 0xC1, 0xE1, 0x04
 };
 
