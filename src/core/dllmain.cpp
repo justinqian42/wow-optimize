@@ -133,6 +133,7 @@
 #include "parallel_particles.h"
 #include "m2_parallel_roots.h"
 #include "m2_parallel_children.h"
+#include "nameplate_parallel.h"
 #include "shader_const_dedup_sse2.h"
 #include "batch_colour_convert.h"
 #include "ribbon_edge_loop.h"
@@ -6183,6 +6184,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("ParallelParticles::LogStats", ParallelParticles::LogStats());
     STAT_TIME("M2ParallelRoots::LogStats", M2ParallelRoots::LogStats());
     STAT_TIME("M2ParallelChildren::LogStats", M2ParallelChildren::LogStats());
+    STAT_TIME("NameplateParallel::LogStats", NameplateParallel::LogStats());
     STAT_TIME("ParticleFillFast::LogStats", ParticleFillFast::LogStats());
     STAT_TIME("RibbonEdgeLoop::LogStats", RibbonEdgeLoop::LogStats());
     STAT_TIME("BoneTrackPrefetch::LogStats", BoneTrackPrefetch::LogStats());
@@ -9012,6 +9014,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     ParallelParticles::Init();
     M2ParallelRoots::Init();
     M2ParallelChildren::Init();
+    NameplateParallel::Init();
     ParticleFillFast::Init();
     RibbonEdgeLoop::Init();
     BoneTrackPrefetch::Init();
