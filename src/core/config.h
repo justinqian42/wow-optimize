@@ -781,6 +781,7 @@ namespace Config {
         bool OptMapObjQueryFast = false;
         bool OptLuaTableTraverseFast = false;
         bool OptLuaGCSweeplistFast = false;
+        bool OptUIFrameLevelFast = false;
     };
 
 

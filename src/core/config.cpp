@@ -301,6 +301,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "MapObjQueryFast", &Settings::OptMapObjQueryFast },
     { "UI_Lua", "LuaTableTraverseFast", &Settings::OptLuaTableTraverseFast },
     { "UI_Lua", "LuaGCSweeplistFast", &Settings::OptLuaGCSweeplistFast },
+    { "UI_Lua", "UIFrameLevelFast", &Settings::OptUIFrameLevelFast },
 };
 
 
@@ -998,6 +999,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptMapObjQueryFast      = GetPrivateProfileIntA("Graphics_Sound", "MapObjQueryFast", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaTableTraverseFast = GetPrivateProfileIntA("UI_Lua", "LuaTableTraverseFast", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaGCSweeplistFast   = GetPrivateProfileIntA("UI_Lua", "LuaGCSweeplistFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIFrameLevelFast     = GetPrivateProfileIntA("UI_Lua", "UIFrameLevelFast", 0, iniPath.c_str()) != 0;
     }
 
 }
