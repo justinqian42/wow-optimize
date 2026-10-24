@@ -782,6 +782,7 @@ namespace Config {
         bool OptLuaTableTraverseFast = false;
         bool OptLuaGCSweeplistFast = false;
         bool OptUIFrameLevelFast = false;
+        bool OptAsyncTimeFast = false;
     };
 
 
