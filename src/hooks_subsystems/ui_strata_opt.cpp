@@ -133,43 +133,55 @@ int __fastcall Hook_SimpleFrame_OnUpdate(void* this_ptr, void* /*edx*/, float el
         }
     }
 
-    // 3. vtable[10] on the children. The list head and link offset are read where
-    // the client reads them, after the calls above have had their chance to change them.
-    {
-        uintptr_t child = *(const uintptr_t*)(frame + 0x214);
-        if (child & 1) child = 0;
-        while (child && !(child & 1)) {
-            const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)child + 0x28);
-            if (fn != kBaseDirtyUpdate || (*(const uint8_t*)(child + 0xBF) & 2)) {
-                ((Vtable10Fn)fn)((void*)child);
-            }
-            child = *(const uintptr_t*)(*(const uint32_t*)(frame + 0x20C) + child + 4);
-        }
-    }
-
-    // 4. vtable[11] on the frame
     int result = 0;
-    {
-        const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)frame + 0x2C);
-        if (fn != kBaseAnimUpdate || *(const uintptr_t*)(frame + 0x98)) {
-            result = ((Vtable11Fn)fn)((void*)frame, elapsed);
-            ++g_framesWithAnim;
-        } else {
-            anySkipped = true;
-        }
-    }
+    const uintptr_t frameAnimGroups = *(const uintptr_t*)(frame + 0x98);
 
-    // 5. vtable[11] on the children
-    {
-        uintptr_t child = *(const uintptr_t*)(frame + 0x214);
-        if (child & 1) child = 0;
-        while (child && !(child & 1)) {
-            const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)child + 0x2C);
-            if (fn != kBaseAnimUpdate || *(const uintptr_t*)(child + 0x98)) {
-                result = ((Vtable11Fn)fn)((void*)child, elapsed);
+    if (frameAnimGroups) {
+        // Frame has anim groups: keep two distinct passes around frame's OnAnimUpdate
+        uintptr_t region = *(const uintptr_t*)(frame + 0x214);
+        if (region & 1) region = 0;
+        const uint32_t linkOffset = *(const uint32_t*)(frame + 0x20C);
+
+        while (region && !(region & 1)) {
+            if (*(const uint8_t*)(region + 0xCC) & 0x40) {
+                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x28);
+                ((Vtable10Fn)fn)((void*)region);
             }
-            child = *(const uintptr_t*)(*(const uint32_t*)(frame + 0x20C) + child + 4);
+            region = *(const uintptr_t*)(linkOffset + region + 4);
         }
+
+        const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)frame + 0x2C);
+        result = ((Vtable11Fn)fn)((void*)frame, elapsed);
+        ++g_framesWithAnim;
+
+        region = *(const uintptr_t*)(frame + 0x214);
+        if (region & 1) region = 0;
+        while (region && !(region & 1)) {
+            if (*(const uintptr_t*)(region + 0x98)) {
+                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x2C);
+                result = ((Vtable11Fn)fn)((void*)region, elapsed);
+            }
+            region = *(const uintptr_t*)(linkOffset + region + 4);
+        }
+    } else {
+        // Frame has NO anim groups (99.9% of frames):
+        // Coalesce into a single pass through m_regions, skipping idle regions entirely
+        uintptr_t region = *(const uintptr_t*)(frame + 0x214);
+        if (region & 1) region = 0;
+        const uint32_t linkOffset = *(const uint32_t*)(frame + 0x20C);
+
+        while (region && !(region & 1)) {
+            if (*(const uint8_t*)(region + 0xCC) & 0x40) {
+                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x28);
+                ((Vtable10Fn)fn)((void*)region);
+            }
+            if (*(const uintptr_t*)(region + 0x98)) {
+                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x2C);
+                result = ((Vtable11Fn)fn)((void*)region, elapsed);
+            }
+            region = *(const uintptr_t*)(linkOffset + region + 4);
+        }
+        anySkipped = true;
     }
 
     if (!scriptHandler && anySkipped) {
