@@ -385,6 +385,97 @@ __declspec(safebuffers) static int __cdecl Hooked_4B7E80(void* texture) {
 }
 
 // ----------------------------------------------------------------------------
+// CGxDeviceD3d::ITexCreate guard (sub_6A2C00 @ 0x006A2C00)
+//
+// In stock 3.3.5a build 12340, CGxDeviceD3d::ITexCreate indexes s_GxTexFormatToUse
+// (dword_AD8EF0) with texId->m_format (offset +0x24):
+//     0x006A2C26: mov ecx, [esi+24h]
+//     0x006A2C29: mov eax, dword_AD8EF0[ecx*4]
+//
+// s_GxTexFormatToUse has exactly 13 entries [0..12]. If texId is not a valid
+// pointer (e.g. an IEEE-754 float coordinate leaked during UI batch rendering
+// or modified by third-party DLLs like AwesomeWotlkLib.dll), or if m_format >= 13,
+// the client calculates an out-of-bounds address (e.g. 0xB8E298C4) and crashes
+// with ERROR #132 (ACCESS_VIOLATION).
+//
+// Guard validates this_device, validates texId as a valid user-space pointer,
+// checks for 0xFFFFFFFF freed marker, and verifies m_format < 13.
+// If any check fails, increments g_texCreateWildSanitized and safely returns 0.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget6A2C00 = 0x006A2C00;
+static const unsigned char kExpectedPrologue6A2C00[8] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x53, 0x56
+};
+
+typedef int (__fastcall* ITexCreate_fn)(void* this_device, void* dummy_edx, void* texId);
+static ITexCreate_fn g_orig6A2C00 = nullptr;
+static volatile LONG g_texCreateWildSanitized = 0;
+static bool g_guard6A2C00Active = false;
+
+__declspec(safebuffers) static int __fastcall Hooked_6A2C00(void* this_device, void* dummy_edx, void* texId) {
+    if (!this_device || !IsValidUserPointer((uintptr_t)this_device)) {
+        return 0;
+    }
+    if (!texId || !IsValidUserPointer((uintptr_t)texId)) {
+        InterlockedIncrement(&g_texCreateWildSanitized);
+        return 0;
+    }
+    if (*(const uintptr_t*)texId == 0xFFFFFFFF) {
+        InterlockedIncrement(&g_texCreateWildSanitized);
+        return 0;
+    }
+    uint32_t format = *(const uint32_t*)((uintptr_t)texId + 0x24);
+    if (format >= 13) {
+        InterlockedIncrement(&g_texCreateWildSanitized);
+        return 0;
+    }
+    return g_orig6A2C00(this_device, dummy_edx, texId);
+}
+
+// ----------------------------------------------------------------------------
+// CGxDeviceD3d::ITexUpdate guard (sub_6A31E0 @ 0x006A31E0)
+//
+// In stock 3.3.5a build 12340, CGxDeviceD3d::ITexUpdate dereferences texId at
+// offsets +91 (+0x5B) and +56 (+0x38) before invoking ITexCreate:
+//     0x006A3206: cmp byte ptr [esi+5Bh], 0
+// If texId is not a valid user pointer or points to freed/float garbage,
+// accessing offsets +0x5B or +0x38 faults immediately.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget6A31E0 = 0x006A31E0;
+static const unsigned char kExpectedPrologue6A31E0[16] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x24, 0x53, 0x33,
+    0xDB, 0x39, 0x99, 0x58, 0x0F, 0x00, 0x00, 0x89
+};
+
+typedef BOOL (__fastcall* ITexUpdate_fn)(void* this_device, void* dummy_edx, void* texId, const void* a3, const void* a4, int a5, int a6);
+static ITexUpdate_fn g_orig6A31E0 = nullptr;
+static volatile LONG g_texUpdateWildSanitized = 0;
+static bool g_guard6A31E0Active = false;
+
+__declspec(safebuffers) static BOOL __fastcall Hooked_6A31E0(void* this_device, void* dummy_edx, void* texId, const void* a3, const void* a4, int a5, int a6) {
+    if (!this_device || !IsValidUserPointer((uintptr_t)this_device)) {
+        return 0;
+    }
+    if (!texId || !IsValidUserPointer((uintptr_t)texId)) {
+        InterlockedIncrement(&g_texUpdateWildSanitized);
+        return 0;
+    }
+    if (*(const uintptr_t*)texId == 0xFFFFFFFF) {
+        InterlockedIncrement(&g_texUpdateWildSanitized);
+        return 0;
+    }
+    uint32_t format = *(const uint32_t*)((uintptr_t)texId + 0x24);
+    if (format >= 13) {
+        InterlockedIncrement(&g_texUpdateWildSanitized);
+        return 0;
+    }
+    return g_orig6A31E0(this_device, dummy_edx, texId, a3, a4, a5, a6);
+}
+
+
+// ----------------------------------------------------------------------------
 // AsyncFileReadWait guard (sub_4BA060 @ 0x004BA060)
 //
 // In stock 3.3.5a build 12340, AsyncFileReadWait (sub_4BA060) waits for pending
@@ -1276,6 +1367,37 @@ bool InstallRenderNullGuard()
         }
     }
 
+    void* target6A2C00 = (void*)kTarget6A2C00;
+    if (WowOpt_ClientPatchAllowed(target6A2C00)) {
+        if (memcmp(target6A2C00, kExpectedPrologue6A2C00, sizeof(kExpectedPrologue6A2C00)) == 0) {
+            if (MH_CreateHook(target6A2C00, (void*)Hooked_6A2C00, (void**)&g_orig6A2C00) == MH_OK &&
+                MH_EnableHook(target6A2C00) == MH_OK) {
+                g_guard6A2C00Active = true;
+                Log("[RenderGuard] ITexCreate guard ACTIVE on sub_6A2C00 @ 0x%08X", (unsigned)kTarget6A2C00);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget6A2C00);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget6A2C00);
+        }
+    }
+
+    void* target6A31E0 = (void*)kTarget6A31E0;
+    if (WowOpt_ClientPatchAllowed(target6A31E0)) {
+        if (memcmp(target6A31E0, kExpectedPrologue6A31E0, sizeof(kExpectedPrologue6A31E0)) == 0) {
+            if (MH_CreateHook(target6A31E0, (void*)Hooked_6A31E0, (void**)&g_orig6A31E0) == MH_OK &&
+                MH_EnableHook(target6A31E0) == MH_OK) {
+                g_guard6A31E0Active = true;
+                Log("[RenderGuard] ITexUpdate guard ACTIVE on sub_6A31E0 @ 0x%08X", (unsigned)kTarget6A31E0);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget6A31E0);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget6A31E0);
+        }
+    }
+
+
     return true;
 }
 
@@ -1363,6 +1485,17 @@ void RenderNullGuard_LogStats()
         Log("[RenderGuard] %ld invalid DeviceClearTarget calls SUPPRESSED on sub_683320 (Null target crash at 0x00683328 prevented)",
             (long)g_nullClearTargetSuppressed);
     }
+
+    if (g_texCreateWildSanitized > 0) {
+        Log("[RenderGuard] %ld corrupted/out-of-bounds ITexCreate calls SANITIZED on sub_6A2C00 (Error #132 at 0x006A2C29 prevented)",
+            (long)g_texCreateWildSanitized);
+    }
+
+    if (g_texUpdateWildSanitized > 0) {
+        Log("[RenderGuard] %ld corrupted ITexUpdate calls SANITIZED on sub_6A31E0 (Error #132 at 0x006A320B prevented)",
+            (long)g_texUpdateWildSanitized);
+    }
+
 }
 
 
