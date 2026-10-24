@@ -294,7 +294,10 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "SplineInterpFast", &Settings::OptSplineInterpFast },
     { "Graphics_Sound", "PlaneFromPointsFast", &Settings::OptPlaneFromPointsFast },
     { "Graphics_Sound", "MatrixAdjugateFast", &Settings::OptMatrixAdjugateFast },
+    { "Graphics_Sound", "SplineSegLengthFast", &Settings::OptSplineSegLengthFast },
+    { "Graphics_Sound", "MapObjQueryFast", &Settings::OptMapObjQueryFast },
 };
+
 
 static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolSettings[0]));
 
@@ -984,7 +987,9 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptPlaneFromPointsFast  = GetPrivateProfileIntA("Graphics_Sound", "PlaneFromPointsFast", 0, iniPath.c_str()) != 0;
         g_settings.OptMatrixAdjugateFast   = GetPrivateProfileIntA("Graphics_Sound", "MatrixAdjugateFast", 0, iniPath.c_str()) != 0;
         g_settings.OptSplineSegLengthFast  = GetPrivateProfileIntA("Graphics_Sound", "SplineSegLengthFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptMapObjQueryFast      = GetPrivateProfileIntA("Graphics_Sound", "MapObjQueryFast", 0, iniPath.c_str()) != 0;
     }
+
 }
 
 // lua_optimize.cpp has a file-scope object named Config, so it cannot include

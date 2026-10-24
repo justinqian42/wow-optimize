@@ -775,7 +775,9 @@ namespace Config {
         bool OptPlaneFromPointsFast = false;
         bool OptMatrixAdjugateFast = false;
         bool OptSplineSegLengthFast = false;
+        bool OptMapObjQueryFast = false;
     };
+
 
     extern Settings g_settings;
 

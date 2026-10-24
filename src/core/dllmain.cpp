@@ -152,6 +152,8 @@
 #include "simd_math/plane_from_points_fast.h"
 #include "simd_math/matrix_adjugate_fast.h"
 #include "simd_math/spline_seg_length_fast.h"
+#include "simd_math/map_obj_query_fast.h"
+
 #include "world_vis_traverse_sse2.h"
 #include "ui_strata_opt.h"
 #include "runtime_vm/lua_hget_dispatch.h"
@@ -6208,6 +6210,9 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("SplineInterpFast::LogStats", SplineInterpFast::LogStats());
     STAT_TIME("PlaneFromPointsFast::LogStats", PlaneFromPointsFast::LogStats());
     STAT_TIME("MatrixAdjugateFast::LogStats", MatrixAdjugateFast::LogStats());
+    STAT_TIME("SplineSegLengthFast::LogStats", SplineSegLengthFast::LogStats());
+    STAT_TIME("MapObjQueryFast::LogStats", MapObjQueryFast::LogStats());
+
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
     STAT_TIME("CombatLogFilter::LogStats", CombatLogFilter::LogStats());
@@ -8990,6 +8995,8 @@ static DWORD WINAPI MainThread(LPVOID param) {
     PlaneFromPointsFast::Init();
     MatrixAdjugateFast::Init();
     SplineSegLengthFast::Init();
+    MapObjQueryFast::Init();
+
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
     CollisionRayVerts::Init();
@@ -12042,6 +12049,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             SplineInterpFast::Shutdown();
             PlaneFromPointsFast::Shutdown();
             MatrixAdjugateFast::Shutdown();
+            SplineSegLengthFast::Shutdown();
+            MapObjQueryFast::Shutdown();
+
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();
             UIStrataOpt::Shutdown();

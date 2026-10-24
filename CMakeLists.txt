@@ -341,6 +341,9 @@ add_library(wow_optimize SHARED
     src/simd_math/segment_aabb_sse2.cpp
     src/simd_math/wmo_group_bounds_fast.cpp
     src/simd_math/wmo_group_bounds_fast.h
+    src/simd_math/map_obj_query_fast.cpp
+    src/simd_math/map_obj_query_fast.h
+
     src/runtime_vm/lua_hget_dispatch.cpp
     src/runtime_vm/lua_pool_fast.cpp
     src/runtime_vm/lua_proto_cache.cpp
