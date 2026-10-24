@@ -166,6 +166,7 @@
 #include "hooks_subsystems/gx_texture_wrap_fast.h"
 #include "hooks_subsystems/ui_anchor_check_fast.h"
 #include "hooks_subsystems/fog_state_dedup.h"
+#include "hooks_subsystems/lua_func_bounds_fast.h"
 
 #include "world_vis_traverse_sse2.h"
 #include "ui_strata_opt.h"
@@ -6238,6 +6239,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("GxTextureWrapFast::LogStats", GxTextureWrapFast::LogStats());
     STAT_TIME("UIAnchorCheckFast::LogStats", UIAnchorCheckFast::LogStats());
     STAT_TIME("FogStateDedup::LogStats", FogStateDedup::LogStats());
+    STAT_TIME("LuaFuncBoundsFast::LogStats", LuaFuncBoundsFast::LogStats());
 
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
@@ -9033,6 +9035,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     GxTextureWrapFast::Init();
     UIAnchorCheckFast::Init();
     FogStateDedup::Init();
+    LuaFuncBoundsFast::Init();
 
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
@@ -12101,6 +12104,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             GxTextureWrapFast::Shutdown();
             UIAnchorCheckFast::Shutdown();
             FogStateDedup::Shutdown();
+            LuaFuncBoundsFast::Shutdown();
 
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

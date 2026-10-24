@@ -789,6 +789,7 @@ namespace Config {
         bool OptGxTextureWrapFast = false;
         bool OptUIAnchorCheckFast = false;
         bool OptFogStateDedup = false;
+        bool OptLuaFuncBoundsFast = false;
     };
 
 
