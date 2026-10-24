@@ -727,6 +727,7 @@ namespace Config {
         bool OptM2ParallelChildren = false;
         bool OptNameplateParallel = false;
         bool OptGrassParallel = false;
+        bool OptTerrainVertexFast = false;
         bool OptParticleFillFast = false;
         bool OptRibbonEdgeLoop = false;
         bool OptBoneTrackPrefetch = true;

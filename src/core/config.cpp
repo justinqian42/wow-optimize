@@ -247,6 +247,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2ParallelChildren", &Settings::OptM2ParallelChildren },
     { "Graphics_Sound", "NameplateParallel", &Settings::OptNameplateParallel },
     { "Graphics_Sound", "GrassParallel", &Settings::OptGrassParallel },
+    { "Graphics_Sound", "TerrainVertexFast", &Settings::OptTerrainVertexFast },
     { "Graphics_Sound", "ParticleFillFast", &Settings::OptParticleFillFast },
     { "Graphics_Sound", "RibbonEdgeLoop", &Settings::OptRibbonEdgeLoop },
     { "Graphics_Sound", "BoneTrackPrefetch", &Settings::OptBoneTrackPrefetch },
@@ -941,6 +942,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2ParallelChildren   = GetPrivateProfileIntA("Graphics_Sound", "M2ParallelChildren", 0, iniPath.c_str()) != 0;
         g_settings.OptNameplateParallel    = GetPrivateProfileIntA("Graphics_Sound", "NameplateParallel", 0, iniPath.c_str()) != 0;
         g_settings.OptGrassParallel        = GetPrivateProfileIntA("Graphics_Sound", "GrassParallel", 0, iniPath.c_str()) != 0;
+        g_settings.OptTerrainVertexFast    = GetPrivateProfileIntA("Graphics_Sound", "TerrainVertexFast", 0, iniPath.c_str()) != 0;
         g_settings.OptParticleFillFast     = GetPrivateProfileIntA("Graphics_Sound", "ParticleFillFast", 0, iniPath.c_str()) != 0;
         g_settings.OptRibbonEdgeLoop       = GetPrivateProfileIntA("Graphics_Sound", "RibbonEdgeLoop", 0, iniPath.c_str()) != 0;
         g_settings.OptBoneTrackPrefetch    = GetPrivateProfileIntA("Graphics_Sound", "BoneTrackPrefetch", 1, iniPath.c_str()) != 0;

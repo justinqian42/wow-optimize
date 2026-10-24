@@ -83,6 +83,7 @@
 #include "m2_batch_cmp_solid.h"
 #include "horizon_test_sse2.h"
 #include "m2_skin_proj_fast.h"
+#include "terrain_vertex_fast.h"
 #include "sstr_hash_fast.h"
 #include "reverb_clear_fast.h"
 #include "ui_layout_rect_fast.h"
@@ -6132,6 +6133,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("M2BatchCmpSolid::LogStats", M2BatchCmpSolid::LogStats());
     STAT_TIME("HorizonTestSSE2::LogStats", HorizonTestSSE2::LogStats());
     STAT_TIME("M2SkinProjFast::LogStats", M2SkinProjFast::LogStats());
+    STAT_TIME("TerrainVertexFast::LogStats", TerrainVertexFast::LogStats());
     STAT_TIME("SStrHashFast::LogStats", SStrHashFast::LogStats());
     STAT_TIME("ReverbClearFast::LogStats", ReverbClearFast::LogStats());
     STAT_TIME("SoundGroupGuard::LogStats", SoundGroupGuard::LogStats());
@@ -8948,6 +8950,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     M2BatchCmpSolid::Init();
     HorizonTestSSE2::Init();
     M2SkinProjFast::Init();
+    TerrainVertexFast::Init();
     SStrHashFast::Init();
     ReverbClearFast::Init();
     SoundGroupGuard::Init();
@@ -12019,6 +12022,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             M2BatchCmpSolid::Shutdown();
             HorizonTestSSE2::Shutdown();
             M2SkinProjFast::Shutdown();
+            TerrainVertexFast::Shutdown();
             SStrHashFast::Shutdown();
             ReverbClearFast::Shutdown();
             SoundGroupGuard::Shutdown();
