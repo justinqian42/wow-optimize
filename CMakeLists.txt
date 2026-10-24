@@ -249,6 +249,8 @@ add_library(wow_optimize SHARED
     src/core/world_position.cpp
     src/hooks_subsystems/tick_list_prefetch.cpp
     src/diagnostics/lua_table_census.cpp
+    src/runtime_vm/lua_table_traverse_fast.cpp
+    src/runtime_vm/lua_table_traverse_fast.h
     # Windows file-version metadata. This was never attached to a target, so the
     # shipped DLL carried no version resource at all and the file sat at 3.12.0
     # unnoticed through several releases.

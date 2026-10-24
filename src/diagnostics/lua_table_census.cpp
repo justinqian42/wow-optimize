@@ -160,6 +160,12 @@ bool g_installed = false;
 bool Init() {
     if (!Config::g_settings.OptLuaTableCensus) return true;
 
+    if (Config::g_settings.OptLuaTableTraverseFast) {
+        g_installed = true;
+        Log("[TableCensus] ACTIVE via LuaTableTraverseFast forwarding (0x%08X).", (unsigned)kTraverse);
+        return true;
+    }
+
     static const unsigned char kTraverseOpening[16] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x8B, 0x43, 0x0C, 0x56, 0x33, 0xF6, 0x3B, 0xC6, 0x57, 0x89 };
     if (!WowOpt_ClientBytesAre(kTraverse, kTraverseOpening, sizeof(kTraverseOpening))) {
         Log("[TableCensus] NOT installed: the bytes at 0x%08X are not luaC_traversetable's opening", (unsigned)kTraverse);

@@ -779,6 +779,7 @@ namespace Config {
         bool OptMatrixAdjugateFast = false;
         bool OptSplineSegLengthFast = false;
         bool OptMapObjQueryFast = false;
+        bool OptLuaTableTraverseFast = false;
     };
 
 
