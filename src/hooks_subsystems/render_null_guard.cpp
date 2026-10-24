@@ -888,10 +888,104 @@ __declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned in
     return g_orig9911A0(face, charcode);
 }
 
+// ----------------------------------------------------------------------------
+// DeviceSetViewport guard (sub_6848A0 @ 0x006848A0)
+//
+// In stock 3.3.5a build 12340:
+// sub_6848A0 is a __thiscall method on CGxDevice (this in ECX, retn 0Ch):
+//     int __thiscall sub_6848A0(CGxDevice* this, void* target, const int* rect, int flush)
+//
+// On function entry:
+//     0x006848A0: push ebp
+//     0x006848A1: mov ebp, esp
+//     0x006848A3: mov eax, [ebp+8]    ; target
+//     0x006848A6: mov edx, [ebp+0Ch]  ; rect
+//     0x006848A9: mov byte ptr [eax+5Ah], 1  ; <-- CRASH if target is null!
+//
+// Root Cause:
+// When entering the world, UI frame layouts are refreshed. The ColorSelect /
+// ValueTexture widget updates via sub_96E030. It queries the texture surface via
+// sub_481720 -> sub_4B6CB0(wait=1). When the texture is still loading asynchronously
+// or missing, sub_4B6CB0 returns 0. sub_96E030 does not check for NULL and passes
+// 0 as target to sub_681F20, which passes 0 to sub_6848A0. sub_6848A0 blindly
+// dereferences [0 + 0x5A] = 1, crashing with ACCESS_VIOLATION (0xC0000005) at
+// 0x006848A9 writing to 0x0000005A on the main render thread.
+//
+// Furthermore, sub_6848A0 unconditionally reads [rect] and [rect+8], and if flush is
+// non-zero, dereferences [this] (ECX) to invoke vtable[0].
+//
+// Guard:
+// Naked ASM hook on sub_6848A0 that validates target ([esp+4]), this (ECX), and
+// rect ([esp+8]). If any pointer is null or invalid, increment
+// g_nullViewportTargetSuppressed, set eax = 0, and return with ret 0x0C.
+// Zero /GS cookies, zero SEH frames.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget6848A0 = 0x006848A0;
+static const unsigned char kExpectedPrologue6848A0[9] = {
+    0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x8B, 0x55, 0x0C
+};
+
+static void* g_orig6848A0 = nullptr;
+static volatile LONG g_nullViewportTargetSuppressed = 0;
+static bool g_guard6848A0Active = false;
+
+__declspec(naked) static void Hooked_6848A0() {
+    __asm {
+        // [esp+4] = target
+        mov eax, [esp+4]
+        cmp eax, 0x10000
+        jb invalid_viewport
+        cmp eax, 0x7FFE0000
+        jb check_device
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je invalid_viewport
+        cmp eax, 0x80010000
+        jb invalid_viewport
+        cmp eax, 0xFFFE0000
+        jae invalid_viewport
+
+    check_device:
+        // ecx = this (CGxDevice)
+        cmp ecx, 0x10000
+        jb invalid_viewport
+        cmp ecx, 0x7FFE0000
+        jb check_rect
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je invalid_viewport
+        cmp ecx, 0x80010000
+        jb invalid_viewport
+        cmp ecx, 0xFFFE0000
+        jae invalid_viewport
+
+    check_rect:
+        // [esp+8] = rect
+        mov edx, [esp+8]
+        cmp edx, 0x10000
+        jb invalid_viewport
+        cmp edx, 0x7FFE0000
+        jb valid_viewport
+        cmp byte ptr [g_optHighPlacementClientActive], 0
+        je invalid_viewport
+        cmp edx, 0x80010000
+        jb invalid_viewport
+        cmp edx, 0xFFFE0000
+        jae invalid_viewport
+
+    valid_viewport:
+        jmp dword ptr [g_orig6848A0]
+
+    invalid_viewport:
+        inc dword ptr [g_nullViewportTargetSuppressed]
+        xor eax, eax
+        ret 0x0C
+    }
+}
+
 bool InstallRenderNullGuard()
 {
     if (!Config::g_settings.OptRenderNullGuard) {
-        Log("[RenderGuard] DISABLED via configuration - sub_873060, sub_4B6550, sub_4B6CB0, sub_4BA060, sub_4F5980 and sub_992DA0 run unguarded");
+        Log("[RenderGuard] DISABLED via configuration - sub_873060, sub_4B6550, sub_4B6CB0, sub_4BA060, sub_4F5980, sub_6848A0 and sub_992DA0 run unguarded");
         return true;
     }
 
@@ -1043,6 +1137,21 @@ bool InstallRenderNullGuard()
         }
     }
 
+    void* target6848A0 = (void*)kTarget6848A0;
+    if (WowOpt_ClientPatchAllowed(target6848A0)) {
+        if (memcmp(target6848A0, kExpectedPrologue6848A0, sizeof(kExpectedPrologue6848A0)) == 0) {
+            if (MH_CreateHook(target6848A0, (void*)Hooked_6848A0, (void**)&g_orig6848A0) == MH_OK &&
+                MH_EnableHook(target6848A0) == MH_OK) {
+                g_guard6848A0Active = true;
+                Log("[RenderGuard] DeviceSetViewport guard ACTIVE on sub_6848A0 @ 0x%08X", (unsigned)kTarget6848A0);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget6848A0);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget6848A0);
+        }
+    }
+
     return true;
 }
 
@@ -1119,6 +1228,11 @@ void RenderNullGuard_LogStats()
     if (g_textureWildSanitized > 0) {
         Log("[RenderGuard] %ld corrupted/freed texture lookups SANITIZED in TextureGetGxTex (sub_4B6CB0 @ 0x004B6D26 prevented)",
             (long)g_textureWildSanitized);
+    }
+
+    if (g_nullViewportTargetSuppressed > 0) {
+        Log("[RenderGuard] %ld invalid DeviceSetViewport calls SUPPRESSED on sub_6848A0 (Null target crash at 0x006848A9 prevented)",
+            (long)g_nullViewportTargetSuppressed);
     }
 }
 
