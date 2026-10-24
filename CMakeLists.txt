@@ -376,6 +376,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/ui_anim_update_fast.h
     src/hooks_subsystems/gx_device_texture_fast.cpp
     src/hooks_subsystems/gx_device_texture_fast.h
+    src/hooks_subsystems/ui_render_coord_fast.cpp
+    src/hooks_subsystems/ui_render_coord_fast.h
     src/allocators/mimalloc_high_arena.cpp
     src/allocators/high_placement.cpp
     src/allocators/process_top_down.cpp
