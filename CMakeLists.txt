@@ -386,6 +386,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/fog_state_dedup.h
     src/hooks_subsystems/lua_func_bounds_fast.cpp
     src/hooks_subsystems/lua_func_bounds_fast.h
+    src/hooks_subsystems/scene_node_active_fast.cpp
+    src/hooks_subsystems/scene_node_active_fast.h
     src/allocators/mimalloc_high_arena.cpp
     src/allocators/high_placement.cpp
     src/allocators/process_top_down.cpp

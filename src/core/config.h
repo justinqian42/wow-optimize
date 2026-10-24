@@ -790,6 +790,7 @@ namespace Config {
         bool OptUIAnchorCheckFast = false;
         bool OptFogStateDedup = false;
         bool OptLuaFuncBoundsFast = false;
+        bool OptSceneNodeActiveFast = false;
     };
 
 

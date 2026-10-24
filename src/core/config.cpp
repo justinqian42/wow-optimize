@@ -310,6 +310,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "UIAnchorCheckFast", &Settings::OptUIAnchorCheckFast },
     { "Graphics_Sound", "FogStateDedup", &Settings::OptFogStateDedup },
     { "UI_Lua", "LuaFuncBoundsFast", &Settings::OptLuaFuncBoundsFast },
+    { "Graphics_Sound", "SceneNodeActiveFast", &Settings::OptSceneNodeActiveFast },
 };
 
 
@@ -1016,6 +1017,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptUIAnchorCheckFast    = GetPrivateProfileIntA("UI_Lua", "UIAnchorCheckFast", 0, iniPath.c_str()) != 0;
         g_settings.OptFogStateDedup        = GetPrivateProfileIntA("Graphics_Sound", "FogStateDedup", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaFuncBoundsFast    = GetPrivateProfileIntA("UI_Lua", "LuaFuncBoundsFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptSceneNodeActiveFast  = GetPrivateProfileIntA("Graphics_Sound", "SceneNodeActiveFast", 0, iniPath.c_str()) != 0;
     }
 
 }
