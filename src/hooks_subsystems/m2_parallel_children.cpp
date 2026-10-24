@@ -67,7 +67,7 @@ typedef void (__fastcall* AnimateModel_fn)(void* child, void* dummy, const float
 
 static AnimateAttachments_fn orig_AnimateAttachmentsMT = nullptr;
 
-constexpr int kMaxWorkers = 3;
+constexpr int kMaxWorkers = 7;
 constexpr int kMaxTasks   = 32;
 
 struct ChildTask {
@@ -80,16 +80,20 @@ struct ChildTask {
     bool         isSimple;
 };
 
+struct TaskRange {
+    int begin;
+    int end;
+};
+
 // Global task staging buffer to eliminate stack frame cookies (/GS) on the hot path
-static ChildTask g_tasks[kMaxTasks];
-static volatile LONG g_totalTasks = 0;
-static volatile LONG g_nextTask   = 0;
+static ChildTask  g_tasks[kMaxTasks];
+static TaskRange  g_ranges[kMaxWorkers];
+static volatile LONG g_activeWorkers = 0;
 static volatile LONG g_poolInUse  = 0;
 
 static int    g_numWorkers = 0;
 static HANDLE g_threads[kMaxWorkers];
 static HANDLE g_wake[kMaxWorkers];
-static HANDLE g_done[kMaxWorkers];
 static volatile LONG g_shutdown = 0;
 
 static volatile unsigned short g_fpuCw = 0x7F;
@@ -131,13 +135,13 @@ static DWORD WINAPI WorkerThreadProc(LPVOID param) {
         __asm fldcw cw
         _mm_setcsr(g_mxcsr);
 
-        for (;;) {
-            LONG taskIdx = InterlockedIncrement(&g_nextTask) - 1;
-            if (taskIdx >= g_totalTasks) break;
-            ExecuteChildTask(g_tasks[taskIdx]);
+        const int begin = g_ranges[idx].begin;
+        const int end = g_ranges[idx].end;
+        for (int i = begin; i < end; ++i) {
+            ExecuteChildTask(g_tasks[i]);
         }
 
-        SetEvent(g_done[idx]);
+        InterlockedDecrement(&g_activeWorkers);
     }
     return 0;
 }
@@ -145,8 +149,7 @@ static DWORD WINAPI WorkerThreadProc(LPVOID param) {
 static bool StartWorkers(int count) {
     for (int i = 0; i < count; ++i) {
         g_wake[i] = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-        g_done[i] = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-        if (!g_wake[i] || !g_done[i]) return false;
+        if (!g_wake[i]) return false;
 
         g_threads[i] = CreateThread(nullptr, 256 * 1024, WorkerThreadProc, (LPVOID)(intptr_t)i,
                                     STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
@@ -248,29 +251,37 @@ void __fastcall Hooked_AnimateAttachmentsMT(void* self, void* edx) {
     g_fpuCw = cw;
     g_mxcsr = _mm_getcsr();
 
-    g_totalTasks = taskCount;
-    g_nextTask   = 0;
+    // Partition tasks across workers and calling thread in contiguous ranges
+    int totalThreads = g_numWorkers + 1;
+    if (totalThreads > taskCount) totalThreads = (int)taskCount;
+    const int workersToUse = totalThreads - 1;
 
-    int workersToWake = g_numWorkers;
-    if (taskCount - 1 < workersToWake) {
-        workersToWake = (int)(taskCount - 1);
+    const int base = (int)taskCount / totalThreads;
+    const int rem = (int)taskCount % totalThreads;
+    int cur = 0;
+    for (int i = 0; i < workersToUse; ++i) {
+        const int count = base + (i < rem ? 1 : 0);
+        g_ranges[i].begin = cur;
+        g_ranges[i].end = cur + count;
+        cur += count;
     }
+    const int mainBegin = cur;
+    const int mainEnd = (int)taskCount;
 
-    for (int i = 0; i < workersToWake; ++i) {
-        ResetEvent(g_done[i]);
+    g_activeWorkers = workersToUse;
+    for (int i = 0; i < workersToUse; ++i) {
         SetEvent(g_wake[i]);
     }
 
-    // Calling thread participates in task execution
-    for (;;) {
-        LONG taskIdx = InterlockedIncrement(&g_nextTask) - 1;
-        if (taskIdx >= taskCount) break;
-        ExecuteChildTask(g_tasks[taskIdx]);
+    // Calling thread executes its contiguous slice
+    for (int i = mainBegin; i < mainEnd; ++i) {
+        ExecuteChildTask(g_tasks[i]);
     }
 
-    // Wait for all participating workers to complete
-    if (workersToWake > 0) {
-        WaitForMultipleObjects(workersToWake, g_done, TRUE, INFINITE);
+    // Hybrid spin-wait for participating workers without kernel transition overhead
+    unsigned spins = 0;
+    while (g_activeWorkers > 0) {
+        if (++spins < 2000) YieldProcessor(); else SwitchToThread();
     }
 
     InterlockedExchange(&g_poolInUse, 0);
@@ -288,8 +299,8 @@ bool Init() {
 
     SYSTEM_INFO si;
     GetSystemInfo(&si);
-    const int workers = (int)si.dwNumberOfProcessors - 2 < kMaxWorkers
-                      ? (int)si.dwNumberOfProcessors - 2 : kMaxWorkers;
+    int workers = (int)si.dwNumberOfProcessors > 2 ? (int)si.dwNumberOfProcessors - 2 : 1;
+    if (workers > kMaxWorkers) workers = kMaxWorkers;
     if (workers < 1) {
         Log("[M2ParallelChildren] NOT active: %lu logical CPU(s); needs at least 3 cores.",
             si.dwNumberOfProcessors);
@@ -340,7 +351,6 @@ void Shutdown() {
             g_threads[i] = nullptr;
         }
         if (g_wake[i]) { CloseHandle(g_wake[i]); g_wake[i] = nullptr; }
-        if (g_done[i]) { CloseHandle(g_done[i]); g_done[i] = nullptr; }
     }
     g_numWorkers = 0;
 }
