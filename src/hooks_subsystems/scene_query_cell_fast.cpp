@@ -77,14 +77,6 @@ uint64_t g_emptySkips = 0;
 
 
 __declspec(safebuffers) static int __cdecl Hook_sub_799B70(uint32_t* a1, void* pFrustum, uint32_t queryFrame, int flag) {
-    if (!a1) return 0;
-
-    const uint32_t head = a1[2];
-    if ((head & 1) != 0 || head == 0) {
-        ++g_emptySkips;
-        return 0;
-    }
-
     ++g_calls;
     return g_orig(a1, pFrustum, queryFrame, flag);
 }
