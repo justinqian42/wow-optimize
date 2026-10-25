@@ -971,6 +971,8 @@ __declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned in
     static thread_local void* s_lastClazz = nullptr;
     static thread_local void* s_lastGetCharIndex = nullptr;
 
+    typedef int (__cdecl* GetCharIndex_fn)(void* charmap, unsigned int charcode);
+
     uintptr_t pFace = (uintptr_t)face;
     if (face == s_lastFace) {
         void* charmap = *(void**)(pFace + 0x5C);
@@ -980,7 +982,7 @@ __declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned in
             if (clazz == s_lastClazz && clazz != nullptr) {
                 void* get_char_index = *(void**)((uintptr_t)clazz + 0x54);
                 if (get_char_index == s_lastGetCharIndex && get_char_index != nullptr) {
-                    return g_orig9911A0(face, charcode);
+                    return ((GetCharIndex_fn)get_char_index)(charmap, charcode);
                 }
             }
         }
@@ -1020,8 +1022,84 @@ __declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned in
     s_lastClazz = clazz;
     s_lastGetCharIndex = get_char_index;
 
-    return g_orig9911A0(face, charcode);
+    return ((GetCharIndex_fn)get_char_index)(charmap, charcode);
 }
+
+// ----------------------------------------------------------------------------
+// M2 GetSequenceDuration / SequenceData guard (sub_8267E0 @ 0x008267E0)
+//
+// In stock 3.3.5a build 12340, sub_8267E0 is a __thiscall method called from
+// CSimpleModel::UpdateAnimation (sub_5971B0), character model updates, and UI model
+// rendering to retrieve the duration and animation record for a sequence index.
+// ECX contains the model instance pointer ('this').
+// At 0x00826828:
+//     mov edx, [esi+2Ch]   ; CM2Shared / model definition
+//     mov ecx, [edx+150h]  ; M2Header sequence chunk
+// At 0x00826856:
+//     mov ecx, [esi+94h]   ; m_animData array (+148)
+//     imul eax, 0ACh       ; 172 bytes per sequence record
+//     mov eax, [eax+ecx+90h] ; CRASH at 0x00826862 reading 0x00000090 if ecx is null!
+//
+// When a model is uninitialized, newly spawned, or in the middle of loading textures/bones
+// (especially HD models, WCollections, or UI models), [esi+94h] is null (0). Dereferencing
+// [eax + 0 + 0x90] immediately faults with ACCESS_VIOLATION at 0x00826862 reading from 0x00000090.
+//
+// Guard:
+// Naked assembly validation checking that ECX, [ECX+0x2C], [shared+0x150], and [ECX+0x94]
+// are all within user memory [0x10000, 0xFFFE0000).
+// If any pointer is null or invalid, increments g_modelAnimNullSuppressed and returns 0 (ret 4).
+// Otherwise, branches directly to g_orig8267E0.
+// Zero /GS cookies, zero SEH frames, zero overhead on the hot path.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget8267E0 = 0x008267E0;
+static const unsigned char kExpectedPrologue8267E0[6] = {
+    0x55, 0x8B, 0xEC, 0x56, 0x8B, 0xF1
+};
+
+static void* g_orig8267E0 = nullptr;
+static volatile LONG g_modelAnimNullSuppressed = 0;
+static bool g_guard8267E0Active = false;
+
+__declspec(naked) static void Hooked_8267E0() {
+    __asm {
+        // Validate ecx (this pointer to model instance)
+        cmp ecx, 0x10000
+        jb invalid_model
+        cmp ecx, 0xFFFE0000
+        jae invalid_model
+
+        // Validate [ecx+2Ch] (CM2Shared pointer)
+        mov eax, dword ptr [ecx + 0x2C]
+        cmp eax, 0x10000
+        jb invalid_model
+        cmp eax, 0xFFFE0000
+        jae invalid_model
+
+        // Validate [eax+150h] (M2Header sequence chunk pointer)
+        mov eax, dword ptr [eax + 0x150]
+        cmp eax, 0x10000
+        jb invalid_model
+        cmp eax, 0xFFFE0000
+        jae invalid_model
+
+        // Validate [ecx+94h] (m_animData pointer)
+        mov eax, dword ptr [ecx + 0x94]
+        cmp eax, 0x10000
+        jb invalid_model
+        cmp eax, 0xFFFE0000
+        jae invalid_model
+
+        // All prerequisites valid: forward to original function
+        jmp dword ptr [g_orig8267E0]
+
+    invalid_model:
+        inc dword ptr [g_modelAnimNullSuppressed]
+        xor eax, eax
+        ret 4
+    }
+}
+
 
 // ----------------------------------------------------------------------------
 // DeviceSetViewport guard (sub_6848A0 @ 0x006848A0)
@@ -1402,6 +1480,21 @@ bool InstallRenderNullGuard()
     }
 
 
+    void* target8267E0 = (void*)kTarget8267E0;
+    if (WowOpt_ClientPatchAllowed(target8267E0)) {
+        if (memcmp(target8267E0, kExpectedPrologue8267E0, sizeof(kExpectedPrologue8267E0)) == 0) {
+            if (MH_CreateHook(target8267E0, (void*)Hooked_8267E0, (void**)&g_orig8267E0) == MH_OK &&
+                MH_EnableHook(target8267E0) == MH_OK) {
+                g_guard8267E0Active = true;
+                Log("[RenderGuard] Model AnimSequence guard ACTIVE on sub_8267E0 @ 0x%08X", (unsigned)kTarget8267E0);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget8267E0);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget8267E0);
+        }
+    }
+
     return true;
 }
 
@@ -1498,6 +1591,11 @@ void RenderNullGuard_LogStats()
     if (g_texUpdateWildSanitized > 0) {
         Log("[RenderGuard] %ld corrupted ITexUpdate calls SANITIZED on sub_6A31E0 (Error #132 at 0x006A320B prevented)",
             (long)g_texUpdateWildSanitized);
+    }
+
+    if (g_modelAnimNullSuppressed > 0) {
+        Log("[RenderGuard] %ld uninitialized Model AnimSequence calls SUPPRESSED on sub_8267E0 (Error #132 at 0x00826862 prevented)",
+            (long)g_modelAnimNullSuppressed);
     }
 
 }
