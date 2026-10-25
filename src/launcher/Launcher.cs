@@ -2598,16 +2598,21 @@ namespace WowOptimizeLauncher {
                     Directory.CreateDirectory(dir);
                 }
 
-                Dictionary<string, List<string>> sections = new Dictionary<string, List<string>>() {
+                Dictionary<string, List<string>> sections = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase) {
                     { "General", new List<string>() },
                     { "UI_Lua", new List<string>() },
                     { "Combat_Net", new List<string>() },
-                    { "Graphics_Sound", new List<string>() }
+                    { "Graphics_Sound", new List<string>() },
+                    { "System", new List<string>() }
                 };
 
                 foreach (SettingItem item in settingsMap.Values) {
                     string val = (item.Ctrl != null && item.Ctrl.Checked) ? "1" : "0";
-                    sections[item.Section].Add(item.Key + "=" + val);
+                    string sec = string.IsNullOrEmpty(item.Section) ? "General" : item.Section;
+                    if (!sections.ContainsKey(sec)) {
+                        sections[sec] = new List<string>();
+                    }
+                    sections[sec].Add(item.Key + "=" + val);
                 }
                 sections["General"].Add("LogFolder=" + logFolderValue);
 
@@ -2640,7 +2645,9 @@ namespace WowOptimizeLauncher {
                             string key = line.Substring(0, eq).Trim();
                             if (FindByKey(key) != null) continue;
                             if (key == "LogFolder") continue;
-                            if (!sections.ContainsKey(current)) continue;
+                            if (!sections.ContainsKey(current)) {
+                                sections[current] = new List<string>();
+                            }
                             sections[current].Add(key + "=" + line.Substring(eq + 1).Trim());
                         }
                     }
