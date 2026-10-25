@@ -961,69 +961,47 @@ static FT_GetCharIndex_fn g_orig9911A0 = nullptr;
 static volatile LONG g_nullGetCharIndexSuppressed = 0;
 static bool g_guard9911A0Active = false;
 
-__declspec(safebuffers) static int __cdecl Hooked_9911A0(void* face, unsigned int charcode) {
-    if (!face) return 0;
+__declspec(naked) static void Hooked_9911A0() {
+    __asm {
+        mov edx, dword ptr [esp + 4]   // face
+        cmp edx, 0x10000
+        jb ret_zero
+        cmp edx, 0xFFFE0000
+        jae ret_zero
 
-    // Fast path: MRU font face cache to avoid querying known valid face structures
-    static thread_local void* s_lastFace = nullptr;
-    static thread_local void* s_lastCharmap = nullptr;
-    static thread_local void* s_lastDriver = nullptr;
-    static thread_local void* s_lastClazz = nullptr;
-    static thread_local void* s_lastGetCharIndex = nullptr;
+        mov ecx, dword ptr [edx + 0x5C] // charmap
+        cmp ecx, 0x10000
+        jb ret_zero
+        cmp ecx, 0xFFFE0000
+        jae ret_zero
 
-    typedef int (__cdecl* GetCharIndex_fn)(void* charmap, unsigned int charcode);
+        mov edx, dword ptr [edx + 0x60] // driver
+        cmp edx, 0x10000
+        jb ret_zero
+        cmp edx, 0xFFFE0000
+        jae ret_zero
 
-    uintptr_t pFace = (uintptr_t)face;
-    if (face == s_lastFace) {
-        void* charmap = *(void**)(pFace + 0x5C);
-        void* driver  = *(void**)(pFace + 0x60);
-        if (charmap == s_lastCharmap && driver == s_lastDriver && driver != nullptr) {
-            void* clazz = *(void**)((uintptr_t)driver + 0x14);
-            if (clazz == s_lastClazz && clazz != nullptr) {
-                void* get_char_index = *(void**)((uintptr_t)clazz + 0x54);
-                if (get_char_index == s_lastGetCharIndex && get_char_index != nullptr) {
-                    return ((GetCharIndex_fn)get_char_index)(charmap, charcode);
-                }
-            }
-        }
+        mov eax, dword ptr [edx + 0x14] // clazz
+        cmp eax, 0x10000
+        jb ret_zero
+        cmp eax, 0xFFFE0000
+        jae ret_zero
+
+        mov eax, dword ptr [eax + 0x54] // get_char_index
+        cmp eax, 0x10000
+        jb ret_zero
+        cmp eax, 0xFFFE0000
+        jae ret_zero
+
+        jmp dword ptr [g_orig9911A0]
+
+    ret_zero:
+        inc dword ptr [g_nullGetCharIndexSuppressed]
+        xor eax, eax
+        ret
     }
-
-    if (!IsValidReadablePointer(face, 0x64)) {
-        InterlockedIncrement(&g_nullGetCharIndexSuppressed);
-        return 0;
-    }
-
-    void* charmap = *(void**)(pFace + 0x5C);
-    if (!charmap || !IsValidReadablePointer(charmap, 4)) {
-        return 0; // standard FT returns 0 if charmap is null
-    }
-
-    void* driver = *(void**)(pFace + 0x60);
-    if (!IsValidReadablePointer(driver, 0x18)) {
-        InterlockedIncrement(&g_nullGetCharIndexSuppressed);
-        return 0;
-    }
-
-    void* clazz = *(void**)((uintptr_t)driver + 0x14);
-    if (!IsValidReadablePointer(clazz, 0x58)) {
-        InterlockedIncrement(&g_nullGetCharIndexSuppressed);
-        return 0;
-    }
-
-    void* get_char_index = *(void**)((uintptr_t)clazz + 0x54);
-    if (!IsValidCodePointer(get_char_index)) {
-        InterlockedIncrement(&g_nullGetCharIndexSuppressed);
-        return 0;
-    }
-
-    s_lastFace = face;
-    s_lastCharmap = charmap;
-    s_lastDriver = driver;
-    s_lastClazz = clazz;
-    s_lastGetCharIndex = get_char_index;
-
-    return ((GetCharIndex_fn)get_char_index)(charmap, charcode);
 }
+
 
 // ----------------------------------------------------------------------------
 // M2 GetSequenceDuration / SequenceData guard (sub_8267E0 @ 0x008267E0)
