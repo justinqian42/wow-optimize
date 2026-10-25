@@ -98,9 +98,9 @@ static unsigned long long g_batchesPass = 0;
 static const unsigned long kVerifyCount      = 2000;
 static const unsigned long kVerifySampleMask = 0x7F; // 1 in 128 thereafter
 
-static thread_local bool t_inVerify = false;
+static thread_local int t_verifyDepth = 0;
 
-#define SCRATCH_CAPACITY 256
+#define SCRATCH_CAPACITY 1024
 static M2BatchEntry s_scratchOrigU[SCRATCH_CAPACITY];
 static M2BatchEntry s_scratchOrigT[SCRATCH_CAPACITY];
 static M2BatchEntry s_scratchFastU[SCRATCH_CAPACITY];
@@ -121,8 +121,11 @@ __declspec(safebuffers) static void FastGatherModelBatches(
     uintptr_t model,
     CModelBatchList* untextured,
     CModelBatchList* textured,
-    bool runAnimate
+    bool runAnimate,
+    int depth = 0
 ) {
+    if (!model || depth > 8) return;
+
     if (runAnimate) {
         // 1. Initialized check
         uint8_t fFlags = *(const uint8_t*)(model + 0x10);
@@ -238,7 +241,8 @@ __declspec(safebuffers) static void FastGatherModelBatches(
 
     // 4. Attached child models
     for (uintptr_t child = *(const uintptr_t*)(model + 0x58); child; child = *(const uintptr_t*)(child + 0x60)) {
-        FastGatherModelBatches(child, untextured, textured, runAnimate);
+        if (child == model) break;
+        FastGatherModelBatches(child, untextured, textured, runAnimate, depth + 1);
     }
 }
 
@@ -259,7 +263,7 @@ __declspec(safebuffers) void __fastcall Hooked_GatherModelBatches(
         return;
     }
 
-    if (t_inVerify) {
+    if (t_verifyDepth > 0) {
         g_orig(this_ptr, dummy_edx, untextured, textured);
         return;
     }
@@ -277,9 +281,9 @@ __declspec(safebuffers) void __fastcall Hooked_GatherModelBatches(
     CModelBatchList dummyFastU = { s_scratchFastU, 0, SCRATCH_CAPACITY };
     CModelBatchList dummyFastT = { s_scratchFastT, 0, SCRATCH_CAPACITY };
 
-    t_inVerify = true;
+    t_verifyDepth++;
     g_orig(this_ptr, dummy_edx, &dummyOrigU, &dummyOrigT);
-    t_inVerify = false;
+    t_verifyDepth--;
 
     // Run fast path (AnimateSM already ran inside g_orig for this frame)
     FastGatherModelBatches((uintptr_t)this_ptr, &dummyFastU, &dummyFastT, false);
