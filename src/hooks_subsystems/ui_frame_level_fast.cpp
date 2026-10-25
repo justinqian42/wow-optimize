@@ -59,75 +59,8 @@ static uint64_t g_pendingSplices = 0;
 
 __declspec(safebuffers)
 static void* __fastcall Hook_FrameLevel_OnUpdate(void* this_ptr, void* /*edx*/, float elapsed) {
-    if (g_retired || (g_abSubject && AbTest::StandAside())) {
-        return g_orig_FrameLevelOnUpdate(this_ptr, elapsed);
-    }
-
-    const uintptr_t level = reinterpret_cast<uintptr_t>(this_ptr);
-    if (!level) return nullptr;
-
     ++g_levelsEvaluated;
-
-    // Head of active frame list in CFrameLevel
-    uintptr_t curr = *reinterpret_cast<const uintptr_t*>(level + 0x14);
-
-    if (curr && !(curr & 1)) {
-        do {
-            uintptr_t next = *reinterpret_cast<const uintptr_t*>(curr + 0x298);
-            if (next & 1) {
-                next = 0;
-            }
-
-            // Client engine contract: stores next frame into level->m_iteratingNext (+0x18)
-            *reinterpret_cast<uintptr_t*>(level + 0x18) = next;
-
-            // Hardware prefetch next frame node and its vtable to hide pointer chase latency
-            if (next) {
-                _mm_prefetch(reinterpret_cast<const char*>(next), _MM_HINT_T0);
-                _mm_prefetch(reinterpret_cast<const char*>(next + 0x298), _MM_HINT_T0);
-                const uintptr_t nextVtable = *reinterpret_cast<const uintptr_t*>(next);
-                if (nextVtable) {
-                    _mm_prefetch(reinterpret_cast<const char*>(nextVtable), _MM_HINT_T0);
-                }
-            }
-
-            // Call frame vtable[30] (offset 0x78)
-            const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(curr);
-            typedef void (__thiscall *FrameOnUpdateFn)(void* frame, float elapsed);
-            const FrameOnUpdateFn onUpdate = *reinterpret_cast<const FrameOnUpdateFn*>(vtable + 0x78);
-            onUpdate(reinterpret_cast<void*>(curr), elapsed);
-            ++g_framesUpdated;
-
-            // Reload next in case frame unlinking modified level->m_iteratingNext
-            curr = *reinterpret_cast<const uintptr_t*>(level + 0x18);
-        } while (curr);
-    }
-
-    // Check pending list (at level + 4). In >99.9% of calls, pending list is empty (points to itself).
-    const uintptr_t pendingHead = *reinterpret_cast<const uintptr_t*>(level + 4);
-    if (pendingHead == (level + 4)) {
-        return reinterpret_cast<void*>(level + 0x0C);
-    }
-
-    // Frames were queued in pending list during this tick - splice pending into active list
-    uintptr_t* const pending = reinterpret_cast<uintptr_t*>(level + 4);
-    uintptr_t* const active = reinterpret_cast<uintptr_t*>(level + 0x0C);
-    const uintptr_t ecx_val = pending[1];
-    const uintptr_t ebx_val = active[1];
-    const uintptr_t edx_val = *reinterpret_cast<const uintptr_t*>(ebx_val + 4);
-    *reinterpret_cast<uintptr_t*>(ebx_val + 4) = ecx_val;
-    const uintptr_t saved_edx = edx_val;
-    active[1] = pending[0];
-
-    const uintptr_t tail = reinterpret_cast<TSListGetTailFn>(kTSListGetTailAddr)(pending, *reinterpret_cast<const int*>(level));
-
-    *reinterpret_cast<uintptr_t*>(tail) = ebx_val;
-    *reinterpret_cast<uintptr_t*>(pending[0] + 4) = saved_edx;
-    pending[0] = reinterpret_cast<uintptr_t>(pending);
-    *reinterpret_cast<uintptr_t*>(level + 8) = (reinterpret_cast<uintptr_t>(pending)) | 1;
-    ++g_pendingSplices;
-
-    return reinterpret_cast<void*>(tail);
+    return g_orig_FrameLevelOnUpdate(this_ptr, elapsed);
 }
 
 } // namespace
