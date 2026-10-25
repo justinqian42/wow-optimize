@@ -82,57 +82,8 @@ static uint64_t g_stageChanges   = 0;
 static uint64_t g_specialStages  = 0;
 
 __declspec(safebuffers) static int __fastcall Hook_sub_685F50(void* this_ptr, void* /*edx*/, int stage, void* texture) {
-    if (g_retired) {
-        return g_orig(this_ptr, stage, texture);
-    }
-
-    if (g_abSubject && !AbTest::g_onNow && AbTest::StandAsideSlow()) {
-        return g_orig(this_ptr, stage, texture);
-    }
-
     ++g_calls;
-
-    const uintptr_t dev = (uintptr_t)this_ptr;
-    if (!*(const uint32_t*)(dev + 0x0F58)) {
-        return 0;
-    }
-
-    const uintptr_t states = *(const uintptr_t*)(dev + 0x28F4);
-    uintptr_t* const slot = (uintptr_t*)(states + stage * 24);
-
-    if (*slot == (uintptr_t)texture) {
-        ++g_redundantSkips;
-        return (int)(uintptr_t)slot;
-    }
-
-    // Prefetch texture flags if valid pointer
-    const uintptr_t texAddr = (uintptr_t)texture;
-    if (texAddr >= 0x10000 && !(texAddr & 3)) {
-        _mm_prefetch((const char*)(texAddr + 0x2C), _MM_HINT_T0);
-    }
-
-    ++g_stageChanges;
-    const int res = ((RecordStateFn)kRecordStateTarget)(this_ptr, stage);
-
-    *slot = texAddr;
-    if (!texture) {
-        return res;
-    }
-
-    if ((unsigned int)(stage - 21) <= 15) {
-        ++g_specialStages;
-        // Verify pointer is valid and properly aligned before dereferencing
-        if (texAddr >= 0x10000 && texAddr < 0x7FFF0000 && !(texAddr & 3)) {
-            if ((*(const uint8_t*)(texAddr + 0x2C) & 0x80) &&
-                *(const uint8_t*)(texAddr + 0x5A) != 0) {
-                const uintptr_t vtable = *(const uintptr_t*)dev;
-                DeviceSetTexFn setTex = *(DeviceSetTexFn*)vtable;
-                return setTex(this_ptr, texture);
-            }
-        }
-    }
-
-    return res;
+    return g_orig(this_ptr, stage, texture);
 }
 
 } // anonymous namespace
