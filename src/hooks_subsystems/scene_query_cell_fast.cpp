@@ -71,59 +71,10 @@ static const uint8_t kExpectedPrologue[16] = {
 typedef int (__cdecl *QueryCellFn)(uint32_t* pCell, void* pFrustum, uint32_t queryFrame, int flag);
 static QueryCellFn g_orig = nullptr;
 
-// Engine functions called by sub_799B70:
-typedef void (__cdecl    *fn_7F9430_t)(void* transform, float* inAabb, float* outBounds);
-typedef void (__thiscall *fn_7946D0_t)(void* this_ptr, float* bounds, float param);
-typedef void (__thiscall *fn_823F10_t)(void* sceneNode, int active);
-typedef int  (__thiscall *fn_983FB0_t)(void* frustum, const float* center, float radius);
-typedef void (__cdecl    *fn_791CB0_t)(void* entity, uint32_t queryFrame);
-
-static const fn_7F9430_t fn_7F9430 = (fn_7F9430_t)0x007F9430;
-static const fn_7946D0_t fn_7946D0 = (fn_7946D0_t)0x007946D0;
-static const fn_823F10_t fn_823F10 = (fn_823F10_t)0x00823F10;
-static const fn_983FB0_t fn_983FB0 = (fn_983FB0_t)0x00983FB0;
-static const fn_791CB0_t fn_791CB0 = (fn_791CB0_t)0x00791CB0;
-
-// Engine globals:
-static uint32_t* const g_pCurFrame      = (uint32_t*)0x00CD87B0;
-static const float* const g_pCam        = (const float*)0x00CD8F5C; // X=0x00CD8F5C, Y=0x00CD8F60, Z=0x00CD8F64
-static uint32_t* const g_pVisibleCount  = (uint32_t*)0x00CD872C;
-static void* const g_pStaticContext     = (void*)0x00ADF4A0;
-
 bool g_installed = false;
 uint64_t g_calls = 0;
 uint64_t g_emptySkips = 0;
-uint64_t g_entitiesTested = 0;
-uint64_t g_entitiesVisible = 0;
 
-__forceinline bool Fast_DistCheck(const float* pos, const float* cam) {
-    const double dx = (double)pos[0] - (double)cam[0];
-    const double dy = (double)pos[1] - (double)cam[1];
-    const double dz = (double)pos[2] - (double)cam[2];
-    const double dz2 = dz * dz;
-    const double dy2 = dy * dy;
-    const double sum1 = dy2 + dz2;
-    const double dx2 = dx * dx;
-    return (dx2 + sum1) < 100.0;
-}
-
-// Out-of-line helper for static/WMO group bounds to ensure Hook_sub_799B70
-// has zero stack buffers and zero /GS security cookies.
-__declspec(noinline) __declspec(safebuffers) static void HandleWmoNode(void* esi, void* sceneNode) {
-    float bounds[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-    void* shared = *(void**)((uintptr_t)sceneNode + 0x2C);
-    if (!shared) return;
-    const float* aabb = (const float*)((uintptr_t)shared + 0x154);
-    float localAabb[6];
-    localAabb[0] = aabb[0];
-    localAabb[1] = aabb[1];
-    localAabb[2] = aabb[2];
-    localAabb[3] = aabb[3];
-    localAabb[4] = aabb[4];
-    localAabb[5] = aabb[5];
-    fn_7F9430((void*)((uintptr_t)esi + 0xD8), localAabb, bounds);
-    fn_7946D0(g_pStaticContext, bounds, 10.0f);
-}
 
 __declspec(safebuffers) static int __cdecl Hook_sub_799B70(uint32_t* a1, void* pFrustum, uint32_t queryFrame, int flag) {
     if (!a1) return 0;
@@ -135,72 +86,9 @@ __declspec(safebuffers) static int __cdecl Hook_sub_799B70(uint32_t* a1, void* p
     }
 
     ++g_calls;
-    const uint32_t linkOffset = a1[0];
-    void* node = (void*)head;
-
-    while (node && (((uintptr_t)node & 1) == 0)) {
-        void* esi = *(void**)((uintptr_t)node + 4);
-        void* nextNode = *(void**)((uintptr_t)node + linkOffset + 4);
-        _mm_prefetch((const char*)nextNode, _MM_HINT_T0);
-
-        if (esi) {
-            const uint16_t entityFrame = (uint16_t)*(const uint8_t*)((uintptr_t)esi + 0x24);
-            if (entityFrame >= (uint16_t)queryFrame) {
-                ++g_entitiesTested;
-                void* sceneNode = *(void**)((uintptr_t)esi + 0x34);
-                const int8_t typeFlag = *(const int8_t*)((uintptr_t)esi + 0x0C);
-
-                if (!sceneNode || typeFlag >= 0) {
-                    HandleWmoNode(esi, sceneNode);
-                } else {
-                    const uint32_t curFrame = *g_pCurFrame;
-                    if (*(uint32_t*)((uintptr_t)esi + 0xB0) != curFrame) {
-                        const uint32_t flags = *(const uint32_t*)((uintptr_t)esi + 0x7C);
-                        *(uint32_t*)((uintptr_t)esi + 0xB0) = curFrame;
-                        *(uint8_t*)((uintptr_t)esi + 0x25) = 1;
-
-                        int active = 1;
-                        if ((flags & 0x400) == 0) {
-                            const float* pos = (const float*)((uintptr_t)esi + 0x38);
-                            active = Fast_DistCheck(pos, g_pCam) ? 1 : 0;
-                        }
-                        fn_823F10(sceneNode, active);
-                    }
-
-                    if (*(const uint8_t*)((uintptr_t)esi + 0x25) != 0 && pFrustum) {
-                        const float* center = (const float*)((uintptr_t)esi + 0x38);
-                        const float radius = *(const float*)((uintptr_t)esi + 0x44);
-
-                        void* frustum = pFrustum;
-                        while (frustum) {
-                            if (fn_983FB0(frustum, center, radius)) {
-                                *(uint8_t*)((uintptr_t)esi + 0x25) = 0;
-                                uint32_t* pFlags = (uint32_t*)((uintptr_t)esi + 0x0C);
-                                if (flag) {
-                                    *pFlags |= 0x8000;
-                                } else {
-                                    *pFlags &= ~0x8000;
-                                }
-                                fn_791CB0(esi, queryFrame);
-                                ++(*g_pVisibleCount);
-                                ++g_entitiesVisible;
-                                break;
-                            }
-                            void* nextFrustum = *(void**)((uintptr_t)frustum + 0xF8);
-                            if (!nextFrustum || (((uintptr_t)nextFrustum & 1) != 0)) {
-                                break;
-                            }
-                            frustum = nextFrustum;
-                        }
-                    }
-                }
-            }
-        }
-        node = nextNode;
-    }
-
-    return 0;
+    return g_orig(a1, pFrustum, queryFrame, flag);
 }
+
 
 } // namespace
 
@@ -212,23 +100,6 @@ bool Init() {
     if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
         Log("[SceneQueryCellFast] NOT active: client patches not allowed.");
         return false;
-    }
-
-    // Startup test vectors for exact distance check
-    {
-        const float camZero[3] = { 0.0f, 0.0f, 0.0f };
-        const float pNear[3]   = { 5.0f, 5.0f, 5.0f }; // 75 < 100
-        const float pFar[3]    = { 6.0f, 6.0f, 6.0f }; // 108 >= 100
-        const float pBound1[3] = { 7.0f, 7.0f, 1.0f }; // 99 < 100
-        const float pBound2[3] = { 7.0f, 7.0f, 2.0f }; // 102 >= 100
-
-        if (!Fast_DistCheck(pNear, camZero) ||
-             Fast_DistCheck(pFar, camZero) ||
-            !Fast_DistCheck(pBound1, camZero) ||
-             Fast_DistCheck(pBound2, camZero)) {
-            Log("[SceneQueryCellFast] NOT active: self-test vectors failed.");
-            return false;
-        }
     }
 
     if (memcmp((const void*)kTarget, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
@@ -263,8 +134,7 @@ void Shutdown() {
 
 void LogStats() {
     if (!g_installed) return;
-    Log("[SceneQueryCellFast] calls=%llu emptySkips=%llu tested=%llu visible=%llu",
-        g_calls, g_emptySkips, g_entitiesTested, g_entitiesVisible);
+    Log("[SceneQueryCellFast] calls=%llu emptySkips=%llu", g_calls, g_emptySkips);
 }
 
 } // namespace SceneQueryCellFast
