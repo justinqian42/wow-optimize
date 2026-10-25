@@ -722,6 +722,7 @@ namespace Config {
         bool OptM2BatchCmpTransparent = true;
         bool OptM2BatchCmpSolid = true;
         bool OptParticleQuad = false;
+        bool OptDetailDoodadVertices = false;
         bool OptParallelParticles = false;
         bool OptM2ParallelRoots = true;
         bool OptM2ParallelChildren = false;

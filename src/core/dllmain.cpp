@@ -119,6 +119,7 @@
 #include "sky_cloud_texels.h"
 #include "particle_track_eval_sse2.h"
 #include "particle_quad_sse2.h"
+#include "detail_doodad_vertices_sse2.h"
 #include "particle_fill_fast.h"
 #include "../hooks_subsystems/particle_loop_prefetch.h"
 #include "../hooks_subsystems/addon_memory_walk.h"
@@ -6196,6 +6197,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("DbcFastRle::LogStats", DbcFastRle::LogStats());
     STAT_TIME("UIFrameRemove::LogStats", UIFrameRemove::LogStats());
     STAT_TIME("ParticleQuad::LogStats", ParticleQuad::LogStats());
+    STAT_TIME("DetailDoodadVertices::LogStats", DetailDoodadVertices::LogStats());
     STAT_TIME("ParallelParticles::LogStats", ParallelParticles::LogStats());
     STAT_TIME("M2ParallelRoots::LogStats", M2ParallelRoots::LogStats());
     STAT_TIME("M2ParallelChildren::LogStats", M2ParallelChildren::LogStats());
@@ -9052,6 +9054,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     DbcFastRle::Init();
     UIFrameRemove::Init();
     ParticleQuad::Init();
+    DetailDoodadVertices::Init();
     ParallelParticles::Init();
     M2ParallelRoots::Init();
     M2ParallelChildren::Init();
@@ -12128,6 +12131,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             DbcFastRle::Shutdown();
             UIFrameRemove::Shutdown();
             ParticleQuad::Shutdown();
+            DetailDoodadVertices::Shutdown();
             ParallelParticles::Shutdown();
             ParticleFillFast::Shutdown();
             RibbonEdgeLoop::Shutdown();

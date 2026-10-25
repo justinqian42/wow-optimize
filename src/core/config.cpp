@@ -242,6 +242,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2BatchCmpTransparent", &Settings::OptM2BatchCmpTransparent },
     { "Graphics_Sound", "M2BatchCmpSolid", &Settings::OptM2BatchCmpSolid },
     { "Graphics_Sound", "ParticleQuad", &Settings::OptParticleQuad },
+    { "Graphics_Sound", "DetailDoodadVertices", &Settings::OptDetailDoodadVertices },
     { "Graphics_Sound", "ParallelParticles", &Settings::OptParallelParticles },
     { "Graphics_Sound", "M2ParallelRoots", &Settings::OptM2ParallelRoots },
     { "Graphics_Sound", "M2ParallelChildren", &Settings::OptM2ParallelChildren },
@@ -949,6 +950,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptM2BatchCmpTransparent = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpTransparent", 1, iniPath.c_str()) != 0;
         g_settings.OptM2BatchCmpSolid       = GetPrivateProfileIntA("Graphics_Sound", "M2BatchCmpSolid", 1, iniPath.c_str()) != 0;
         g_settings.OptParticleQuad         = GetPrivateProfileIntA("Graphics_Sound", "ParticleQuad", 0, iniPath.c_str()) != 0;
+        g_settings.OptDetailDoodadVertices = GetPrivateProfileIntA("Graphics_Sound", "DetailDoodadVertices", 0, iniPath.c_str()) != 0;
         g_settings.OptParallelParticles    = GetPrivateProfileIntA("Graphics_Sound", "ParallelParticles", 0, iniPath.c_str()) != 0;
         g_settings.OptM2ParallelRoots      = GetPrivateProfileIntA("Graphics_Sound", "M2ParallelRoots", 1, iniPath.c_str()) != 0;
         g_settings.OptM2ParallelChildren   = GetPrivateProfileIntA("Graphics_Sound", "M2ParallelChildren", 0, iniPath.c_str()) != 0;
