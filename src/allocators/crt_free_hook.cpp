@@ -15,8 +15,15 @@
 #include "crash_dumper.h"
 #include "sampling_profiler.h"
 #include "alloc_tag_census.h"
+#include "memory_pressure_governor.h"
 
 extern "C" void Log(const char* fmt, ...);
+extern "C" bool mi_is_in_heap_region(const void* p);
+extern "C" void mi_free(void* p);
+extern "C" void* mi_malloc(size_t size);
+extern "C" void* mi_calloc(size_t count, size_t size);
+extern "C" void mi_collect(bool force);
+extern DWORD g_mainThreadId;
 
 // WoW's CRT free wrapper, read out of the binary rather than assumed:
 //
@@ -137,9 +144,52 @@ int __stdcall Hooked_CrtFree(void* block, int a2, int a3, int a4) {
     NoteHit(n);
     if (block) {
         if (AllocTagCensus::g_on) AllocTagCensus::OnFree(block);
-        g_wow_free(block);
+        if (mi_is_in_heap_region(block)) {
+            mi_free(block);
+        } else {
+            g_wow_free(block);
+        }
     }
     return 1;
+}
+
+// Cold emergency recovery: called ONLY when CRT heap allocation returns NULL and
+// the client is facing immediate FatalError dialog termination.
+// Marked noinline so that Hooked_WowAlloc keeps a small, cookie-less hot path frame.
+__declspec(noinline)
+static void PerformEmergencyOomRecovery(unsigned neededBytes, const char* tag, DWORD exitCode) {
+    Log("[OOM] Allocation of %u bytes (tag=%s, code=%u) FAILED. Triggering emergency memory recovery...",
+        neededBytes, tag ? tag : "unknown", exitCode);
+
+    // 1. Force PressureGovernor to RED and fire all registered callbacks (sheds regex, guid, lua, tex budget).
+    PressureGovernor::EmergencyShed();
+
+    // 2. Clear unreferenced M2 shared models and unreferenced textures from WoW's own caches
+    // ONLY safe to invoke on the main thread (thread 0 / g_mainThreadId).
+    DWORD curThread = GetCurrentThreadId();
+    if (g_mainThreadId == 0 || curThread == g_mainThreadId) {
+        __try {
+            uintptr_t scene = *(uintptr_t*)0x00CD754C;
+            if (scene && *(uintptr_t*)(scene + 4)) {
+                typedef void (__thiscall* m2_gc_fn)(void*);
+                ((m2_gc_fn)0x0081CAB0)((void*)scene);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+        __try {
+            typedef void (*tex_clear_fn)();
+            ((tex_clear_fn)0x004B8060)();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
+    // 3. Compact default process heap to coalesce adjacent free chunks
+    HANDLE hHeap = GetProcessHeap();
+    if (hHeap) {
+        HeapCompact(hHeap, 0);
+    }
+
+    // 4. Force mimalloc to return freed pages to OS
+    mi_collect(true);
 }
 
 // Size census.
@@ -172,7 +222,30 @@ void* __stdcall Hooked_WowAlloc(int size, int a2, DWORD exitCode, char flags) {
         return p;
     }
 
-    // Out of memory: hand it back to the original, which reports it properly.
+    // Out of memory: attempt emergency shedding and heap compaction before giving up.
+    static thread_local bool s_inEmergency = false;
+    if (!s_inEmergency) {
+        s_inEmergency = true;
+        PerformEmergencyOomRecovery(rounded, (const char*)(uintptr_t)a2, exitCode);
+
+        // Retry allocation from CRT heap
+        p = (flags & 8) ? g_crt_calloc(1, rounded) : g_crt_malloc(rounded);
+        if (!p) {
+            // Secondary fallback: allocate from mimalloc if CRT heap is too fragmented
+            p = (flags & 8) ? mi_calloc(1, rounded) : mi_malloc(rounded);
+        }
+
+        s_inEmergency = false;
+
+        if (p) {
+            Log("[OOM] Emergency recovery SUCCEEDED: allocated %u bytes (%p) after cache shedding. Crash prevented.",
+                rounded, p);
+            if (AllocTagCensus::g_on) AllocTagCensus::OnAlloc(p, rounded, (const char*)(uintptr_t)a2, exitCode);
+            return p;
+        }
+    }
+
+    // Exhausted: hand it back to the original, which reports it properly.
     return g_origAlloc(size, a2, exitCode, flags);
 }
 

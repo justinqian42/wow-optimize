@@ -217,10 +217,19 @@ void Grow() {
     if (!CommittedInArena(&committed, &handed)) return;
 
     const SIZE_T step = (SIZE_T)Config::g_settings.MimallocHighArenaMB * 1024 * 1024;
-    // The headroom is one step: by the time the allocator is within a block of
-    // the end it is about to need the next one, and reserving after it has
-    // already gone to the OS would be too late to matter.
-    if (committed + step < handed) return;
+    // Reserving an arena block takes virtual address space above 2GB that other
+    // high-placement subsystems (D3D9, wow.exe heap, textures) also need.
+    // The previous check 'committed + step < handed' had an arithmetic flaw:
+    // when handed == step (initial 256MB), any committed > 0 caused
+    // (committed + step) > handed to be true, immediately reserving another 256MB
+    // on the very first 10s tick, even though only 18MB was committed!
+    // That prematurely locked up 512MB above 2GB, exhausting the high half and
+    // causing HighPlacement to fall back top-down into the low 2GB.
+    //
+    // Headroom before growing: grow only when committed is within 32MB of the
+    // handed capacity (or within 25% of the block).
+    const SIZE_T headroom = (step > 64 * 1024 * 1024) ? (32 * 1024 * 1024) : (step / 4);
+    if (committed + headroom < handed) return;
 
     SIZE_T want = step;
     if (g_handed + want > g_maxHanded) want = g_maxHanded - g_handed;

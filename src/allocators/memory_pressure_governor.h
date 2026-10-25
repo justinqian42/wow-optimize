@@ -41,4 +41,8 @@ Level GetLevel();
 // Up to 16 callbacks; returns false if the table is full.
 bool RegisterShedCallback(ShedCallback cb, void* ctx);
 
+// Immediately forces level to PRESSURE_RED and invokes all registered shed callbacks.
+// Called during allocator emergency recovery when an allocation has failed.
+void EmergencyShed();
+
 } // namespace PressureGovernor

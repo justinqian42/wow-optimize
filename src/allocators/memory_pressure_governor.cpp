@@ -90,6 +90,13 @@ bool RegisterShedCallback(ShedCallback cb, void* ctx) {
     return true;
 }
 
+void EmergencyShed() {
+    Level prev = g_level.exchange(PRESSURE_RED);
+    Log("[PressureGovernor] EMERGENCY SHED triggered (previous level=%s) - firing all callbacks with RED",
+        LevelName(prev));
+    FireCallbacks(PRESSURE_RED);
+}
+
 // The largest free run BELOW 2GB, which is where the client allocates from.
 //
 // A run that crosses the boundary is cut at it rather than carried over, so a

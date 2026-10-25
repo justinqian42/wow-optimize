@@ -158,6 +158,8 @@ const char* g_exState = "not looked for";
 ULONG g_reserveCalls = 0, g_reserveCallsEx = 0;
 ULONG g_attribWalk = 0, g_attribScan = 0, g_attribNone = 0;
 ULONG g_topDownAdded = 0, g_topDownHigh = 0, g_topDownLow = 0, g_topDownRetried = 0;
+volatile LONG g_highHalfFull = 0;
+DWORD         g_highHalfFullTick = 0;
 ULONG g_heapGrowthLeft = 0;                   // reservations made by ntdll itself that were not moved
 ULONG g_keptLow = 0;                          // would have been placed, but the caller is a kept-low module
 // Every reservation of the minimum size made from inside ntdll, moved or not, by what it asked for
@@ -388,7 +390,11 @@ Decision Decide(PVOID* baseAddress, SIZE_T asked, ULONG allocationType, bool may
         d.slot = AttributeCaller(table, retAddr, retSlot, &where);
         d.ret = where;
     }
-    if (candidate) {
+    const bool highFull = (g_highHalfFull != 0) && (GetTickCount() - g_highHalfFullTick <= 10000);
+    if (!highFull && g_highHalfFull != 0) {
+        InterlockedExchange(&g_highHalfFull, 0);
+    }
+    if (candidate && !highFull) {
         const unsigned char cls = g_slots[d.slot].cls;
         d.addTopDown = (cls == kClassClient && placeClient) ||
                        (cls == kClassOther && placeModules);
@@ -404,7 +410,13 @@ void Record(const Decision& d, LONG status, bool retried, PVOID base, SIZE_T siz
         if (retried) {
             if (status >= 0) ++g_topDownRetried;
         } else if (status >= 0) {
-            if ((uintptr_t)base >= kLowHalfEnd) ++g_topDownHigh; else ++g_topDownLow;
+            if ((uintptr_t)base >= kLowHalfEnd) {
+                ++g_topDownHigh;
+            } else {
+                ++g_topDownLow;
+                InterlockedExchange(&g_highHalfFull, 1);
+                g_highHalfFullTick = GetTickCount();
+            }
         }
     }
     if (status < 0) return;
@@ -486,6 +498,10 @@ LONG NTAPI Hooked_NtAllocateVirtualMemoryEx(HANDLE process, PVOID* baseAddress,
 
 LONG NTAPI Hooked_NtFreeVirtualMemory(HANDLE process, PVOID* baseAddress,
                                       PSIZE_T regionSize, ULONG freeType) {
+    if (process == kCurrentProcess && baseAddress && *baseAddress &&
+        (uintptr_t)*baseAddress >= kLowHalfEnd && (freeType & MEM_RELEASE) != 0) {
+        InterlockedExchange(&g_highHalfFull, 0);
+    }
     if (g_live && process == kCurrentProcess && baseAddress &&
         (freeType & MEM_RELEASE) != 0) {
         const ULONG index = (ULONG)((uintptr_t)*baseAddress >> 16);
