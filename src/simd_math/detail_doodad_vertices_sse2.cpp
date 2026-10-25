@@ -81,7 +81,7 @@ const unsigned char kPrologue[16] = {
 typedef void* (__thiscall* BufLock_fn)(void* device, void* buf);
 typedef void  (__thiscall* BufUnlock_fn)(void* device, void* buf, uint32_t param);
 typedef void  (__thiscall* WaitForLoad_fn)(void* model, void* dummy);
-typedef float*(__stdcall* MatrixRot_fn)(float* outMtx, const float* basis, const float* dir, float angle, const float* axis);
+typedef float*(__stdcall* MatrixRot_fn)(float* outMtx, float* tempMtx, const float* basis, float angle, const float* axis);
 
 typedef void (__thiscall* FillVertices_fn)(void* self);
 FillVertices_fn g_orig = nullptr;
@@ -119,11 +119,6 @@ struct CGxVertexPNCT {
 static_assert(sizeof(CGxVertexPNCT) == 36, "CGxVertexPNCT size mismatch");
 
 static const float kAxisZ[3] = { 0.0f, 0.0f, 1.0f };
-static const float kBasisIdentity[9] = {
-    1.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 1.0f
-};
 
 // ----------------------------------------------------------------------------
 // Startup Self-Test Vectors (bit-exact evaluation)
@@ -259,9 +254,9 @@ __declspec(noinline) __declspec(safebuffers) static void FillDoodad3D(
         const double vy = (double)m2.pos[1];
         const double vz = (double)m2.pos[2];
 
-        const double rx = mtx3 * vy + mtx0 * vx + mtx6 * vz;
-        const double ry = mtx4 * vy + mtx1 * vx + mtx7 * vz;
-        const double rz = mtx8 * vz + mtx2 * vx + mtx5 * vy;
+        const double rx = (mtx3 * vy + mtx0 * vx) + mtx6 * vz;
+        const double ry = (mtx4 * vy + mtx1 * vx) + mtx7 * vz;
+        const double rz = (mtx8 * vz + mtx2 * vx) + mtx5 * vy;
 
         pOut->pos[0] = (float)(rx * sc + px);
         pOut->pos[1] = (float)(ry * sc + py);
@@ -373,20 +368,28 @@ __declspec(noinline) __declspec(safebuffers) static void ProcessBatchVertices(vo
 
             const uint32_t fan = triIndex & 3;
             if (!(builtFan & (1 << fan))) {
-                const float len = 1.0f / sqrtf(normY * normY + normZ * normZ);
-                const float tangentZ = normZ * len;
-                const float tangentY = -normY * len;
-                const float binormalX = normY * tangentZ - normZ * tangentY;
-                const float binormalY = -tangentZ * normX;
-                const float binormalZ = tangentY * normX;
+                const float lenSq = normY * normY + normZ * normZ;
+                float v21 = 0.0f;
+                if (lenSq > 1e-12f) {
+                    v21 = 1.0f / sqrtf(lenSq);
+                }
+                const float v24 = normZ * v21;
+                const float v26 = -normY * v21;
 
                 const float basis[9] = {
-                    binormalX, binormalY, binormalZ,
-                    0.0f, tangentZ, tangentY,
-                    normX, normY, normZ
+                    normY * v26 - normZ * v24,
+                    -v26 * normX,
+                    v24 * normX,
+                    0.0f,
+                    v24,
+                    v26,
+                    normX,
+                    normY,
+                    normZ
                 };
 
-                fnMatrixRot(matrices[fan], kBasisIdentity, basis, angle, kAxisZ);
+                float tempMtx[9];
+                fnMatrixRot(matrices[fan], tempMtx, basis, angle, kAxisZ);
                 builtFan |= static_cast<uint8_t>(1 << fan);
             }
 
