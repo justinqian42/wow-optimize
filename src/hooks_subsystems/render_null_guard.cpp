@@ -924,86 +924,6 @@ __declspec(safebuffers) static int __cdecl Hooked_992DA0(int a1, unsigned int a2
 }
 
 // ----------------------------------------------------------------------------
-// FreeType FT_Get_Char_Index guard (sub_9911A0 @ 0x009911A0)
-//
-// In stock 3.3.5a build 12340:
-// int __cdecl sub_9911A0(void* face, unsigned int charcode)
-// {
-//     if (!face) return 0;
-//     void* charmap = *(void**)(face + 0x5C);
-//     if (!charmap) return 0;
-//     void* driver = *(void**)(face + 0x60);
-//     void* clazz  = *(void**)(driver + 0x14);
-//     typedef int (__cdecl *get_char_index_fn)(void* charmap, unsigned int charcode);
-//     get_char_index_fn fn = *(get_char_index_fn*)(clazz + 0x54);
-//     return fn(charmap, charcode); // <-- Invokes fn without verifying non-null!
-// }
-//
-// Root Cause:
-// In Alterac Valley / busy combat (15v15), custom UI fonts (e.g. Sarych Cyrillic fonts,
-// combat text, or nameplate fonts) query glyph indices via sub_6C3D40 -> sub_9911A0.
-// If the font format/driver does not implement get_char_index or clazz->54h is null,
-// sub_9911A0 calls address 0x00000000, crashing immediately with 0xC0000005.
-//
-// Guard:
-// Validate face, charmap, driver, clazz, and clazz->get_char_index. If any pointer is
-// invalid or clazz->get_char_index is null/invalid code pointer, return 0 (glyph 0 =
-// undefined / missing glyph) safely without crashing.
-// ----------------------------------------------------------------------------
-
-static constexpr uintptr_t kTarget9911A0 = 0x009911A0;
-static const unsigned char kExpectedPrologue9911A0[6] = {
-    0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x08
-};
-
-typedef int (__cdecl* FT_GetCharIndex_fn)(void* face, unsigned int charcode);
-static FT_GetCharIndex_fn g_orig9911A0 = nullptr;
-static volatile LONG g_nullGetCharIndexSuppressed = 0;
-static bool g_guard9911A0Active = false;
-
-__declspec(naked) static void Hooked_9911A0() {
-    __asm {
-        mov edx, dword ptr [esp + 4]   // face
-        cmp edx, 0x10000
-        jb ret_zero
-        cmp edx, 0xFFFE0000
-        jae ret_zero
-
-        mov ecx, dword ptr [edx + 0x5C] // charmap
-        cmp ecx, 0x10000
-        jb ret_zero
-        cmp ecx, 0xFFFE0000
-        jae ret_zero
-
-        mov edx, dword ptr [edx + 0x60] // driver
-        cmp edx, 0x10000
-        jb ret_zero
-        cmp edx, 0xFFFE0000
-        jae ret_zero
-
-        mov eax, dword ptr [edx + 0x14] // clazz
-        cmp eax, 0x10000
-        jb ret_zero
-        cmp eax, 0xFFFE0000
-        jae ret_zero
-
-        mov eax, dword ptr [eax + 0x54] // get_char_index
-        cmp eax, 0x10000
-        jb ret_zero
-        cmp eax, 0xFFFE0000
-        jae ret_zero
-
-        jmp dword ptr [g_orig9911A0]
-
-    ret_zero:
-        inc dword ptr [g_nullGetCharIndexSuppressed]
-        xor eax, eax
-        ret
-    }
-}
-
-
-// ----------------------------------------------------------------------------
 // M2 GetSequenceDuration / SequenceData guard (sub_8267E0 @ 0x008267E0)
 //
 // In stock 3.3.5a build 12340, sub_8267E0 is a __thiscall method called from
@@ -1018,16 +938,19 @@ __declspec(naked) static void Hooked_9911A0() {
 //     imul eax, 0ACh       ; 172 bytes per sequence record
 //     mov eax, [eax+ecx+90h] ; CRASH at 0x00826862 reading 0x00000090 if ecx is null!
 //
-// When a model is uninitialized, newly spawned, or in the middle of loading textures/bones
-// (especially HD models, WCollections, or UI models), [esi+94h] is null (0). Dereferencing
-// [eax + 0 + 0x90] immediately faults with ACCESS_VIOLATION at 0x00826862 reading from 0x00000090.
+// Root Cause:
+// In stock 3.3.5a, when a model is uninitialized (bit 0 of [this+16] is 0), sub_8267E0
+// first checks and waits for pending file reads (sub_4BA060) and invokes sub_832EA0(this)
+// to allocate and load m_animData. A prior guard returned 0 before sub_832EA0 could run,
+// preventing uninitialized models (such as 3D portrait frames) from ever initializing.
+// Furthermore, if a model has no animData or async loading has not populated it yet,
+// dereferencing [0 + 0x90] crashed with Error #132 ACCESS_VIOLATION at 0x00826862.
 //
 // Guard:
-// Naked assembly validation checking that ECX, [ECX+0x2C], [shared+0x150], and [ECX+0x94]
-// are all within user memory [0x10000, 0xFFFE0000).
-// If any pointer is null or invalid, increments g_modelAnimNullSuppressed and returns 0 (ret 4).
-// Otherwise, branches directly to g_orig8267E0.
-// Zero /GS cookies, zero SEH frames, zero overhead on the hot path.
+// If uninitialized, executes the engine initialization path (sub_4BA060 and sub_832EA0).
+// Then safely resolves the sequence record, verifying that animData [this+0x94] is non-null
+// before reading sequence duration at +0x90. If null, increments g_modelAnimNullSuppressed
+// and returns 0 without crashing. Zero /GS cookies, zero SEH frames.
 // ----------------------------------------------------------------------------
 
 static constexpr uintptr_t kTarget8267E0 = 0x008267E0;
@@ -1035,47 +958,83 @@ static const unsigned char kExpectedPrologue8267E0[6] = {
     0x55, 0x8B, 0xEC, 0x56, 0x8B, 0xF1
 };
 
-static void* g_orig8267E0 = nullptr;
+typedef int (__fastcall *ModelGetAnimDuration_fn)(void* this_ptr, void* dummy_edx, unsigned int a2);
+static ModelGetAnimDuration_fn g_orig8267E0 = nullptr;
 static volatile LONG g_modelAnimNullSuppressed = 0;
 static bool g_guard8267E0Active = false;
 
-__declspec(naked) static void Hooked_8267E0() {
-    __asm {
-        // Validate ecx (this pointer to model instance)
-        cmp ecx, 0x10000
-        jb invalid_model
-        cmp ecx, 0xFFFE0000
-        jae invalid_model
-
-        // Validate [ecx+2Ch] (CM2Shared pointer)
-        mov eax, dword ptr [ecx + 0x2C]
-        cmp eax, 0x10000
-        jb invalid_model
-        cmp eax, 0xFFFE0000
-        jae invalid_model
-
-        // Validate [eax+150h] (M2Header sequence chunk pointer)
-        mov eax, dword ptr [eax + 0x150]
-        cmp eax, 0x10000
-        jb invalid_model
-        cmp eax, 0xFFFE0000
-        jae invalid_model
-
-        // Validate [ecx+94h] (m_animData pointer)
-        mov eax, dword ptr [ecx + 0x94]
-        cmp eax, 0x10000
-        jb invalid_model
-        cmp eax, 0xFFFE0000
-        jae invalid_model
-
-        // All prerequisites valid: forward to original function
-        jmp dword ptr [g_orig8267E0]
-
-    invalid_model:
-        inc dword ptr [g_modelAnimNullSuppressed]
-        xor eax, eax
-        ret 4
+__declspec(safebuffers)
+static int __fastcall Hooked_8267E0(void* this_ptr, void* /*dummy_edx*/, unsigned int a2) {
+    if (!this_ptr || !IsValidUserPointer(reinterpret_cast<uintptr_t>(this_ptr))) {
+        return 0;
     }
+
+    const uintptr_t pModel = reinterpret_cast<uintptr_t>(this_ptr);
+
+    // If model is uninitialized (bit 0 of +0x10 is clear), run engine initialization:
+    if ((*reinterpret_cast<const uint8_t*>(pModel + 0x10) & 1) == 0) {
+        const uintptr_t shared = *reinterpret_cast<const uintptr_t*>(pModel + 0x2C);
+        if (shared && IsValidUserPointer(shared)) {
+            typedef int (__cdecl *AsyncWaitFn)(void*);
+            const AsyncWaitFn asyncWait = reinterpret_cast<AsyncWaitFn>(0x004BA060);
+
+            void* req1 = *reinterpret_cast<void**>(shared + 0x0C);
+            if (req1 && IsValidUserPointer(reinterpret_cast<uintptr_t>(req1))) {
+                asyncWait(req1);
+            }
+
+            const uintptr_t shared2 = *reinterpret_cast<const uintptr_t*>(pModel + 0x2C);
+            if (shared2 && IsValidUserPointer(shared2)) {
+                void* req2 = *reinterpret_cast<void**>(shared2 + 0x0C);
+                if (req2 && IsValidUserPointer(reinterpret_cast<uintptr_t>(req2))) {
+                    asyncWait(req2);
+                }
+            }
+        }
+
+        if (*reinterpret_cast<const uint8_t*>(pModel + 4) & 0x20) {
+            typedef int (__thiscall *ModelInitFn)(void*);
+            reinterpret_cast<ModelInitFn>(0x00832EA0)(this_ptr);
+        }
+    }
+
+    const uintptr_t shared = *reinterpret_cast<const uintptr_t*>(pModel + 0x2C);
+    if (!shared || !IsValidUserPointer(shared)) {
+        return 0;
+    }
+
+    const uintptr_t seqChunk = *reinterpret_cast<const uintptr_t*>(shared + 0x150);
+    if (!seqChunk || !IsValidUserPointer(seqChunk)) {
+        return 0;
+    }
+
+    uint16_t seqIndex = 0;
+    if (a2 == 0xFFFFFFFF) {
+        seqIndex = 0;
+    } else {
+        const uint32_t count = *reinterpret_cast<const uint32_t*>(seqChunk + 0x34);
+        if (a2 < count) {
+            const uintptr_t indices = *reinterpret_cast<const uintptr_t*>(seqChunk + 0x38);
+            if (!indices || !IsValidUserPointer(indices)) {
+                return 0;
+            }
+            seqIndex = *reinterpret_cast<const uint16_t*>(indices + 2 * a2);
+        } else {
+            seqIndex = 0xFFFF;
+        }
+    }
+
+    const uint32_t maxSeq = *reinterpret_cast<const uint32_t*>(seqChunk + 0x2C);
+    if (static_cast<uint32_t>(seqIndex) < maxSeq) {
+        const uintptr_t animData = *reinterpret_cast<const uintptr_t*>(pModel + 0x94);
+        if (!animData || !IsValidUserPointer(animData)) {
+            InterlockedIncrement(&g_modelAnimNullSuppressed);
+            return 0;
+        }
+        return *reinterpret_cast<const int*>(animData + 172 * static_cast<uint32_t>(seqIndex) + 0x90);
+    }
+
+    return 0;
 }
 
 
@@ -1350,22 +1309,6 @@ bool InstallRenderNullGuard()
         }
     }
 
-    void* target9911A0 = (void*)kTarget9911A0;
-    if (WowOpt_ClientPatchAllowed(target9911A0)) {
-        if (memcmp(target9911A0, kExpectedPrologue9911A0, sizeof(kExpectedPrologue9911A0)) == 0) {
-            if (MH_CreateHook(target9911A0, (void*)Hooked_9911A0, (void**)&g_orig9911A0) == MH_OK &&
-                MH_EnableHook(target9911A0) == MH_OK) {
-                g_guard9911A0Active = true;
-                Log("[RenderGuard] FT_Get_Char_Index guard ACTIVE on sub_9911A0 @ 0x%08X", (unsigned)kTarget9911A0);
-            } else {
-                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget9911A0);
-            }
-        } else {
-            const unsigned char* p = (const unsigned char*)target9911A0;
-            Log("[RenderGuard] BAD PROLOGUE at 0x%08X (got %02X %02X %02X %02X %02X %02X)",
-                (unsigned)kTarget9911A0, p[0], p[1], p[2], p[3], p[4], p[5]);
-        }
-    }
 
     void* target7B5020 = (void*)kTarget7B5020;
     if (WowOpt_ClientPatchAllowed(target7B5020)) {
@@ -1531,10 +1474,6 @@ void RenderNullGuard_LogStats()
             (long)g_nullGlyphRasterizerSuppressed);
     }
 
-    if (g_nullGetCharIndexSuppressed > 0) {
-        Log("[RenderGuard] %ld invalid/null FreeType FT_Get_Char_Index calls SUPPRESSED on sub_9911A0 (Null function call crash prevented)",
-            (long)g_nullGetCharIndexSuppressed);
-    }
 
     if (g_listLinkNullSuppressed > 0) {
         Log("[RenderGuard] %ld invalid TSList link calls SUPPRESSED on sub_7B5020 (Crash at 0x007B502D prevented)",
