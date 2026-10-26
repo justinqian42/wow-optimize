@@ -314,6 +314,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "LuaFuncBoundsFast", &Settings::OptLuaFuncBoundsFast },
     { "Graphics_Sound", "SceneNodeActiveFast", &Settings::OptSceneNodeActiveFast },
     { "Graphics_Sound", "GxDeviceStateFast", &Settings::OptGxDeviceStateFast },
+    { "UI_Lua", "UIFrameAlphaFast", &Settings::OptUIFrameAlphaFast },
 };
 
 
@@ -1024,6 +1025,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptLuaFuncBoundsFast    = GetPrivateProfileIntA("UI_Lua", "LuaFuncBoundsFast", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneNodeActiveFast  = GetPrivateProfileIntA("Graphics_Sound", "SceneNodeActiveFast", 0, iniPath.c_str()) != 0;
         g_settings.OptGxDeviceStateFast    = GetPrivateProfileIntA("Graphics_Sound", "GxDeviceStateFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIFrameAlphaFast     = GetPrivateProfileIntA("UI_Lua", "UIFrameAlphaFast", 0, iniPath.c_str()) != 0;
     }
 
 }
