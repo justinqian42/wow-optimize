@@ -170,6 +170,7 @@
 #include "hooks_subsystems/fog_state_dedup.h"
 #include "hooks_subsystems/lua_func_bounds_fast.h"
 #include "hooks_subsystems/scene_node_active_fast.h"
+#include "hooks_subsystems/gx_device_state_fast.h"
 
 #include "world_vis_traverse_sse2.h"
 #include "ui_strata_opt.h"
@@ -1453,6 +1454,10 @@ static void FlushFieldUpdates() {
 }
 
 static bool InstallFieldUpdateHook() {
+    if (Config::g_settings.OptGxDeviceStateFast) {
+        Log("Deferred field updates: NOT active - GxDeviceStateFast owns 0x006A3C40");
+        return false;
+    }
 #if TEST_DISABLE_DEFERRED_FIELD_UPDATES
     Log("Deferred field updates: DISABLED (test toggle)");
     return false;
@@ -6246,6 +6251,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("FogStateDedup::LogStats", FogStateDedup::LogStats());
     STAT_TIME("LuaFuncBoundsFast::LogStats", LuaFuncBoundsFast::LogStats());
     STAT_TIME("SceneNodeActiveFast::LogStats", SceneNodeActiveFast::LogStats());
+    STAT_TIME("GxDeviceStateFast::LogStats", GxDeviceStateFast::LogStats());
 
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
@@ -9043,6 +9049,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     FogStateDedup::Init();
     LuaFuncBoundsFast::Init();
     SceneNodeActiveFast::Init();
+    GxDeviceStateFast::Init();
 
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
@@ -12115,6 +12122,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             FogStateDedup::Shutdown();
             LuaFuncBoundsFast::Shutdown();
             SceneNodeActiveFast::Shutdown();
+            GxDeviceStateFast::Shutdown();
 
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

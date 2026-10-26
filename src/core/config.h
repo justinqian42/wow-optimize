@@ -793,6 +793,7 @@ namespace Config {
         bool OptFogStateDedup = false;
         bool OptLuaFuncBoundsFast = false;
         bool OptSceneNodeActiveFast = false;
+        bool OptGxDeviceStateFast = false;
     };
 
 

@@ -313,6 +313,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "FogStateDedup", &Settings::OptFogStateDedup },
     { "UI_Lua", "LuaFuncBoundsFast", &Settings::OptLuaFuncBoundsFast },
     { "Graphics_Sound", "SceneNodeActiveFast", &Settings::OptSceneNodeActiveFast },
+    { "Graphics_Sound", "GxDeviceStateFast", &Settings::OptGxDeviceStateFast },
 };
 
 
@@ -1022,6 +1023,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptFogStateDedup        = GetPrivateProfileIntA("Graphics_Sound", "FogStateDedup", 0, iniPath.c_str()) != 0;
         g_settings.OptLuaFuncBoundsFast    = GetPrivateProfileIntA("UI_Lua", "LuaFuncBoundsFast", 0, iniPath.c_str()) != 0;
         g_settings.OptSceneNodeActiveFast  = GetPrivateProfileIntA("Graphics_Sound", "SceneNodeActiveFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptGxDeviceStateFast    = GetPrivateProfileIntA("Graphics_Sound", "GxDeviceStateFast", 0, iniPath.c_str()) != 0;
     }
 
 }

@@ -875,6 +875,8 @@ add_library(wow_optimize SHARED
     src/simd_math/collision_segment_leaf_sse2.h
     src/simd_math/spline_seg_length_fast.cpp
     src/simd_math/spline_seg_length_fast.h
+    src/hooks_subsystems/gx_device_state_fast.cpp
+    src/hooks_subsystems/gx_device_state_fast.h
 )
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/server_sync_compat.cpp")
