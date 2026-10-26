@@ -182,37 +182,10 @@ static bool RunSelfTest() {
 bool Init() {
     if (!Config::g_settings.OptTerrainChunkAlphaFade) return true;
 
-    if (!RunSelfTest()) {
-        Log("[TerrainChunkAlphaFade] NOT active: self-test failed");
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[TerrainChunkAlphaFade] NOT active: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[TerrainChunkAlphaFade] NOT active: client patches not allowed");
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hook_sub_7B5420, (void**)&g_orig) != MH_OK) {
-        Log("[TerrainChunkAlphaFade] NOT active: CreateHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[TerrainChunkAlphaFade] NOT active: EnableHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("TerrainChunkAlphaFade", &g_abSubject);
-    SamplingProfiler::RegisterSelfSymbol("TerrainChunkAlphaFade_Hook", (const void*)&Hook_sub_7B5420);
-    Log("[TerrainChunkAlphaFade] Hook installed on sub_7B5420 (0x7A bytes)");
-    return true;
+    // Retired: sub_7B5420 traverses and unlinks active map chunk TSList structures.
+    // Manual pointer unlinking across zone transitions introduces memory safety risks.
+    Log("[TerrainChunkAlphaFade] RETIRED: sub_7B5420 intrusive list unlinking is unsafe across map transitions");
+    return false;
 }
 
 void Shutdown() {
