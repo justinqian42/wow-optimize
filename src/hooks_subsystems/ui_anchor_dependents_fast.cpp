@@ -156,37 +156,11 @@ static bool RunSelfTest() {
 bool Init() {
     if (!Config::g_settings.OptUIAnchorDependentsFast) return true;
 
-    if (!RunSelfTest()) {
-        Log("[UIAnchorDependentsFast] NOT active: self-test failed");
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[UIAnchorDependentsFast] NOT active: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[UIAnchorDependentsFast] NOT active: client patches not allowed");
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hook_sub_489D70, (void**)&g_orig) != MH_OK) {
-        Log("[UIAnchorDependentsFast] NOT active: CreateHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[UIAnchorDependentsFast] NOT active: EnableHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("UIAnchorDependentsFast", &g_abSubject);
-    SamplingProfiler::RegisterSelfSymbol("UIAnchorDependentsFast_Hook", (const void*)&Hook_sub_489D70);
-    Log("[UIAnchorDependentsFast] Hook installed on sub_489D70 (0x64 bytes)");
-    return true;
+    // Retired: sub_489D70 is recursive and mutates intrusive lists. In field telemetry
+    // (48,978 calls in Dalaran auction house), empty fastpaths were never hit (empty=0)
+    // and manual node freeing triggered use-after-free corruption in font string layout (sub_992780).
+    Log("[UIAnchorDependentsFast] RETIRED: sub_489D70 is recursive and stateful; fastpath never hit");
+    return false;
 }
 
 void Shutdown() {
