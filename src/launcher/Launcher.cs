@@ -60,7 +60,7 @@ namespace WowOptimizeLauncher {
             "AabbOverlap",         // 48.8 cycles against the client's 44.6
             "M2SortKey",           // 93.2 cycles against the client's 56.3
             "LuaSNewLstrFast",      // 134.9 cycles against the client's 122.6
-            "RenderStateDedup", "ObjVisCache", "AsyncWorkerPool", "FontMetricsFast", "ThreadIdCache", "ParticleQuad", "SceneLightGrid", "UIAnchorDependentsFast", "TerrainChunkAlphaFade"
+            "RenderStateDedup", "ObjVisCache", "AsyncWorkerPool", "FontMetricsFast", "ThreadIdCache", "ParticleQuad", "SceneLightGrid", "UIAnchorDependentsFast", "TerrainChunkAlphaFade", "M2ParticleEmitterMatrixFast"
         };
 
         private static readonly string[] DiagKeys = new string[] {
@@ -205,7 +205,7 @@ namespace WowOptimizeLauncher {
             "LuaGcStockPace",      // turns the GC pacing below it off again
             "LuaGcCoalesce",
             "AabbOverlap", "M2SortKey", "LuaSNewLstrFast",   // slower than the client, see LostKeys
-            "RenderStateDedup", "ObjVisCache", "AsyncWorkerPool", "FontMetricsFast", "ThreadIdCache", "ParticleQuad", "SceneLightGrid", "UIAnchorDependentsFast", "TerrainChunkAlphaFade",   // no effect, see LostKeys
+            "RenderStateDedup", "ObjVisCache", "AsyncWorkerPool", "FontMetricsFast", "ThreadIdCache", "ParticleQuad", "SceneLightGrid", "UIAnchorDependentsFast", "TerrainChunkAlphaFade", "M2ParticleEmitterMatrixFast",   // no effect, see LostKeys
 
             // Each verifies itself against the client on the hot path it replaces
             // and neither has been seen to arm and pay in a session. M2AnimReuse got
@@ -1001,7 +1001,7 @@ namespace WowOptimizeLauncher {
                 { "Fast Exterior Doodad Culling (sub_799980)", new SettingItem("Graphics_Sound", "DoodadCullExterior", false, null, "Accelerates CWorldScene::CullDoodadsExterior in sub_799980 (9,545 samples at 0x007999B8, over 23,000 samples across exterior culling hierarchy). Fastpaths empty terrain chunk doodad lists in ~2 cycles, prefetches upcoming linked list nodes to eliminate RAM pointer-chase latency, vectorizes 3D camera distance evaluation with SSE2 without x87 FPU status word stalls, and eliminates the legacy x87 stack leak. Off by default.", true) },
                 { "Fast Map Chunk Alpha Fade Update (sub_7B5420)", new SettingItem("Graphics_Sound", "TerrainChunkAlphaFade", false, null, "[RETIRED] Accelerates CWorldMap::UpdateMapChunkAlphaFades in sub_7B5420. Retired: traversing and unlinking active map chunk TSList structures with manual pointer offsets introduces memory safety hazards across zone transitions. Off by default.", true) },
                 { "Fast UI Anchor Dependents Deregistration (sub_489D70)", new SettingItem("UI_Lua", "UIAnchorDependentsFast", false, null, "[RETIRED] Accelerates CLayoutFrame::UnregisterDependent in sub_489D70. Retired: callers only invoke sub_489D70 when dependants exist (empty=0 out of 48k calls in field telemetry) and manual node freeing triggered use-after-free corruption in font string layout (sub_992780) during auction house browsing. Off by default.", true) },
-                { "Fast M2 Particle Emitter Matrix Composition (sub_8309C0)", new SettingItem("Graphics_Sound", "M2ParticleEmitterMatrixFast", false, null, "Accelerates M2ParticleEmitter::Update matrix evaluation in sub_8309C0 (13,421 samples across sub_8309C0, 1.6% to 2.1% of executing CPU time in raid/combat visual effects). Eliminates CRT rep movsd for 64-byte bone matrices, inlines 4x4 matrix translation and world transform composition, and collapses billboard rotation into direct sign negation. Evaluates in IEEE double precision in client operation order for exact 53-bit x87 bit parity with zero /GS security cookies. Off by default.", true) },
+                { "Fast M2 Particle Emitter Matrix Composition (sub_8309C0)", new SettingItem("Graphics_Sound", "M2ParticleEmitterMatrixFast", false, null, "[HELD BACK] Accelerates M2ParticleEmitter::Update matrix evaluation in sub_8309C0. Held back: startup self-test bit parity failed against client matrix multiplication order. Kept disarmed until bit-exact offline harness equivalence is established. Off by default.", true) },
             };
 
 
