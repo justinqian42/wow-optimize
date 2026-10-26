@@ -173,6 +173,7 @@
 #include "hooks_subsystems/gx_device_state_fast.h"
 #include "hooks_subsystems/ui_frame_alpha_fast.h"
 #include "simd_math/doodad_cull_exterior_sse2.h"
+#include "simd_math/terrain_chunk_alpha_fade.h"
 
 #include "world_vis_traverse_sse2.h"
 #include "ui_strata_opt.h"
@@ -6256,6 +6257,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("GxDeviceStateFast::LogStats", GxDeviceStateFast::LogStats());
     STAT_TIME("UIFrameAlphaFast::LogStats", UIFrameAlphaFast::LogStats());
     STAT_TIME("DoodadCullExterior::LogStats", DoodadCullExterior::LogStats());
+    STAT_TIME("TerrainChunkAlphaFade::LogStats", TerrainChunkAlphaFade::LogStats());
 
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
@@ -9056,6 +9058,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     GxDeviceStateFast::Init();
     UIFrameAlphaFast::Init();
     DoodadCullExterior::Init();
+    TerrainChunkAlphaFade::Init();
 
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
@@ -12131,6 +12134,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             GxDeviceStateFast::Shutdown();
             UIFrameAlphaFast::Shutdown();
             DoodadCullExterior::Shutdown();
+            TerrainChunkAlphaFade::Shutdown();
 
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

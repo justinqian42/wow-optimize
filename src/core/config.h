@@ -796,6 +796,7 @@ namespace Config {
         bool OptGxDeviceStateFast = false;
         bool OptUIFrameAlphaFast = false;
         bool OptDoodadCullExterior = false;
+        bool OptTerrainChunkAlphaFade = false;
     };
 
 
