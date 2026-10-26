@@ -797,6 +797,7 @@ namespace Config {
         bool OptUIFrameAlphaFast = false;
         bool OptDoodadCullExterior = false;
         bool OptTerrainChunkAlphaFade = false;
+        bool OptUIAnchorDependentsFast = false;
     };
 
 
