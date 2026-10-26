@@ -798,6 +798,7 @@ namespace Config {
         bool OptDoodadCullExterior = false;
         bool OptTerrainChunkAlphaFade = false;
         bool OptUIAnchorDependentsFast = false;
+        bool OptM2ParticleEmitterMatrixFast = false;
     };
 
 
