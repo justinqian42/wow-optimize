@@ -879,6 +879,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/gx_device_state_fast.h
     src/hooks_subsystems/ui_frame_alpha_fast.cpp
     src/hooks_subsystems/ui_frame_alpha_fast.h
+    src/simd_math/doodad_cull_exterior_sse2.cpp
+    src/simd_math/doodad_cull_exterior_sse2.h
 )
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/server_sync_compat.cpp")

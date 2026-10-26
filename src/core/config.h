@@ -795,6 +795,7 @@ namespace Config {
         bool OptSceneNodeActiveFast = false;
         bool OptGxDeviceStateFast = false;
         bool OptUIFrameAlphaFast = false;
+        bool OptDoodadCullExterior = false;
     };
 
 
