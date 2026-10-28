@@ -470,45 +470,7 @@ bool SelfTestPasses() {
 
 void Init() {
     if (!Config::g_settings.OptM2ShadowBatchFast) return;
-
-    if (!BytesMatch(kTarget, kPrologue, sizeof(kPrologue))) {
-        Log("[M2ShadowBatchFast] NOT active: prologue bytes at 0x%08X do not match "
-            "CM2Model::GatherModelBatchesShadowMap, hook refused.", (unsigned)kTarget);
-        return;
-    }
-
-    if (!SelfTestPasses()) {
-        Log("[M2ShadowBatchFast] NOT active: startup self-test failed.");
-        return;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[M2ShadowBatchFast] NOT active: No Client Patches is on, and this hooks "
-            "a function inside wow.exe.");
-        return;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hooked_GatherModelBatches, (void**)&g_orig) != MH_OK) {
-        Log("[M2ShadowBatchFast] NOT active: hook on 0x%08X could not be created.", (unsigned)kTarget);
-        return;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[M2ShadowBatchFast] NOT active: hook on 0x%08X could not be enabled.", (unsigned)kTarget);
-        return;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("M2ShadowBatchFast", &g_abSubject);
-
-    Log("[M2ShadowBatchFast] ACTIVE on CM2Model::GatherModelBatchesShadowMap at 0x%08X "
-        "(0.65%% CPU in profile, 3,715 samples). Replaces serialized x87 fcomp/fnstsw stalls "
-        "with streamlined batch filtering and IEEE double precision alpha test.", (unsigned)kTarget);
-
-    if (g_abSubject) {
-        Log("[M2ShadowBatchFast]   under A/B test: control half calls original client code.");
-    }
+    Log("[M2ShadowBatchFast] RETIRED: sub_834660 replacement uses shared static buffers and risks batch dropping during attachment recursion");
 }
 
 void Shutdown() {

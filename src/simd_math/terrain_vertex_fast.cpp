@@ -253,36 +253,9 @@ __declspec(safebuffers) static float* __fastcall Hook_TerrainVertex(
 } // anonymous namespace
 
 bool Init() {
-    if (!Config::g_settings.OptTerrainVertexFast) {
-        return true;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[TerrainVertexFast] NOT hooked: client patches disabled.");
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[TerrainVertexFast] NOT hooked: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    InitNormalTable();
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)Hook_TerrainVertex, (void**)&g_orig_TerrainVertex) != MH_OK) {
-        Log("[TerrainVertexFast] Failed to create hook at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        Log("[TerrainVertexFast] Failed to enable hook at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_active = true;
-    Log("[TerrainVertexFast] ACTIVE on sub_7C3F30 (0x%08X). Verifying against client for first %lu calls.",
-        (unsigned)kTarget, kVerifyCount);
-    return true;
+    if (!Config::g_settings.OptTerrainVertexFast) return true;
+    Log("[TerrainVertexFast] RETIRED: sub_7C3F30 replacement suppresses writes to coordinate globals flt_D25B88/flt_D25B64");
+    return false;
 }
 
 void LogStats() {

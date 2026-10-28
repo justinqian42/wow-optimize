@@ -215,37 +215,9 @@ __declspec(safebuffers) static int __fastcall Hook_TestGroupBounds(
 } // anonymous namespace
 
 bool Init() {
-    if (!Config::g_settings.OptWmoGroupBounds) {
-        return false;
-    }
-
-    if (IsBadReadPtr((const void*)kTarget, 16)) {
-        Log("[WmoGroupBounds] Target 0x%08X is unreadable - not installing", (unsigned)kTarget);
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
-        Log("[WmoGroupBounds] Prologue check failed at 0x%08X - not installing", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)Hook_TestGroupBounds, (void**)&g_orig) != MH_OK) {
-        Log("[WmoGroupBounds] Failed to create hook at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        Log("[WmoGroupBounds] Failed to enable hook at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    SamplingProfiler::RegisterSelfSymbol("WmoGroupBoundsFast", (const void*)&Hook_TestGroupBounds);
-    Log("[WmoGroupBounds] ACTIVE on CMapObj::TestGroupBounds (sub_7AE880 @ 0x%08X). "
-        "Hoists contiguous AABB slab tests, eliminating heap cache misses and sub_7F9480 calls. "
-        "Dual-run verifying first %u calls and 1 in %u thereafter.",
-        (unsigned)kTarget, kVerifyFirst, kResampleMask + 1);
-    return true;
+    if (!Config::g_settings.OptWmoGroupBounds) return true;
+    Log("[WmoGroupBounds] RETIRED: sub_7AE880 bounding slab culling discards interior WMO building geometry");
+    return false;
 }
 
 void LogStats() {

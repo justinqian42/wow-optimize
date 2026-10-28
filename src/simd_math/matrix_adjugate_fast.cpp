@@ -128,36 +128,10 @@ static bool CheckPrologue(uintptr_t addr, const unsigned char* expected, size_t 
 
 } // namespace
 
-bool Init()
-{
-    if (!Config::g_settings.OptMatrixAdjugateFast) {
-        return false;
-    }
-
-    if (!CheckPrologue(kTarget, kExpectedPrologue, sizeof(kExpectedPrologue))) {
-        Log("[MatrixAdjugateFast] Prologue mismatch at 0x%08X, aborting hook.", (unsigned)kTarget);
-        return false;
-    }
-
-    MH_STATUS status = MH_CreateHook((void*)kTarget, (void*)&Hook_sub_4C2440, (void**)&g_orig);
-    if (status != MH_OK) {
-        Log("[MatrixAdjugateFast] MH_CreateHook failed with status %d.", status);
-        return false;
-    }
-
-    status = MH_EnableHook((void*)kTarget);
-    if (status != MH_OK) {
-        Log("[MatrixAdjugateFast] MH_EnableHook failed with status %d.", status);
-        MH_RemoveHook((void*)kTarget);
-        return false;
-    }
-
-    g_active = true;
-    SamplingProfiler::RegisterSelfSymbol("MatrixAdjugate_Fast", (const void*)&Fast_CMatrix_Adjugate);
-    SamplingProfiler::RegisterSelfSymbol("MatrixAdjugate_Hook", (const void*)&Hook_sub_4C2440);
-
-    Log("[MatrixAdjugateFast] ACTIVE: Hooked sub_4C2440 (2,892 bytes, 685 serialized x87 instructions) with IEEE double exact adjugate derivation.");
-    return true;
+bool Init() {
+    if (!Config::g_settings.OptMatrixAdjugateFast) return true;
+    Log("[MatrixAdjugateFast] RETIRED: sub_4C2440 replacement causes view/projection matrix inversion distortion and black screens");
+    return false;
 }
 
 void Shutdown()

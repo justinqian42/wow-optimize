@@ -170,40 +170,9 @@ __declspec(safebuffers) static void __cdecl Hook_sub_873210(float a1, float a2, 
 } // anonymous namespace
 
 bool Init() {
-    if (g_installed) return true;
-
-    if (!Config::g_settings.OptFogStateDedup) {
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
-        Log("[FogStateDedup] Prologue mismatch at 0x%08X; hook skipped.", (unsigned)kTarget);
-        return false;
-    }
-
-    MH_STATUS st = WineSafe_CreateHook((void*)kTarget, (void*)&Hook_sub_873210, (void**)&g_orig);
-    if (st != MH_OK) {
-        Log("[FogStateDedup] WineSafe_CreateHook failed: %d", st);
-        return false;
-    }
-
-    st = WO_EnableHook((void*)kTarget);
-    if (st != MH_OK) {
-        Log("[FogStateDedup] WO_EnableHook failed: %d", st);
-        MH_DisableHook((void*)kTarget);
-        return false;
-    }
-
-    SamplingProfiler::RegisterSelfSymbol("FogStateDedup_Hook", (const void*)&Hook_sub_873210);
-    g_abSubject = AbTest::IsSubject("FogStateDedup", &g_abSubject);
-    g_installed = true;
-
-    Log("[FogStateDedup] ACTIVE on sub_873210 (0x%08X, 379 bytes). Off by default.", (unsigned)kTarget);
-    if (g_abSubject) {
-        Log("[FogStateDedup] under A/B test: toggled by the test harness.");
-    }
-
-    return true;
+    if (!Config::g_settings.OptFogStateDedup) return true;
+    Log("[FogStateDedup] RETIRED: sub_873210 deduplication leaves newly bound shaders with uninitialized fog constants (c4/c5)");
+    return false;
 }
 
 void Install() {

@@ -115,33 +115,8 @@ __declspec(safebuffers) static void __fastcall Hook_sub_6A3C40(void* thisPtr, vo
 
 bool Init() {
     if (!Config::g_settings.OptGxDeviceStateFast) return true;
-
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[GxDeviceStateFast] NOT active: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[GxDeviceStateFast] NOT active: client patches not allowed");
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hook_sub_6A3C40, (void**)&g_orig) != MH_OK) {
-        Log("[GxDeviceStateFast] NOT active: CreateHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[GxDeviceStateFast] NOT active: EnableHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("GxDeviceStateFast", &g_abSubject);
-    SamplingProfiler::RegisterSelfSymbol("GxDeviceStateFast_Hook", (const void*)&Hook_sub_6A3C40);
-    Log("[GxDeviceStateFast] Hook installed on sub_6A3C40 (0x367 bytes)");
-    return true;
+    Log("[GxDeviceStateFast] RETIRED: sub_6A3C40 skipping desynchronizes D3D9 device render states causing black screens");
+    return false;
 }
 
 void Shutdown() {

@@ -307,48 +307,9 @@ __declspec(safebuffers) void* __cdecl Hooked_TextureGetGxTex(void* texture, int 
 }
 
 bool Init() {
-    if (!Config::g_settings.OptTextureGetGxTexFast) {
-        return true;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[TextureGxTexFast] NOT active: No Client Patches is on.");
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
-        Log("[TextureGxTexFast] NOT active: prologue bytes at 0x%08X do not match expected.",
-            (unsigned)kTarget);
-        return false;
-    }
-
-    if (!RunStartupSelfTest()) {
-        Log("[TextureGxTexFast] NOT active: startup self-test failed.");
-        return false;
-    }
-
-    MH_STATUS status = WineSafe_CreateHook((void*)kTarget, (void*)&Hooked_TextureGetGxTex, (void**)&g_orig);
-    if (status != MH_OK) {
-        Log("[TextureGxTexFast] Failed to create hook on 0x%08X (status=%d)", (unsigned)kTarget, status);
-        return false;
-    }
-
-    status = WO_EnableHook((void*)kTarget);
-    if (status != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[TextureGxTexFast] Failed to enable hook on 0x%08X (status=%d)", (unsigned)kTarget, status);
-        return false;
-    }
-
-    g_installed = true;
-    SamplingProfiler::RegisterSelfSymbol("TextureGetGxTexFast_Hook", (const void*)&Hooked_TextureGetGxTex);
-
-    Log("[TextureGxTexFast] ACTIVE on TextureGetGxTex (sub_4B6CB0 @ 0x%08X). Bypasses non-inlined "
-        "frame and inactive streaming priority checks for resident surfaces. Dual-run verified "
-        "first %u calls and 1 in %u thereafter.",
-        (unsigned)kTarget, kVerifyFirst, kResampleMask + 1);
-
-    return true;
+    if (!Config::g_settings.OptTextureGetGxTexFast) return true;
+    Log("[TextureGxTexFast] RETIRED: sub_4B6CB0 in-place pointer nulling corrupts async texture streaming");
+    return false;
 }
 
 void Shutdown() {

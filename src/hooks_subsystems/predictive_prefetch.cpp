@@ -139,20 +139,8 @@ static void WorkerProc() {
 }
 
 bool Init() {
-    if (!LoadStormAPIs()) {
-        Log("[PredictivePrefetch] Failed to resolve Storm.dll exports");
-        return false;
-    }
-
-    g_shutdown = false;
-    OpenPrivateArchives();
-
-    // Spawn background thread
-    g_workerThread = CreateThread(NULL, 0, PredictivePrefetchWorkerThread, NULL, 0, NULL);
-    g_started = true;
-
-    Log("[PredictivePrefetch] Active - Predictive movement-based read-ahead prefetcher running");
-    return true;
+    Log("[TerrainPrefetch] RETIRED: background Storm MPQ archive reads cause lock contention and severe loading screen delays");
+    return false;
 }
 
 void OnFrame() {

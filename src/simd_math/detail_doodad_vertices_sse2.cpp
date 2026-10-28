@@ -442,46 +442,8 @@ bool BytesMatch(uintptr_t addr, const unsigned char* want, int n) {
 
 bool Init() {
     if (!Config::g_settings.OptDetailDoodadVertices) return true;
-
-    if (!BytesMatch(kTarget, kPrologue, sizeof(kPrologue))) {
-        Log("[DetailDoodadVertices] NOT active: prologue bytes at 0x%08X do not match "
-            "CDetailDoodadInstBatch::FillVertices, hook refused.", (unsigned)kTarget);
-        return false;
-    }
-
-    if (!SelfTestPasses()) {
-        return false;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[DetailDoodadVertices] NOT active: No Client Patches is on, and this hooks "
-            "a function inside wow.exe.");
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hooked_FillVertices, (void**)&g_orig) != MH_OK) {
-        Log("[DetailDoodadVertices] NOT active: hook on 0x%08X could not be created.", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[DetailDoodadVertices] NOT active: hook on 0x%08X could not be enabled.", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("DetailDoodadVertices", &g_abSubject);
-
-    Log("[DetailDoodadVertices] ACTIVE on CDetailDoodadInstBatch::FillVertices at 0x%08X "
-        "(0.73%% CPU in profile). Inlines 2D/3D detail doodad rotation in exact double "
-        "precision and streamlines vertex buffer stores without /GS cookies.", (unsigned)kTarget);
-
-    if (g_abSubject) {
-        Log("[DetailDoodadVertices]   under A/B test: control half calls original client code.");
-    }
-
-    return true;
+    Log("[DetailDoodadVertices] RETIRED: sub_7B1B50 replacement causes ground clutter polygon stretching and white silhouette rendering");
+    return false;
 }
 
 void Shutdown() {

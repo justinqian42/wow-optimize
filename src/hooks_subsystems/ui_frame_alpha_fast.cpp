@@ -149,33 +149,8 @@ __declspec(safebuffers) static void __fastcall Hook_sub_491680(void* thisPtr, vo
 
 bool Init() {
     if (!Config::g_settings.OptUIFrameAlphaFast) return true;
-
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[UIFrameAlphaFast] NOT active: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[UIFrameAlphaFast] NOT active: client patches not allowed");
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hook_sub_491680, (void**)&g_orig) != MH_OK) {
-        Log("[UIFrameAlphaFast] NOT active: CreateHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[UIFrameAlphaFast] NOT active: EnableHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("UIFrameAlphaFast", &g_abSubject);
-    SamplingProfiler::RegisterSelfSymbol("UIFrameAlphaFast_Hook", (const void*)&Hook_sub_491680);
-    Log("[UIFrameAlphaFast] Hook installed on sub_491680 (0xB4 bytes)");
-    return true;
+    Log("[UIFrameAlphaFast] RETIRED: sub_491680 alpha recursion suppression causes UI frames to disappear depending on camera angle");
+    return false;
 }
 
 void Shutdown() {

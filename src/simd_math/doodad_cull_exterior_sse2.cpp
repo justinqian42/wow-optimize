@@ -233,38 +233,8 @@ static bool RunSelfTest() {
 
 bool Init() {
     if (!Config::g_settings.OptDoodadCullExterior) return true;
-
-    if (!RunSelfTest()) {
-        Log("[DoodadCullExterior] NOT active: self-test failed");
-        return false;
-    }
-
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[DoodadCullExterior] NOT active: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[DoodadCullExterior] NOT active: client patches not allowed");
-        return false;
-    }
-
-    if (WineSafe_CreateHook((void*)kTarget, (void*)&Hook_sub_799980, (void**)&g_orig) != MH_OK) {
-        Log("[DoodadCullExterior] NOT active: CreateHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        MH_RemoveHook((void*)kTarget);
-        Log("[DoodadCullExterior] NOT active: EnableHook failed on 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_installed = true;
-    g_abSubject = AbTest::IsSubject("DoodadCullExterior", &g_abSubject);
-    SamplingProfiler::RegisterSelfSymbol("DoodadCullExterior_Hook", (const void*)&Hook_sub_799980);
-    Log("[DoodadCullExterior] Hook installed on sub_799980 (0x1E2 bytes)");
-    return true;
+    Log("[DoodadCullExterior] RETIRED: sub_799980 exterior doodad culling causes missing outdoor scenery");
+    return false;
 }
 
 void Shutdown() {
