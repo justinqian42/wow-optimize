@@ -436,7 +436,7 @@ __declspec(safebuffers) static int __fastcall Hooked_6A2C00(void* this_device, v
         return 0;
     }
     uint32_t format = *(const uint32_t*)((uintptr_t)texId + 0x24);
-    if (format >= 13) {
+    if (format >= 16) {
         InterlockedIncrement(&g_texCreateWildSanitized);
         return 0;
     }
@@ -477,7 +477,7 @@ __declspec(safebuffers) static BOOL __fastcall Hooked_6A31E0(void* this_device, 
         return 0;
     }
     uint32_t format = *(const uint32_t*)((uintptr_t)texId + 0x24);
-    if (format >= 13) {
+    if (format >= 16) {
         InterlockedIncrement(&g_texUpdateWildSanitized);
         return 0;
     }
@@ -1247,21 +1247,26 @@ static bool g_guard6844C0Active = false;
 
 static void __fastcall Hooked_6844C0(void* self, void* dummyEdx, void* texture, const uint32_t* params, uint32_t count) {
     if (!self || !IsValidUserPointer((uintptr_t)self)) return;
-    if (!texture || !IsValidUserPointer((uintptr_t)texture)) return;
+    if (!texture || !IsValidUserPointer((uintptr_t)texture)) {
+        *(uint32_t*)((uintptr_t)self + 0x28B0) = 0xE;
+        return;
+    }
     if (count == 0) {
         g_orig6844C0(self, dummyEdx, texture, params, count);
         return;
     }
     if (count > 32 || !params || !IsValidReadablePointer(params, count * 16)) {
         InterlockedIncrement(&g_invalidStageParamsSuppressed);
+        *(uint32_t*)((uintptr_t)self + 0x28B0) = 0xE;
         return;
     }
 
-    // Verify stage indices: in D3D9, valid texture stages are 0..7
+    // Verify stage indices: in CGxDeviceD3d, the stage lookup array at +0x2870 has 14 slots (0..13)
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t stage = params[i * 4];
-        if (stage >= 8) {
+        if (stage >= 14) {
             InterlockedIncrement(&g_invalidStageParamsSuppressed);
+            *(uint32_t*)((uintptr_t)self + 0x28B0) = 0xE;
             return;
         }
     }
