@@ -167,13 +167,14 @@ static void* g_orig4B6550 = nullptr;
 static volatile LONG g_asyncWaitSuppressed = 0;
 static volatile LONG g_asyncReentrantWaitSuppressed = 0;
 static bool g_guard4B6550Active = false;
-static bool g_optHighPlacementClientActive = false;
+static bool g_hasHighAddressSpace = false;
 
 static inline bool IsValidUserPointer(uintptr_t p) {
     if (p < 0x10000) return false;
+    if (p >= 0xFFFE0000) return false;
     if (p < 0x7FFE0000) return true;
-    if (!g_optHighPlacementClientActive) return false;
-    if (p < 0x80010000 || p >= 0xFFFE0000) return false;
+    if (p < 0x80010000) return false;
+    if (!g_hasHighAddressSpace) return false;
     return true;
 }
 
@@ -181,14 +182,14 @@ __declspec(naked) static void Hooked_4B6550() {
     __asm {
         cmp esi, 0x10000
         jb skip_wait
-        cmp esi, 0x7FFE0000
-        jb check_esi_content
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je skip_wait
-        cmp esi, 0x80010000
-        jb skip_wait
         cmp esi, 0xFFFE0000
         jae skip_wait
+        cmp esi, 0x7FFE0000
+        jb check_esi_content
+        cmp esi, 0x80010000
+        jb skip_wait
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je skip_wait
 
     check_esi_content:
         cmp dword ptr [esi], 0xFFFFFFFF
@@ -200,14 +201,14 @@ __declspec(naked) static void Hooked_4B6550() {
 
         cmp eax, 0x10000
         jb sanitize_and_skip
-        cmp eax, 0x7FFE0000
-        jb check_s_waiting
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je sanitize_and_skip
-        cmp eax, 0x80010000
-        jb sanitize_and_skip
         cmp eax, 0xFFFE0000
         jae sanitize_and_skip
+        cmp eax, 0x7FFE0000
+        jb check_s_waiting
+        cmp eax, 0x80010000
+        jb sanitize_and_skip
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je sanitize_and_skip
 
     check_s_waiting:
         // Only skip if an active wait is ACTUALLY in its polling loop (s_asyncWaitObject at 0x00B4A204 != 0)
@@ -224,29 +225,38 @@ __declspec(naked) static void Hooked_4B6550() {
 
     sanitize_and_skip:
         mov dword ptr [esi + 0x40], 0
-        cmp dword ptr [esi + 0x5C], 0x10000
-        jb check_gxtex
-        cmp dword ptr [esi + 0x5C], 0x7FFE0000
-        jb check_gxtex
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je zero_atlas
-        cmp dword ptr [esi + 0x5C], 0x80010000
+        mov eax, dword ptr [esi + 0x5C]
+        test eax, eax
+        jz check_gxtex
+        cmp eax, 0x10000
         jb zero_atlas
-        cmp dword ptr [esi + 0x5C], 0xFFFE0000
+        cmp eax, 0xFFFE0000
+        jae zero_atlas
+        cmp eax, 0x7FFE0000
         jb check_gxtex
+        cmp eax, 0x80010000
+        jb zero_atlas
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je zero_atlas
+        jmp check_gxtex
     zero_atlas:
         mov dword ptr [esi + 0x5C], 0
+
     check_gxtex:
-        cmp dword ptr [esi + 0x44], 0x10000
-        jb finish_sanitize
-        cmp dword ptr [esi + 0x44], 0x7FFE0000
-        jb finish_sanitize
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je zero_gxtex
-        cmp dword ptr [esi + 0x44], 0x80010000
+        mov eax, dword ptr [esi + 0x44]
+        test eax, eax
+        jz finish_sanitize
+        cmp eax, 0x10000
         jb zero_gxtex
-        cmp dword ptr [esi + 0x44], 0xFFFE0000
+        cmp eax, 0xFFFE0000
+        jae zero_gxtex
+        cmp eax, 0x7FFE0000
         jb finish_sanitize
+        cmp eax, 0x80010000
+        jb zero_gxtex
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je zero_gxtex
+        jmp finish_sanitize
     zero_gxtex:
         mov dword ptr [esi + 0x44], 0
     finish_sanitize:
@@ -590,14 +600,14 @@ __declspec(naked) static void Hooked_7B5020() {
     __asm {
         cmp ecx, 0x10000
         jb invalid_list
-        cmp ecx, 0x7FFE0000
-        jb valid_list
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je invalid_list
-        cmp ecx, 0x80010000
-        jb invalid_list
         cmp ecx, 0xFFFE0000
         jae invalid_list
+        cmp ecx, 0x7FFE0000
+        jb valid_list
+        cmp ecx, 0x80010000
+        jb invalid_list
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je invalid_list
 
     valid_list:
         jmp dword ptr [g_orig7B5020]
@@ -724,7 +734,8 @@ static inline bool IsValidCodePointer(const void* ptr) {
     if (!ptr) return false;
     uintptr_t fnAddr = (uintptr_t)ptr;
     if (fnAddr < 0x10000 || fnAddr >= 0xFFFE0000) return false;
-    if (!g_optHighPlacementClientActive && fnAddr >= 0x7FFE0000) return false;
+    if (fnAddr >= 0x7FFE0000 && fnAddr < 0x80010000) return false;
+    if (fnAddr >= 0x80010000 && !g_hasHighAddressSpace) return false;
 
     // Fast path: wow.exe code section (.text) is always committed executable code:
     if (fnAddr >= 0x00401000 && fnAddr < 0x009DF000) {
@@ -784,7 +795,8 @@ static inline bool IsValidReadablePointer(const void* ptr, size_t size) {
     uintptr_t addr = (uintptr_t)ptr;
     if (addr < 0x10000 || addr >= 0xFFFE0000) return false;
     if (addr + size < addr || addr + size >= 0xFFFE0000) return false;
-    if (!g_optHighPlacementClientActive && (addr + size) > 0x7FFE0000) return false;
+    if ((addr >= 0x7FFE0000 && addr < 0x80010000) || ((addr + size) > 0x7FFE0000 && (addr + size) <= 0x80010000)) return false;
+    if (addr >= 0x80010000 && !g_hasHighAddressSpace) return false;
 
     // Fast path: wow.exe static data / bss
     if (addr >= 0x00401000 && (addr + size) <= 0x00E00000) {
@@ -1086,41 +1098,41 @@ __declspec(naked) static void Hooked_6848A0() {
         mov eax, [esp+4]
         cmp eax, 0x10000
         jb invalid_viewport
-        cmp eax, 0x7FFE0000
-        jb check_device
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je invalid_viewport
-        cmp eax, 0x80010000
-        jb invalid_viewport
         cmp eax, 0xFFFE0000
         jae invalid_viewport
+        cmp eax, 0x7FFE0000
+        jb check_device
+        cmp eax, 0x80010000
+        jb invalid_viewport
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je invalid_viewport
 
     check_device:
         // ecx = this (CGxDevice)
         cmp ecx, 0x10000
         jb invalid_viewport
-        cmp ecx, 0x7FFE0000
-        jb check_rect
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je invalid_viewport
-        cmp ecx, 0x80010000
-        jb invalid_viewport
         cmp ecx, 0xFFFE0000
         jae invalid_viewport
+        cmp ecx, 0x7FFE0000
+        jb check_rect
+        cmp ecx, 0x80010000
+        jb invalid_viewport
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je invalid_viewport
 
     check_rect:
         // [esp+8] = rect
         mov edx, [esp+8]
         cmp edx, 0x10000
         jb invalid_viewport
-        cmp edx, 0x7FFE0000
-        jb valid_viewport
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je invalid_viewport
-        cmp edx, 0x80010000
-        jb invalid_viewport
         cmp edx, 0xFFFE0000
         jae invalid_viewport
+        cmp edx, 0x7FFE0000
+        jb valid_viewport
+        cmp edx, 0x80010000
+        jb invalid_viewport
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je invalid_viewport
 
     valid_viewport:
         jmp dword ptr [g_orig6848A0]
@@ -1182,14 +1194,14 @@ __declspec(naked) static void Hooked_683320() {
         mov eax, [esp+4]
         cmp eax, 0x10000
         jb invalid_target
-        cmp eax, 0x7FFE0000
-        jb valid_target
-        cmp byte ptr [g_optHighPlacementClientActive], 0
-        je invalid_target
-        cmp eax, 0x80010000
-        jb invalid_target
         cmp eax, 0xFFFE0000
         jae invalid_target
+        cmp eax, 0x7FFE0000
+        jb valid_target
+        cmp eax, 0x80010000
+        jb invalid_target
+        cmp byte ptr [g_hasHighAddressSpace], 0
+        je invalid_target
 
     valid_target:
         jmp dword ptr [g_orig683320]
@@ -1201,6 +1213,62 @@ __declspec(naked) static void Hooked_683320() {
     }
 }
 
+// ----------------------------------------------------------------------------
+// CGxDeviceD3d::SetTextureStageParams guard (sub_6844C0 @ 0x006844C0)
+//
+// In stock 3.3.5a build 12340:
+// sub_6844C0 is a __thiscall method on CGxDeviceD3d that sets texture stage parameters.
+// Prototype: void __thiscall sub_6844C0(CGxDeviceD3d* this, void* texture, const void* params, uint32_t count);
+// Calling convention: ECX = this, stack args: [ebp+8]=texture, [ebp+0xC]=params, [ebp+0x10]=count.
+//
+// At 0x006844E6..0x006844E8, the inner loop dereferences [eax] as a DWORD stage index:
+//     mov ecx, [eax]
+//     cmp [edx + ecx*4 + 0x2870], esi
+//
+// If params is uninitialized or corrupted (e.g. stage index corrupted to a float like
+// 0x3F512D99, or an invalid pointer passed), ecx*4 indexes out of bounds, crashing
+// immediately with 0xC0000005 ACCESS_VIOLATION at 0x006844E8.
+//
+// Guard:
+// If texture or device is null/invalid, or count == 0, or count > 32, or params is unreadable,
+// or if any stage in params has stage >= 8, we safely sanitize/suppress the out-of-bounds stage,
+// preventing ERROR #132 at 0x006844E8.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget6844C0 = 0x006844C0;
+static const unsigned char kExpectedPrologue6844C0[8] = {
+    0x55, 0x8B, 0xEC, 0x8B, 0xD1, 0x8B, 0x4D, 0x10
+};
+
+typedef void (__fastcall* SetTextureStageParams_fn)(void* self, void* dummyEdx, void* texture, const uint32_t* params, uint32_t count);
+static SetTextureStageParams_fn g_orig6844C0 = nullptr;
+static volatile LONG g_invalidStageParamsSuppressed = 0;
+static bool g_guard6844C0Active = false;
+
+static void __fastcall Hooked_6844C0(void* self, void* dummyEdx, void* texture, const uint32_t* params, uint32_t count) {
+    if (!self || !IsValidUserPointer((uintptr_t)self)) return;
+    if (!texture || !IsValidUserPointer((uintptr_t)texture)) return;
+    if (count == 0) {
+        g_orig6844C0(self, dummyEdx, texture, params, count);
+        return;
+    }
+    if (count > 32 || !params || !IsValidReadablePointer(params, count * 16)) {
+        InterlockedIncrement(&g_invalidStageParamsSuppressed);
+        return;
+    }
+
+    // Verify stage indices: in D3D9, valid texture stages are 0..7
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t stage = params[i * 4];
+        if (stage >= 8) {
+            InterlockedIncrement(&g_invalidStageParamsSuppressed);
+            return;
+        }
+    }
+
+    g_orig6844C0(self, dummyEdx, texture, params, count);
+}
+
 bool InstallRenderNullGuard()
 {
     if (!Config::g_settings.OptRenderNullGuard) {
@@ -1208,7 +1276,9 @@ bool InstallRenderNullGuard()
         return true;
     }
 
-    g_optHighPlacementClientActive = Config::g_settings.OptHighPlacementClient;
+    SYSTEM_INFO si = {};
+    GetSystemInfo(&si);
+    g_hasHighAddressSpace = ((uintptr_t)si.lpMaximumApplicationAddress > 0x7FFE0000);
 
     void* target = (void*)0x00873060;
     unsigned char* p = (unsigned char*)target;
@@ -1337,6 +1407,21 @@ bool InstallRenderNullGuard()
             }
         } else {
             Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget4B7E80);
+        }
+    }
+
+    void* target6844C0 = (void*)kTarget6844C0;
+    if (WowOpt_ClientPatchAllowed(target6844C0)) {
+        if (memcmp(target6844C0, kExpectedPrologue6844C0, sizeof(kExpectedPrologue6844C0)) == 0) {
+            if (MH_CreateHook(target6844C0, (void*)Hooked_6844C0, (void**)&g_orig6844C0) == MH_OK &&
+                MH_EnableHook(target6844C0) == MH_OK) {
+                g_guard6844C0Active = true;
+                Log("[RenderGuard] SetTextureStageParams guard ACTIVE on sub_6844C0 @ 0x%08X", (unsigned)kTarget6844C0);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget6844C0);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget6844C0);
         }
     }
 
@@ -1508,6 +1593,11 @@ void RenderNullGuard_LogStats()
     if (g_texUpdateWildSanitized > 0) {
         Log("[RenderGuard] %ld corrupted ITexUpdate calls SANITIZED on sub_6A31E0 (Error #132 at 0x006A320B prevented)",
             (long)g_texUpdateWildSanitized);
+    }
+
+    if (g_invalidStageParamsSuppressed > 0) {
+        Log("[RenderGuard] %ld invalid SetTextureStageParams calls SANITIZED on sub_6844C0 (Error #132 at 0x006844E8 prevented)",
+            (long)g_invalidStageParamsSuppressed);
     }
 
     if (g_modelAnimNullSuppressed > 0) {

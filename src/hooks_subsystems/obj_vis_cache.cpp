@@ -110,7 +110,8 @@ static void* __fastcall hooked_HashLookup(
         return orig_HashLookup(thisPtr, hashKey, guidPtr);
     }
 
-    if ((uintptr_t)guidPtr < 0x10000 || (uintptr_t)guidPtr > 0x7FFE0000) {
+    uintptr_t g = (uintptr_t)guidPtr;
+    if (g < 0x10000 || g >= 0xFFFE0000 || (g >= 0x7FFE0000 && g < 0x80000000)) {
         return orig_HashLookup(thisPtr, hashKey, guidPtr);
     }
 
@@ -138,7 +139,8 @@ static void* __fastcall hooked_HashLookup(
         entry->guidHigh == guidHigh)
     {
         void* resObj = entry->result;
-        if (resObj && (uintptr_t)resObj > 0x10000 && (uintptr_t)resObj < 0x7FFE0000) {
+        uintptr_t r = (uintptr_t)resObj;
+        if (resObj && r > 0x10000 && r < 0xFFFE0000 && !(r >= 0x7FFE0000 && r < 0x80000000)) {
             uint64_t expectedGuid = ((uint64_t)guidHigh << 32) | guidLow;
             if (ValidateCachedObject(resObj, expectedGuid)) {
                 InterlockedIncrement(&g_cacheHits);
@@ -186,7 +188,8 @@ __declspec(noinline) static void InvalidateEntry(const void* This) {
 
 // Public Invalidation API (called from Hooked_UnlinkNode in dllmain.cpp)
 extern "C" void InvalidateObjVisCacheFor(void* This) {
-    if (This && g_poolInitDone && (uintptr_t)This >= 0x10000 && (uintptr_t)This <= 0x7FFE0000) {
+    uintptr_t t = (uintptr_t)This;
+    if (This && g_poolInitDone && t >= 0x10000 && t < 0xFFFE0000 && !(t >= 0x7FFE0000 && t < 0x80000000)) {
         InvalidateEntry(This);
     }
 }

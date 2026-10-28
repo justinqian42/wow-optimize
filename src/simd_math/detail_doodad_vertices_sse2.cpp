@@ -379,7 +379,7 @@ __declspec(noinline) __declspec(safebuffers) static void ProcessBatchVertices(vo
                 const float basis[9] = {
                     normY * v26 - normZ * v24,
                     -v26 * normX,
-                    v24 * normX,
+                    -v24 * normX,
                     0.0f,
                     v24,
                     v26,

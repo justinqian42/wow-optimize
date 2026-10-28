@@ -163,7 +163,7 @@ See what other players say: [Reviews and Testimonials](https://github.com/suprep
 This project wouldn't exist without the community. Every crash report, every bisection test, every "hey this broke my addon" message directly shaped the release. 
 
 Special thanks to:
-Morbent, Darkmoore, Ethodeus, Billy Hoyle, tuan, NoGoodLife, feh_dois, David (`_oldq`), Keoo, UNOB, DarkRockDemon, Raymond, Vandal, Mantork, Falcon, Muus, szopachink17, Shandrax, pathetic-lynx, txtsd, Signalborn Soulweaver, Sicsoo, kojekude, Houmbro, Feles Noctis, kromvel85, vabulletizer, [sp0rt99](https://github.com/sarych3vlad), snippi, bezdomen, Hanselgretel, lilserega, lijah2517, reqviemz
+Morbent, Darkmoore, Ethodeus, Billy Hoyle, tuan, NoGoodLife, feh_dois, David (`_oldq`), Keoo, UNOB, DarkRockDemon, Raymond, Vandal, Mantork, Falcon, Muus, szopachink17, Shandrax, pathetic-lynx, txtsd, Signalborn Soulweaver, Sicsoo, kojekude, Houmbro, Feles Noctis, kromvel85, vabulletizer, [sp0rt99](https://github.com/sarych3vlad), snippi, bezdomen, Hanselgretel, lilserega, lijah2517, reqviemz, KEKKEN
 
 
 ### Code contributions
@@ -207,7 +207,7 @@ Every measured item in these notes came out of a log somebody sent in.
   with the lines of its router that produced it. That was enough to trace it
   to this tool's `math.random` returning exactly 1.0, and from there to the
   unseeded generator behind it.
-- **vabulletizer**, **[sp0rt99](https://github.com/sarych3vlad)**, **bezdomen**, **Hanselgretel**, **lilserega**, **lijah2517** — stability testing, crash reports and logs (WoW Circle, server packet synchronization compatibility).
+- **vabulletizer**, **[sp0rt99](https://github.com/sarych3vlad)**, **bezdomen**, **Hanselgretel**, **lilserega**, **lijah2517**, **KEKKEN** — stability testing, crash reports and logs (WoW Circle, server packet synchronization compatibility).
 
 </details>
 

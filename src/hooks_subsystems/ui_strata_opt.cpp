@@ -143,8 +143,8 @@ int __fastcall Hook_SimpleFrame_OnUpdate(void* this_ptr, void* /*edx*/, float el
         const uint32_t linkOffset = *(const uint32_t*)(frame + 0x20C);
 
         while (region && !(region & 1)) {
-            if (*(const uint8_t*)(region + 0xCC) & 0x40) {
-                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x28);
+            const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x28);
+            if (fn != kBaseDirtyUpdate || (*(const uint8_t*)(region + 0xBF) & 2)) {
                 ((Vtable10Fn)fn)((void*)region);
             }
             region = *(const uintptr_t*)(linkOffset + region + 4);
@@ -157,27 +157,33 @@ int __fastcall Hook_SimpleFrame_OnUpdate(void* this_ptr, void* /*edx*/, float el
         region = *(const uintptr_t*)(frame + 0x214);
         if (region & 1) region = 0;
         while (region && !(region & 1)) {
-            if (*(const uintptr_t*)(region + 0x98)) {
-                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x2C);
+            const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x2C);
+            if (fn != kBaseAnimUpdate || *(const uintptr_t*)(region + 0x98)) {
                 result = ((Vtable11Fn)fn)((void*)region, elapsed);
             }
             region = *(const uintptr_t*)(linkOffset + region + 4);
         }
     } else {
         // Frame has NO anim groups (99.9% of frames):
-        // Coalesce into a single pass through m_regions, skipping idle regions entirely
+        // 1. Dispatch vtable[11] on frame if overridden by derived class
+        const uintptr_t fnFrame = *(const uintptr_t*)(*(const uintptr_t*)frame + 0x2C);
+        if (fnFrame != kBaseAnimUpdate) {
+            result = ((Vtable11Fn)fnFrame)((void*)frame, elapsed);
+        }
+
+        // 2. Coalesce into a single pass through m_regions, skipping idle regions
         uintptr_t region = *(const uintptr_t*)(frame + 0x214);
         if (region & 1) region = 0;
         const uint32_t linkOffset = *(const uint32_t*)(frame + 0x20C);
 
         while (region && !(region & 1)) {
-            if (*(const uint8_t*)(region + 0xCC) & 0x40) {
-                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x28);
-                ((Vtable10Fn)fn)((void*)region);
+            const uintptr_t fn10 = *(const uintptr_t*)(*(const uintptr_t*)region + 0x28);
+            if (fn10 != kBaseDirtyUpdate || (*(const uint8_t*)(region + 0xBF) & 2)) {
+                ((Vtable10Fn)fn10)((void*)region);
             }
-            if (*(const uintptr_t*)(region + 0x98)) {
-                const uintptr_t fn = *(const uintptr_t*)(*(const uintptr_t*)region + 0x2C);
-                result = ((Vtable11Fn)fn)((void*)region, elapsed);
+            const uintptr_t fn11 = *(const uintptr_t*)(*(const uintptr_t*)region + 0x2C);
+            if (fn11 != kBaseAnimUpdate || *(const uintptr_t*)(region + 0x98)) {
+                result = ((Vtable11Fn)fn11)((void*)region, elapsed);
             }
             region = *(const uintptr_t*)(linkOffset + region + 4);
         }

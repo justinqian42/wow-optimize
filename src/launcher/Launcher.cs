@@ -60,7 +60,13 @@ namespace WowOptimizeLauncher {
             "AabbOverlap",         // 48.8 cycles against the client's 44.6
             "M2SortKey",           // 93.2 cycles against the client's 56.3
             "LuaSNewLstrFast",      // 134.9 cycles against the client's 122.6
-            "RenderStateDedup", "ObjVisCache", "AsyncWorkerPool", "FontMetricsFast", "ThreadIdCache", "ParticleQuad", "SceneLightGrid", "UIAnchorDependentsFast", "TerrainChunkAlphaFade", "M2ParticleEmitterMatrixFast"
+            "RenderStateDedup", "ObjVisCache", "AsyncWorkerPool", "FontMetricsFast", "ThreadIdCache", "ParticleQuad", "SceneLightGrid", "UIAnchorDependentsFast", "TerrainChunkAlphaFade", "M2ParticleEmitterMatrixFast",
+            // Destructive / bottleneck switches moved to DIDN'T HELP so no preset enables them:
+            "DefragLf",            // Heap sweeps drop loading throughput 5x (94 MB/s down to 18 MB/s)
+            "D3d9RenderThread",    // Emulated command ring causes 66k+ StretchRect drains and desyncs with DXVK
+            "ExtraReaderThird",    // 3+ reader threads cause lock contention on Storm MPQ archives
+            "ExtraReaderFourth",   // 4 reader threads cause severe contention on custom clients
+            "GrassParallel"        // Multithreaded vertex generation causes heap pressure and race conditions
         };
 
         private static readonly string[] DiagKeys = new string[] {
@@ -237,6 +243,7 @@ namespace WowOptimizeLauncher {
             // four reader threads concurrently pulling from one queue creates severe
             // lock contention on the client's internal structures during loading.
             "ExtraReaderThird", "ExtraReaderFourth",
+            "DefragLf", "D3d9RenderThread", "GrassParallel",
         };
 
         // The order a tab lists them in, and what each run is called. Worst
@@ -2336,7 +2343,7 @@ namespace WowOptimizeLauncher {
                 foreach (SettingItem item in settingsMap.Values) {
                     if (item.Ctrl == null) continue;
                     bool records = Kinds.RecordsForLogging(item.Key);
-                    bool want = item.Key == "AbTest" || records || WantedForSpeed(item);
+                    bool want = records || WantedForSpeed(item);
                     item.Ctrl.Checked = want;
                     if (want) {
                         on++;

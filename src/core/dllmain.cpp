@@ -1407,7 +1407,7 @@ extern "C" void InvalidateDeferredFieldUpdatesFor(void* unit) {
 __declspec(noinline) static void SafeDispatchDeferredFieldUpdate(void* unit, int fieldId, int value) {
     __try {
         uintptr_t p = (uintptr_t)unit;
-        if (p > 0x10000 && p < 0x7FFE0000) {
+        if ((p > 0x10000 && p < 0x7FFE0000) || (p >= 0x80000000 && p < 0xFFFE0000)) {
             orig_OnFieldUpdate(unit, fieldId, value);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -2598,7 +2598,7 @@ static void SafeOrigSleep(DWORD ms) {
     // Protect against dangling hooks left behind by external modules (e.g. Byster, overlays)
     // that unloaded or unhooked dynamically without cleanly unchaining.
     uintptr_t fnAddr = (uintptr_t)orig_Sleep;
-    if (fnAddr < 0x10000 || fnAddr >= 0x7FFE0000) {
+    if (fnAddr < 0x10000 || fnAddr >= 0xFFFE0000 || (fnAddr >= 0x7FFE0000 && fnAddr < 0x80000000)) {
         TrueSleep(ms);
         return;
     }

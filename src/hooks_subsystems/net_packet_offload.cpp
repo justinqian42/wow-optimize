@@ -138,6 +138,18 @@ struct BufferedPacket {
     char arg9;
 };
 
+// Hot path-safe invoker
+__declspec(noinline) static void SafeInvoke_ProcessMessage(const BufferedPacket& pkt) {
+    __try {
+        orig_ProcessMessage(pkt.args[0], pkt.args[1], pkt.args[2], pkt.args[3],
+                            pkt.args[4], pkt.args[5], pkt.args[6], pkt.args[7],
+                            pkt.arg9,
+                            pkt.args[9], pkt.args[10], pkt.args[11], pkt.args[12],
+                            pkt.args[13], pkt.args[14], pkt.args[15], pkt.args[16],
+                            pkt.args[17]);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 static constexpr int PACKET_QUEUE_CAPACITY = 2048;
 static BufferedPacket g_packetQueue[PACKET_QUEUE_CAPACITY] = {};
 static int g_packetQueueCount = 0;
@@ -148,15 +160,7 @@ extern "C" void FlushCoalescedPackets() {
     if (g_packetQueueCount > 0) {
         g_coalescePackets = false; // suspend coalescing during flush
         for (int i = 0; i < g_packetQueueCount; i++) {
-            const BufferedPacket& pkt = g_packetQueue[i];
-            __try {
-                orig_ProcessMessage(pkt.args[0], pkt.args[1], pkt.args[2], pkt.args[3],
-                                    pkt.args[4], pkt.args[5], pkt.args[6], pkt.args[7],
-                                    pkt.arg9,
-                                    pkt.args[9], pkt.args[10], pkt.args[11], pkt.args[12],
-                                    pkt.args[13], pkt.args[14], pkt.args[15], pkt.args[16],
-                                    pkt.args[17]);
-            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            SafeInvoke_ProcessMessage(g_packetQueue[i]);
         }
         g_packetQueueCount = 0;
         g_coalescePackets = true; // resume
@@ -166,6 +170,14 @@ extern "C" void FlushCoalescedPackets() {
 
 // Hooked packet processor
 static int __cdecl Hooked_ProcessMessage(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, char a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18) {
+    static std::atomic<int> packetCount{0};
+    if (packetCount < 100) {
+        // Assuming a1 is the packet structure and the first dword is the opcode or related
+        if (IsReadablePtr((void*)a1, 4)) {
+            Log("[NetPacketOffload] Packet %d: Opcode/Header=0x%08X", packetCount.load(), *(uint32_t*)a1);
+        }
+        packetCount++;
+    }
     return orig_ProcessMessage(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18);
 }
 
@@ -182,15 +194,17 @@ static bool SafeReadHeader(const void* target, unsigned char* outPrologue, size_
 bool Init() {
     g_shutdown = false;
 
-    // Hook verification
+    // Hook verification - 8-byte prologue check (Rule 4)
     void* target = (void*)0x005B2CB0;
-    unsigned char prologue[3];
-    if (!SafeReadHeader(target, prologue, 3)) {
+    unsigned char prologue[8];
+    if (!SafeReadHeader(target, prologue, 8)) {
         Log("[NetPacketOffload] Target address 0x005B2CB0 not readable; skipping hook.");
         return true;
     }
 
-    if (prologue[0] == 0x55 && prologue[1] == 0x8B && prologue[2] == 0xEC) {
+    // Expected prologue for 0x005B2CB0 (needs verification against IDA)
+    const unsigned char expectedPrologue[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x53, 0x56 };
+    if (memcmp(prologue, expectedPrologue, 8) == 0) {
         if (MH_CreateHook(target, (void*)Hooked_ProcessMessage, (void**)&orig_ProcessMessage) == MH_OK) {
             MH_EnableHook(target);
             Log("[NetPacketOffload] Hooked NetClient::ProcessMessage at 0x005B2CB0");

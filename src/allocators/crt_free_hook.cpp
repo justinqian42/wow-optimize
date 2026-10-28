@@ -230,11 +230,6 @@ void* __stdcall Hooked_WowAlloc(int size, int a2, DWORD exitCode, char flags) {
 
         // Retry allocation from CRT heap
         p = (flags & 8) ? g_crt_calloc(1, rounded) : g_crt_malloc(rounded);
-        if (!p) {
-            // Secondary fallback: allocate from mimalloc if CRT heap is too fragmented
-            p = (flags & 8) ? mi_calloc(1, rounded) : mi_malloc(rounded);
-        }
-
         s_inEmergency = false;
 
         if (p) {

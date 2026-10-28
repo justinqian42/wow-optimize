@@ -26,8 +26,8 @@ constexpr uintptr_t kTlsIndexAddr        = 0x00D439BC; // TlsIndex for ObjectMgr
 typedef int   (__cdecl* InitRenderState_fn)();
 typedef int   (__cdecl* AcquireBuffers_fn)(int vertexCount, uint32_t* pVertexBuf, int indexCount, uint32_t* pIndexBuf);
 typedef int   (__cdecl* TextureGetGxTex_fn)(uint32_t texture, int a2, int a3);
-typedef void  (__cdecl* WaitForLoad_fn)(int dummy);
-typedef float*(__stdcall* MatrixRot_fn)(float* outMtx, const float* basis, const float* dir, float angle, const float* axis);
+typedef void  (__thiscall* WaitForLoad_fn)(void* model, void* dummy);
+typedef float*(__stdcall* MatrixRot_fn)(float* outMtx, float* tempMtx, const float* basis, float angle, const float* axis);
 
 typedef void* (__thiscall* BufLock_fn)(uint32_t device, uint32_t buf);
 typedef void  (__thiscall* BufUnlock_fn)(uint32_t device, uint32_t buf, uint32_t param);
@@ -232,11 +232,12 @@ __declspec(noinline) __declspec(safebuffers) static void FillVerticesFast(uint32
             const float v26 = len * v20;
             const float v99 = normY * v26 - normZ * v24;
             const float v100 = -v26 * normX;
-            const float v101 = v24 * normX;
+            const float v101 = -v24 * normX;
             const float params[9] = { v99, v100, v101, 0.0f, v24, v26, normX, normY, normZ };
 
+            float tempMtx[9];
             float mtx[9];
-            fnMatrixRot(mtx, kBasisIdentity, params, angle, kAxisZ);
+            fnMatrixRot(mtx, tempMtx, params, angle, kAxisZ);
 
             for (uint32_t v = 0; v < vertexCount; ++v) {
                 const uint16_t m2Idx = skinIndices[v];
@@ -361,7 +362,7 @@ static void QueueBatchFill(uint32_t* batch) {
         const uint32_t data = *reinterpret_cast<const uint32_t*>(doodadList + 4 * doodadId);
         const uint32_t model = *reinterpret_cast<const uint32_t*>(data + 4);
         if (!(*reinterpret_cast<const uint8_t*>(model + 16) & 1)) {
-            fnWaitForLoad(0);
+            fnWaitForLoad(reinterpret_cast<void*>(model), nullptr);
         }
     }
 

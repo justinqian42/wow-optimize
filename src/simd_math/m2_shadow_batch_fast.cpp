@@ -272,7 +272,12 @@ __declspec(safebuffers) void __fastcall Hooked_GatherModelBatches(
 
     bool doVerify = (g_verified < kVerifyCount) || ((g_calls & kVerifySampleMask) == 0);
     if (!doVerify) {
+        DWORD start = GetTickCount();
         FastGatherModelBatches((uintptr_t)this_ptr, untextured, textured, true);
+        DWORD end = GetTickCount();
+        if (end - start > 100) {
+            Log("[M2ShadowBatchFast] WARNING: FastGatherModelBatches took %lu ms", end - start);
+        }
         return;
     }
 
