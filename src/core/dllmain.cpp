@@ -79,6 +79,7 @@
 #include "color_unpack_sse2.h"
 #include "m2_sort_key_cache.h"
 #include "m2_batch_sort.h"
+#include "simd_math/smem_sort_fast.h"
 #include "m2_batch_cmp_transparent.h"
 #include "m2_batch_cmp_solid.h"
 #include "horizon_test_sse2.h"
@@ -6152,6 +6153,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("AnimScalarTrack::LogStats", AnimScalarTrack::LogStats());
     STAT_TIME("AnimSplineTrack::LogStats", AnimSplineTrack::LogStats());
     STAT_TIME("M2SortKey::LogStats", M2SortKey::LogStats());
+    STAT_TIME("SMemSortFast::LogStats", SMemSortFast::LogStats());
     STAT_TIME("M2BatchSort::LogStats", M2BatchSort::LogStats());
     STAT_TIME("M2BatchCmpTransparent::LogStats", M2BatchCmpTransparent::LogStats());
     STAT_TIME("M2BatchCmpSolid::LogStats", M2BatchCmpSolid::LogStats());
@@ -8989,6 +8991,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     AnimScalarTrack::Init();
     AnimSplineTrack::Init();
     M2SortKey::Init();
+    SMemSortFast::Init();
     M2BatchSort::Init();
     M2BatchCmpTransparent::Init();
     M2BatchCmpSolid::Init();
@@ -12081,6 +12084,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             BoneMatrixUpload::Shutdown();
             UiBatchFill::Shutdown();
             ParticleFill::Shutdown();
+            SMemSortFast::Shutdown();
             M2BatchSort::Shutdown();
             M2BatchCmpTransparent::Shutdown();
             M2BatchCmpSolid::Shutdown();

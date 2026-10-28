@@ -178,6 +178,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "AnimVec3Track", &Settings::OptAnimVec3Track },
     { "Graphics_Sound", "M2SortKey", &Settings::OptM2SortKey },
     { "Graphics_Sound", "M2BatchSort", &Settings::OptM2BatchSort },
+    { "Graphics_Sound", "SMemSortFast", &Settings::OptSMemSortFast },
     { "Graphics_Sound", "CollisionPolyClip", &Settings::OptCollisionPolyClip },
     { "Graphics_Sound", "SkyTextureReuse", &Settings::OptSkyTextureReuse },
     { "Graphics_Sound", "WorldVisTraverse", &Settings::OptWorldVisTraverse },
@@ -872,6 +873,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptAnimVec3Track   = GetPrivateProfileIntA("Graphics_Sound", "AnimVec3Track", 1, iniPath.c_str()) != 0;
         g_settings.OptM2SortKey       = GetPrivateProfileIntA("Graphics_Sound", "M2SortKey", 0, iniPath.c_str()) != 0;
         g_settings.OptM2BatchSort     = GetPrivateProfileIntA("Graphics_Sound", "M2BatchSort", 1, iniPath.c_str()) != 0;
+        g_settings.OptSMemSortFast    = GetPrivateProfileIntA("Graphics_Sound", "SMemSortFast", 0, iniPath.c_str()) != 0;
         g_settings.OptCollisionPolyClip = GetPrivateProfileIntA("Graphics_Sound", "CollisionPolyClip", 1, iniPath.c_str()) != 0;
         g_settings.OptSkyTextureReuse  = GetPrivateProfileIntA("Graphics_Sound", "SkyTextureReuse", 0, iniPath.c_str()) != 0;
         g_settings.OptWorldVisTraverse = GetPrivateProfileIntA("Graphics_Sound", "WorldVisTraverse", 0, iniPath.c_str()) != 0;

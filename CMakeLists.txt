@@ -334,6 +334,8 @@ add_library(wow_optimize SHARED
     src/simd_math/color_unpack_sse2.h
     src/hooks_subsystems/m2_sort_key_cache.cpp
     src/hooks_subsystems/m2_batch_sort.cpp
+    src/simd_math/smem_sort_fast.cpp
+    src/simd_math/smem_sort_fast.h
     src/simd_math/collision_poly_clip_sse2.cpp
     src/hooks_subsystems/sky_texture_reuse.cpp
     src/hooks_subsystems/sky_cloud_texels.cpp

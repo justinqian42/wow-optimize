@@ -78,6 +78,7 @@
 #include "ab_test.h"
 #include "session_verdict.h"
 #include "sampling_profiler.h"
+#include "../simd_math/smem_sort_fast.h"
 
 extern "C" void Log(const char* fmt, ...);
 MH_STATUS WineSafe_CreateHook(void* target, void* detour, void** original);
@@ -318,64 +319,95 @@ inline unsigned long long Work(uint32_t n) {
 }
 
 void __cdecl Hooked_Sort(CmpFn cmp, int32_t* idx, uint32_t n, int ctx) {
-    if ((uintptr_t)cmp != kCmpOpaque || g_dead || g_busy || n < 2) {
-        g_orig(cmp, idx, n, ctx);
-        return;
-    }
-    ++g_sorts;
-    if (g_abSubject && AbTest::StandAside()) {
-        ++g_control;
-        g_orig(cmp, idx, n, ctx);
-        return;
-    }
-    if (n > g_largest) g_largest = n;
-
-    uint32_t maxIdx = 0;
-    for (uint32_t i = 0; i < n; ++i)
-        if ((uint32_t)idx[i] > maxIdx) maxIdx = (uint32_t)idx[i];
-    if (maxIdx >= kCapacity) {
-        ++g_tooLarge;
-        g_orig(cmp, idx, n, ctx);
-        return;
-    }
-
-    const unsigned long long s = g_sorts;
-    const bool verify = g_verifiedSorts < kLearnSorts || (s & kResampleMask) == 0;
-    const bool timeClient = !verify && (s & kResampleMask) == 32;
-    const bool timeMine = !verify && (s & kResampleMask) == 16;
-
-    if (timeClient) {
-        const unsigned long long t0 = __rdtsc();
-        g_orig(cmp, idx, n, ctx);
-        g_clientCycles += __rdtsc() - t0;
-        g_clientWork += Work(n);
-        ++g_clientTimed;
-        return;
-    }
-
-    g_busy = true;
-    const unsigned long long t0 = timeMine ? __rdtsc() : 0;
-    g_base = *(const uint8_t* const*)((uintptr_t)ctx + 0x3C);
-    if (!Gather(idx, n)) {
-        ++g_faults;
-        g_busy = false;
-        g_orig(cmp, idx, n, ctx);
-        return;
-    }
-    g_records += n;
-    if (verify) {
-        g_orig(&CmpVerify, idx, n, ctx);
-        if (!g_dead) ++g_verifiedSorts;
-    } else {
-        g_orig(&CmpArmed, idx, n, ctx);
-        ++g_armedSorts;
-        if (timeMine) {
-            g_mineCycles += __rdtsc() - t0;
-            g_mineWork += Work(n);
-            ++g_mineTimed;
+    if (g_busy || n < 2) {
+        if (Config::g_settings.OptSMemSortFast) {
+            SMemSortFast::Sort((SMemSortFast::CmpFn)cmp, idx, n, (void*)ctx);
+        } else {
+            g_orig(cmp, idx, n, ctx);
         }
+        return;
     }
-    g_busy = false;
+
+    if (Config::g_settings.OptM2BatchSort && (uintptr_t)cmp == kCmpOpaque && !g_dead && g_keys) {
+        ++g_sorts;
+        if (g_abSubject && AbTest::StandAside()) {
+            ++g_control;
+            if (Config::g_settings.OptSMemSortFast) {
+                SMemSortFast::Sort((SMemSortFast::CmpFn)cmp, idx, n, (void*)ctx);
+            } else {
+                g_orig(cmp, idx, n, ctx);
+            }
+            return;
+        }
+        if (n > g_largest) g_largest = n;
+
+        uint32_t maxIdx = 0;
+        for (uint32_t i = 0; i < n; ++i)
+            if ((uint32_t)idx[i] > maxIdx) maxIdx = (uint32_t)idx[i];
+        if (maxIdx >= kCapacity) {
+            ++g_tooLarge;
+            if (Config::g_settings.OptSMemSortFast) {
+                SMemSortFast::Sort((SMemSortFast::CmpFn)cmp, idx, n, (void*)ctx);
+            } else {
+                g_orig(cmp, idx, n, ctx);
+            }
+            return;
+        }
+
+        const unsigned long long s = g_sorts;
+        const bool verify = g_verifiedSorts < kLearnSorts || (s & kResampleMask) == 0;
+        const bool timeClient = !verify && (s & kResampleMask) == 32;
+        const bool timeMine = !verify && (s & kResampleMask) == 16;
+
+        if (timeClient) {
+            const unsigned long long t0 = __rdtsc();
+            g_orig(cmp, idx, n, ctx);
+            g_clientCycles += __rdtsc() - t0;
+            g_clientWork += Work(n);
+            ++g_clientTimed;
+            return;
+        }
+
+        g_busy = true;
+        const unsigned long long t0 = timeMine ? __rdtsc() : 0;
+        g_base = *(const uint8_t* const*)((uintptr_t)ctx + 0x3C);
+        if (!Gather(idx, n)) {
+            ++g_faults;
+            g_busy = false;
+            if (Config::g_settings.OptSMemSortFast) {
+                SMemSortFast::Sort((SMemSortFast::CmpFn)cmp, idx, n, (void*)ctx);
+            } else {
+                g_orig(cmp, idx, n, ctx);
+            }
+            return;
+        }
+        g_records += n;
+        if (verify) {
+            g_orig(&CmpVerify, idx, n, ctx);
+            if (!g_dead) ++g_verifiedSorts;
+        } else {
+            if (Config::g_settings.OptSMemSortFast) {
+                SMemSortFast::Sort((SMemSortFast::CmpFn)&CmpArmed, idx, n, (void*)ctx);
+            } else {
+                g_orig(&CmpArmed, idx, n, ctx);
+            }
+            ++g_armedSorts;
+            if (timeMine) {
+                g_mineCycles += __rdtsc() - t0;
+                g_mineWork += Work(n);
+                ++g_mineTimed;
+            }
+        }
+        g_busy = false;
+        return;
+    }
+
+    // Generic sorting path for all other callers across the engine
+    if (Config::g_settings.OptSMemSortFast) {
+        SMemSortFast::Sort((SMemSortFast::CmpFn)cmp, idx, n, (void*)ctx);
+    } else {
+        g_orig(cmp, idx, n, ctx);
+    }
 }
 
 bool BytesMatch(uintptr_t addr, const unsigned char* want, size_t n) {
@@ -389,14 +421,10 @@ bool BytesMatch(uintptr_t addr, const unsigned char* want, size_t n) {
 }  // namespace
 
 bool Init() {
-    if (!Config::g_settings.OptM2BatchSort) return true;
+    if (!Config::g_settings.OptM2BatchSort && !Config::g_settings.OptSMemSortFast) return true;
 
-    if (!BytesMatch(kSort, kSortPrologue, sizeof(kSortPrologue)) ||
-        !BytesMatch(kCmpOpaque, kCmpPrologue, sizeof(kCmpPrologue)) ||
-        !BytesMatch(kCmpType01, kType01Prologue, sizeof(kType01Prologue))) {
-        Log("[M2BatchSort] NOT active: the bytes at 0x%08X, 0x%08X or 0x%08X are not "
-            "the heapsort and comparators this was read from, so nothing was hooked.",
-            (unsigned)kSort, (unsigned)kCmpOpaque, (unsigned)kCmpType01);
+    if (!BytesMatch(kSort, kSortPrologue, sizeof(kSortPrologue))) {
+        Log("[M2BatchSort] NOT active: prologue mismatch at 0x%08X", (unsigned)kSort);
         return false;
     }
     if (!WowOpt_ClientPatchAllowed((const void*)kSort)) {
@@ -405,13 +433,18 @@ bool Init() {
         return false;
     }
 
-    g_keys = (Key*)VirtualAlloc(nullptr, (SIZE_T)kCapacity * sizeof(Key),
-                                MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE);
-    if (!g_keys) {
-        Log("[M2BatchSort] NOT active: the %u KB key array could not be committed, "
-            "error %lu", (unsigned)((SIZE_T)kCapacity * sizeof(Key) / 1024),
-            GetLastError());
-        return false;
+    if (Config::g_settings.OptM2BatchSort) {
+        if (!BytesMatch(kCmpOpaque, kCmpPrologue, sizeof(kCmpPrologue)) ||
+            !BytesMatch(kCmpType01, kType01Prologue, sizeof(kType01Prologue))) {
+            Log("[M2BatchSort] comparator prologue mismatch at 0x%08X or 0x%08X; "
+                "opaque key pre-gather disabled.", (unsigned)kCmpOpaque, (unsigned)kCmpType01);
+        } else {
+            g_keys = (Key*)VirtualAlloc(nullptr, (SIZE_T)kCapacity * sizeof(Key),
+                                        MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE);
+            if (!g_keys) {
+                Log("[M2BatchSort] key array allocation failed (error %lu)", GetLastError());
+            }
+        }
     }
 
     if (WineSafe_CreateHook((void*)kSort, (void*)&Hooked_Sort, (void**)&g_orig) != MH_OK) {
@@ -426,20 +459,23 @@ bool Init() {
         return false;
     }
     g_installed = true;
-    g_abSubject = AbTest::IsSubject("M2BatchSort", &g_abSubject);
-    SamplingProfiler::RegisterSelfSymbol("M2BatchSort_CmpArmed", (const void*)&CmpArmed);
-    SamplingProfiler::RegisterSelfSymbol("M2BatchSort_CmpVerify", (const void*)&CmpVerify);
 
-    Log("[M2BatchSort] ACTIVE on the opaque M2 batch sort (heapsort sub_83DCF0 with "
-        "comparator sub_81EEA0). sub_81EAD0 was 4.09%% of executing time in an "
-        "uncapped profile, spent walking the same pointer chain for both records on "
-        "every comparison. The chain is walked once per record before the sort and "
-        "the client's heapsort runs on the gathered fields. The first %u sorts, and "
-        "one in %u after, compare every answer with the client's; the first "
-        "difference switches this off.", kLearnSorts, kResampleMask + 1);
-    if (g_abSubject)
-        Log("[M2BatchSort]   under A/B test: the control half runs the client's "
-            "comparator through the same hook.");
+    if (Config::g_settings.OptM2BatchSort && g_keys) {
+        g_abSubject = AbTest::IsSubject("M2BatchSort", &g_abSubject);
+        SamplingProfiler::RegisterSelfSymbol("M2BatchSort_CmpArmed", (const void*)&CmpArmed);
+        SamplingProfiler::RegisterSelfSymbol("M2BatchSort_CmpVerify", (const void*)&CmpVerify);
+
+        Log("[M2BatchSort] ACTIVE on the opaque M2 batch sort (heapsort sub_83DCF0 with "
+            "comparator sub_81EEA0). sub_81EAD0 was 4.09%% of executing time in an "
+            "uncapped profile, spent walking the same pointer chain for both records on "
+            "every comparison. The chain is walked once per record before the sort and "
+            "the client's heapsort runs on the gathered fields. The first %u sorts, and "
+            "one in %u after, compare every answer with the client's; the first "
+            "difference switches this off.", kLearnSorts, kResampleMask + 1);
+        if (g_abSubject)
+            Log("[M2BatchSort]   under A/B test: the control half runs the client's "
+                "comparator through the same hook.");
+    }
     return true;
 }
 

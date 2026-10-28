@@ -532,6 +532,10 @@ namespace Config {
         // record and runs the client's own heapsort on it. Verified per comparison
         // before it takes over; opt-in until a tester log shows it armed.
         bool OptM2BatchSort = true;
+        // Generic engine heapsort acceleration: replaces the textbook heapsort
+        // in sub_83DCF0 with a hybrid Introsort (Insertion Sort for N <= 24,
+        // Median-of-3 QuickSort for N > 24 with depth-bounded heapsort fallback).
+        bool OptSMemSortFast = false;
         // The collision polygon clip: answers the two decisions the client makes
         // after its distance pass and leaves a real clip to the client. Checked
         // against the client per call before it takes over; opt-in until run.
