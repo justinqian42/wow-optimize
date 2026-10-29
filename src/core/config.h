@@ -810,6 +810,7 @@ namespace Config {
         bool OptM2SkinningFast = false;
         bool OptDistanceFast = false;
         bool OptTransformDirectionFast = false;
+        bool OptM2BoneBlendFast = false;
         bool OptGxBlitFast = false;
         bool OptInsideFrustumFast = false;
         bool OptAaBoxOpsFast = false;

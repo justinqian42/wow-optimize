@@ -755,6 +755,8 @@ add_library(wow_optimize SHARED
     src/simd_math/distance_fast.h
     src/simd_math/transform_direction_fast.cpp
     src/simd_math/transform_direction_fast.h
+    src/simd_math/m2_bone_blend_fast.cpp
+    src/simd_math/m2_bone_blend_fast.h
     src/simd_math/gx_blit_fast.cpp
     src/simd_math/gx_blit_fast.h
     src/simd_math/inside_frustum_fast.cpp

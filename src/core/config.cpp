@@ -327,6 +327,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "M2SkinningFast", &Settings::OptM2SkinningFast },
     { "Graphics_Sound", "DistanceFast", &Settings::OptDistanceFast },
     { "Graphics_Sound", "TransformDirectionFast", &Settings::OptTransformDirectionFast },
+    { "Graphics_Sound", "M2BoneBlendFast", &Settings::OptM2BoneBlendFast },
     { "Graphics_Sound", "GxBlitFast", &Settings::OptGxBlitFast },
     { "Graphics_Sound", "InsideFrustumFast", &Settings::OptInsideFrustumFast },
     { "Graphics_Sound", "AaBoxOpsFast", &Settings::OptAaBoxOpsFast },
