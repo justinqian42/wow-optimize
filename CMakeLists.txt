@@ -755,6 +755,8 @@ add_library(wow_optimize SHARED
     src/simd_math/distance_fast.h
     src/simd_math/transform_direction_fast.cpp
     src/simd_math/transform_direction_fast.h
+    src/simd_math/gx_blit_fast.cpp
+    src/simd_math/gx_blit_fast.h
     src/simd_math/plane_from_points_fast.cpp
     src/simd_math/plane_from_points_fast.h
     src/simd_math/matrix_adjugate_fast.cpp

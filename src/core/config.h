@@ -810,6 +810,7 @@ namespace Config {
         bool OptM2SkinningFast = false;
         bool OptDistanceFast = false;
         bool OptTransformDirectionFast = false;
+        bool OptGxBlitFast = false;
     };
 
 
