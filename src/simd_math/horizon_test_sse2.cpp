@@ -1,36 +1,33 @@
 // ============================================================================
 // Module: horizon_test_sse2.cpp
 //
-// Full AABB horizon occlusion query (sub_78FDC0, 0x1D9 / 473 bytes).
-// In profile logs (wow_optimize_2026-09-22_17-28-51.log and 23-08-49.log),
-// sub_78FDC0 and its projection loop at 0x0078FEAC accounted for over 7,400
-// samples (~0.8% of total CPU execution time).
+// Full AABB and Sphere horizon occlusion queries:
+//   - sub_78FDC0: AABB horizon query (0x1D9 / 473 bytes)
+//   - sub_78FC40: Sphere horizon query (0x170 / 368 bytes)
 //
-// The stock client function projects 8 corners of the query AABB by calling
-// sub_4C21B0 (3D point * 4x4 matrix, 37 instructions each), executes 8 scalar
-// x87 divisions (1.0 / out.z), tracks min/max projected coordinates using x87
-// comparisons with status-word transfers (fnstsw ax), derives integer screen
-// column bounds [min_col, max_col], and scans the terrain horizon array.
+// In profile logs, horizon raster occlusion testing (sub_78FDC0, sub_78FC40)
+// and their projection loops accounted for substantial CPU execution time.
+// Every terrain chunk, WMO building, doodad (trees, rocks, props), and entity
+// (players, creatures, NPCs) that survives frustum testing evaluates horizon
+// occlusion before being admitted into render passes.
+//
+// The stock client functions project corners/extents by calling sub_4C21B0
+// (3D point * 4x4 matrix, 37 instructions each), execute scalar x87 divisions
+// (1.0 / out.z), track min/max projected coordinates using x87 comparisons with
+// status-word transfers (fnstsw ax), derive integer screen column bounds
+// [min_col, max_col], and scan the 384-column terrain horizon array.
 //
 // This replacement:
-//   - Evaluates the 8 corners with inlined 3D point * 4x4 matrix math using
+//   - Evaluates bounding geometry with inlined 3D point * 4x4 matrix math using
 //     IEEE double precision in client operation order, achieving bit-exact
 //     parity with the client's 53-bit x87 precision.
 //   - Uses vector SSE2 instructions for column coordinate rounding and 4-wide
 //     packed horizon column buffer scanning.
-//   - Avoids all per-corner function call overhead and x87 status-word stalls.
+//   - Avoids all per-corner/per-sphere helper call overhead and x87 status-word
+//     pipeline stalls.
 //
-// Where it keeps more precision than the client: the client tracks the
-// minimum and maximum projections in floats and compares each new double
-// projection against them; this keeps doubles. Rounding to float is monotonic
-// and commutes with the exact scaling by 64 that follows, so the floats the
-// column bounds are built from come out the same. The horizon is compared
-// against the float maximum, as the client does.
-//
-// Verification: compared with the client on the first 10,000 calls and one
-// call in 128 after, retiring on the first difference. Before 2026-09-28 the
-// resampling keyed on the verified count, which stopped at 10,000, so no call
-// after the first 10,000 was ever compared.
+// Verification: Compared with the client on the first 10,000 calls and one
+// call in 128 after, retiring on the first difference.
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -41,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 
 #include "horizon_test_sse2.h"
 #include "MinHook.h"
@@ -55,17 +53,24 @@ namespace HorizonTestSSE2 {
 
 namespace {
 
-constexpr uintptr_t kTarget = 0x0078FDC0;
+constexpr uintptr_t kTargetAABB   = 0x0078FDC0;
+constexpr uintptr_t kTargetSphere = 0x0078FC40;
 
 // push ebp / mov ebp, esp / sub esp, 3Ch / test byte ptr ds:CD774C, 20h
-const unsigned char kPrologue[8] = {
+const unsigned char kPrologueAABB[8] = {
     0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x3C, 0xF6, 0x05
+};
+
+// push ebp / mov ebp, esp / sub esp, 2Ch / test byte ptr ds:CD774C, 20h
+const unsigned char kPrologueSphere[8] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0xF6, 0x05
 };
 
 // Client global pointers
 static const uint32_t* const dword_CD774C = (const uint32_t*)0x00CD774C;
 static const float*    const flt_CD8F7C   = (const float*)0x00CD8F7C;
 static const float*    const kMatrix      = (const float*)0x00ADF460;
+static const float*    const kProjMatrix  = (const float*)0x00ADF628;
 static const float*    const kHorizon     = (const float*)0x00CD8938;
 
 // Corner permutation tables from client (0x00ADF3F4, 0x00ADF414, 0x00ADF434)
@@ -76,13 +81,21 @@ static const uint32_t kCornerZ[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
 typedef int (__cdecl* HorizonTest_fn)(const float* box, char flags);
 static HorizonTest_fn g_orig_HorizonTest = nullptr;
 
-static bool g_active = false;
-static bool g_dead   = false;
-static bool g_abSubject = false;
+typedef int (__cdecl* HorizonTestSphere_fn)(const float* center, float radius, char flags);
+static HorizonTestSphere_fn g_orig_HorizonTestSphere = nullptr;
 
-static unsigned long long g_calls    = 0;
-static unsigned long      g_verified = 0;
-static unsigned long      g_mismatch = 0;
+static bool g_active = false;
+static bool g_dead_aabb   = false;
+static bool g_dead_sphere = false;
+static bool g_abSubject   = false;
+
+static unsigned long long g_calls_aabb    = 0;
+static unsigned long      g_verified_aabb = 0;
+static unsigned long      g_mismatch_aabb = 0;
+
+static unsigned long long g_calls_sphere    = 0;
+static unsigned long      g_verified_sphere = 0;
+static unsigned long      g_mismatch_sphere = 0;
 
 static const unsigned long kVerifyCount      = 10000;
 static const unsigned long kVerifySampleMask = 0x7F; // 1 in 128 thereafter
@@ -106,12 +119,33 @@ static inline void TransformPoint(const float* M, float x, float y, float z, flo
     out[2] = (float)sz;
 }
 
+// Scans horizon columns [min_col, max_col] using 4-wide SSE2 vector comparisons
+static inline int ScanHorizon(int min_col, int max_col, float max_proj_y) {
+    if (min_col >= 384 || max_col < 0) return 0;
+    if (min_col < 0) min_col = 0;
+    if (max_col >= 384) max_col = 383;
+    if (min_col > max_col) return 2;
+
+    const __m128 v = _mm_set1_ps(max_proj_y);
+    int c = min_col;
+    for (; c + 3 <= max_col; c += 4) {
+        const __m128 h = _mm_loadu_ps(kHorizon + c);
+        const int m = _mm_movemask_ps(_mm_cmpgt_ps(v, h));
+        if (m) {
+            return 0;
+        }
+    }
+    for (; c <= max_col; ++c) {
+        if (max_proj_y > kHorizon[c]) return 0;
+    }
+
+    return 2; // occluded
+}
+
 // Fast horizon visibility query matching client sub_78FDC0 bit for bit
 static inline int Fast_HorizonTest(const float* box, char flags) {
     if (!(*dword_CD774C & 0x20)) return 0;
 
-    // 0x0078FDDF test ah,5 jnp and 0x0078FDEE test ah,41h jz: only a pitch
-    // strictly outside [-0.9f, 0.9f] leaves; the bounds and a NaN carry on.
     const float pitch = *flt_CD8F7C;
     if (pitch < -0.8999999761581421f || pitch > 0.8999999761581421f) return 0;
 
@@ -135,7 +169,6 @@ static inline int Fast_HorizonTest(const float* box, char flags) {
             return 0;
         }
 
-        // IEEE double division matching x87 53-bit division
         const double inv_z = 1.0 / (double)out[2];
         const double proj_x = (double)out[0] * inv_z;
         const double proj_y = (double)out[1] * inv_z;
@@ -147,8 +180,6 @@ static inline int Fast_HorizonTest(const float* box, char flags) {
         if (f_proj_y > max_proj_y) max_proj_y = f_proj_y;
     }
 
-    // Client column range derivation:
-    // fmul 64.0f -> store to float -> reload -> fsub 0.5f -> fistp
     const float min_scaled = (float)(min_proj_x * 64.0);
     const int min_col_raw  = _mm_cvtss_si32(_mm_sub_ss(_mm_set_ss(min_scaled), _mm_set_ss(0.5f)));
     int min_col = min_col_raw + 192;
@@ -157,49 +188,91 @@ static inline int Fast_HorizonTest(const float* box, char flags) {
     const int max_col_raw  = _mm_cvtss_si32(_mm_sub_ss(_mm_set_ss(max_scaled), _mm_set_ss(0.5f)));
     int max_col = max_col_raw + 193;
 
-    if (min_col >= 384 || max_col < 0) return 0;
-    if (min_col < 0) min_col = 0;
-    if (max_col >= 384) max_col = 383;
-    if (min_col > max_col) return 2;
+    return ScanHorizon(min_col, max_col, max_proj_y);
+}
 
-    // Vectorized scan across horizon columns using SSE2
-    const __m128 v = _mm_set1_ps(max_proj_y);
-    int c = min_col;
-    for (; c + 3 <= max_col; c += 4) {
-        const __m128 h = _mm_loadu_ps(kHorizon + c);
-        // Client: test ah, 41h; jz -> max_proj_y > kHorizon[c] -> return 0 (visible)
-        const int m = _mm_movemask_ps(_mm_cmpgt_ps(v, h));
-        if (m) {
-            return 0;
-        }
-    }
-    for (; c <= max_col; ++c) {
-        if (max_proj_y > kHorizon[c]) return 0;
+// Fast sphere horizon visibility query matching client sub_78FC40 bit for bit
+static inline int Fast_HorizonTestSphere(const float* center, float radius, char flags) {
+    if (!(*dword_CD774C & 0x20)) return 0;
+
+    if (std::abs(radius) < 0.00000023841858f) return 0;
+
+    const float pitch = *flt_CD8F7C;
+    if (pitch < -0.8999999761581421f || pitch > 0.8999999761581421f) return 0;
+
+    float view[3];
+    TransformPoint(kMatrix, center[0], center[1], center[2], view);
+
+    float extent[3];
+    TransformPoint(kProjMatrix, radius, radius, 0.0f, extent);
+
+    const bool allow_near = (flags & 8) != 0;
+    if (!allow_near && view[2] < 50.0f) {
+        return 0;
     }
 
-    return 2; // occluded
+    const double inv_z = 1.0 / (double)view[2];
+    const double v_x = (double)view[0] * inv_z;
+    const double ext_x = (double)extent[0] * inv_z;
+    const double ext_y = (double)extent[1] * inv_z;
+    const float  v_y = (float)(ext_x + inv_z * (double)view[1]);
+
+    const float min_scaled = (float)((v_x - ext_y) * 64.0);
+    const int min_col_raw  = _mm_cvtss_si32(_mm_sub_ss(_mm_set_ss(min_scaled), _mm_set_ss(0.5f)));
+    int min_col = min_col_raw + 192;
+
+    const float max_scaled = (float)((ext_y + v_x) * 64.0);
+    const int max_col_raw  = _mm_cvtss_si32(_mm_sub_ss(_mm_set_ss(max_scaled), _mm_set_ss(0.5f)));
+    int max_col = max_col_raw + 193;
+
+    return ScanHorizon(min_col, max_col, v_y);
 }
 
 // Detour hook for sub_78FDC0. safebuffers ensures no /GS cookie on hot path.
 __declspec(safebuffers) static int __cdecl Hook_HorizonTest(const float* box, char flags) {
-    ++g_calls;
+    ++g_calls_aabb;
 
-    if (g_dead || (g_abSubject && AbTest::StandAside())) {
+    if (g_dead_aabb || (g_abSubject && AbTest::StandAside())) {
         return g_orig_HorizonTest(box, flags);
     }
 
     const int mine = Fast_HorizonTest(box, flags);
 
-    if (g_verified < kVerifyCount || ((g_calls & kVerifySampleMask) == 0)) {
+    if (g_verified_aabb < kVerifyCount || ((g_calls_aabb & kVerifySampleMask) == 0)) {
         const int theirs = g_orig_HorizonTest(box, flags);
         if (mine != theirs) {
-            ++g_mismatch;
-            g_dead = true;
-            Log("[HorizonTest] DISAGREEMENT: mine=%d, client=%d, flags=0x%02X. "
+            ++g_mismatch_aabb;
+            g_dead_aabb = true;
+            Log("[HorizonTest] AABB DISAGREEMENT: mine=%d, client=%d, flags=0x%02X. "
                 "Retiring replacement for session.", mine, theirs, (uint8_t)flags);
             return theirs;
         }
-        ++g_verified;
+        ++g_verified_aabb;
+    }
+
+    return mine;
+}
+
+// Detour hook for sub_78FC40. safebuffers ensures no /GS cookie on hot path.
+__declspec(safebuffers) static int __cdecl Hook_HorizonTestSphere(const float* center, float radius, char flags) {
+    ++g_calls_sphere;
+
+    if (g_dead_sphere || (g_abSubject && AbTest::StandAside())) {
+        return g_orig_HorizonTestSphere(center, radius, flags);
+    }
+
+    const int mine = Fast_HorizonTestSphere(center, radius, flags);
+
+    if (g_verified_sphere < kVerifyCount || ((g_calls_sphere & kVerifySampleMask) == 0)) {
+        const int theirs = g_orig_HorizonTestSphere(center, radius, flags);
+        if (mine != theirs) {
+            ++g_mismatch_sphere;
+            g_dead_sphere = true;
+            Log("[HorizonTest] Sphere DISAGREEMENT: mine=%d, client=%d, r=%f, flags=0x%02X. "
+                "Retiring replacement for session.", mine, theirs, radius, (uint8_t)flags);
+            return theirs;
+        }
+        ++g_verified_sphere;
     }
 
     return mine;
@@ -212,49 +285,82 @@ bool Init() {
         return true;
     }
 
-    if (!WowOpt_ClientPatchAllowed((const void*)kTarget)) {
-        Log("[HorizonTest] NOT hooked: client patches disabled.");
-        return false;
+    bool aabb_ok = false;
+    bool sphere_ok = false;
+
+    // 1. Hook AABB Horizon Test (sub_78FDC0)
+    if (WowOpt_ClientPatchAllowed((const void*)kTargetAABB)) {
+        if (memcmp((const void*)kTargetAABB, kPrologueAABB, sizeof(kPrologueAABB)) == 0) {
+            if (WineSafe_CreateHook((void*)kTargetAABB, (void*)Hook_HorizonTest, (void**)&g_orig_HorizonTest) == MH_OK &&
+                WO_EnableHook((void*)kTargetAABB) == MH_OK) {
+                aabb_ok = true;
+            } else {
+                Log("[HorizonTest] Failed to create/enable hook at 0x%08X", (unsigned)kTargetAABB);
+            }
+        } else {
+            Log("[HorizonTest] NOT hooked: prologue mismatch at 0x%08X", (unsigned)kTargetAABB);
+        }
     }
 
-    if (memcmp((const void*)kTarget, kPrologue, sizeof(kPrologue)) != 0) {
-        Log("[HorizonTest] NOT hooked: prologue mismatch at 0x%08X", (unsigned)kTarget);
-        return false;
+    // 2. Hook Sphere Horizon Test (sub_78FC40)
+    if (WowOpt_ClientPatchAllowed((const void*)kTargetSphere)) {
+        if (memcmp((const void*)kTargetSphere, kPrologueSphere, sizeof(kPrologueSphere)) == 0) {
+            if (WineSafe_CreateHook((void*)kTargetSphere, (void*)Hook_HorizonTestSphere, (void**)&g_orig_HorizonTestSphere) == MH_OK &&
+                WO_EnableHook((void*)kTargetSphere) == MH_OK) {
+                sphere_ok = true;
+            } else {
+                Log("[HorizonTest] Failed to create/enable hook at 0x%08X", (unsigned)kTargetSphere);
+            }
+        } else {
+            Log("[HorizonTest] NOT hooked: prologue mismatch at 0x%08X", (unsigned)kTargetSphere);
+        }
     }
 
-    if (WineSafe_CreateHook((void*)kTarget, (void*)Hook_HorizonTest, (void**)&g_orig_HorizonTest) != MH_OK) {
-        Log("[HorizonTest] Failed to create hook at 0x%08X", (unsigned)kTarget);
-        return false;
+    if (aabb_ok || sphere_ok) {
+        g_active = true;
+        g_abSubject = AbTest::IsSubject("HorizonTestAABB", &g_abSubject);
+        Log("[HorizonTest] ACTIVE on AABB (%s @ 0x%08X) and Sphere (%s @ 0x%08X). Verifying first %lu calls.",
+            aabb_ok ? "OK" : "SKIP", (unsigned)kTargetAABB,
+            sphere_ok ? "OK" : "SKIP", (unsigned)kTargetSphere,
+            kVerifyCount);
     }
 
-    if (WO_EnableHook((void*)kTarget) != MH_OK) {
-        Log("[HorizonTest] Failed to enable hook at 0x%08X", (unsigned)kTarget);
-        return false;
-    }
-
-    g_active = true;
-    g_abSubject = AbTest::IsSubject("HorizonTestAABB", &g_abSubject);
-    Log("[HorizonTest] ACTIVE on sub_78FDC0 (0x%08X). Verifying against client for first %lu calls.",
-        (unsigned)kTarget, kVerifyCount);
-    return true;
+    return g_active;
 }
 
 void LogStats() {
     if (!g_active) return;
 
-    if (g_dead) {
-        Log("[HorizonTest] RETIRED due to %lu mismatch(es) after %llu call(s).",
-            g_mismatch, g_calls);
-    } else {
-        Log("[HorizonTest] %llu call(s), %lu verified against client (0 mismatches).",
-            g_calls, g_verified);
+    if (g_orig_HorizonTest) {
+        if (g_dead_aabb) {
+            Log("[HorizonTest] AABB RETIRED due to %lu mismatch(es) after %llu call(s).",
+                g_mismatch_aabb, g_calls_aabb);
+        } else {
+            Log("[HorizonTest] AABB: %llu call(s), %lu verified against client (0 mismatches).",
+                g_calls_aabb, g_verified_aabb);
+        }
+    }
+
+    if (g_orig_HorizonTestSphere) {
+        if (g_dead_sphere) {
+            Log("[HorizonTest] Sphere RETIRED due to %lu mismatch(es) after %llu call(s).",
+                g_mismatch_sphere, g_calls_sphere);
+        } else {
+            Log("[HorizonTest] Sphere: %llu call(s), %lu verified against client (0 mismatches).",
+                g_calls_sphere, g_verified_sphere);
+        }
     }
 }
 
 void Shutdown() {
     if (!g_active) return;
     g_active = false;
-    MH_DisableHook((void*)kTarget);
+    if (g_orig_HorizonTest) {
+        MH_DisableHook((void*)kTargetAABB);
+    }
+    if (g_orig_HorizonTestSphere) {
+        MH_DisableHook((void*)kTargetSphere);
+    }
 }
 
 } // namespace HorizonTestSSE2
