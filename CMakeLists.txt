@@ -925,6 +925,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/ui_anchor_dependents_fast.h
     src/simd_math/m2_particle_emitter_matrix_fast.cpp
     src/simd_math/m2_particle_emitter_matrix_fast.h
+    src/simd_math/mat44_affine_ops_fast.cpp
+    src/simd_math/mat44_affine_ops_fast.h
 )
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/server_sync_compat.cpp")

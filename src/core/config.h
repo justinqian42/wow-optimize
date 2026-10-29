@@ -821,6 +821,7 @@ namespace Config {
         bool OptVectorRayOpsFast = false;
         bool OptMat33QuatOpsFast = false;
         bool OptAaBoxMultiOpsFast = false;
+        bool OptMat44AffineOpsFast = false;
     };
 
 
