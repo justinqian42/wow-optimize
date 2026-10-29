@@ -169,6 +169,7 @@
 #include "simd_math/aa_sphere_ops_fast.h"
 #include "simd_math/vector_ray_ops_fast.h"
 #include "simd_math/mat33_quat_ops_fast.h"
+#include "simd_math/aabox_multi_ops_fast.h"
 #include "simd_math/plane_from_points_fast.h"
 #include "simd_math/matrix_adjugate_fast.h"
 #include "simd_math/spline_seg_length_fast.h"
@@ -6273,6 +6274,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("AaSphereOpsFast::LogStats", AaSphereOpsFast::LogStats());
     STAT_TIME("VectorRayOpsFast::LogStats", VectorRayOpsFast::LogStats());
     STAT_TIME("Mat33QuatOpsFast::LogStats", Mat33QuatOpsFast::LogStats());
+    STAT_TIME("AaBoxMultiOpsFast::LogStats", AaBoxMultiOpsFast::LogStats());
     STAT_TIME("PlaneFromPointsFast::LogStats", PlaneFromPointsFast::LogStats());
     STAT_TIME("MatrixAdjugateFast::LogStats", MatrixAdjugateFast::LogStats());
     STAT_TIME("SplineSegLengthFast::LogStats", SplineSegLengthFast::LogStats());
@@ -9094,6 +9096,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     AaSphereOpsFast::Init();
     VectorRayOpsFast::Init();
     Mat33QuatOpsFast::Init();
+    AaBoxMultiOpsFast::Init();
     PlaneFromPointsFast::Init();
     MatrixAdjugateFast::Init();
     SplineSegLengthFast::Init();
@@ -12190,6 +12193,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             AaSphereOpsFast::Shutdown();
             VectorRayOpsFast::Shutdown();
             Mat33QuatOpsFast::Shutdown();
+            AaBoxMultiOpsFast::Shutdown();
             PlaneFromPointsFast::Shutdown();
             MatrixAdjugateFast::Shutdown();
             SplineSegLengthFast::Shutdown();

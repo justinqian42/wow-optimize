@@ -820,6 +820,7 @@ namespace Config {
         bool OptAaSphereOpsFast = false;
         bool OptVectorRayOpsFast = false;
         bool OptMat33QuatOpsFast = false;
+        bool OptAaBoxMultiOpsFast = false;
     };
 
 
