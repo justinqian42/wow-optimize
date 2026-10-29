@@ -771,6 +771,8 @@ add_library(wow_optimize SHARED
     src/simd_math/rect_ops_fast.h
     src/simd_math/aa_sphere_ops_fast.cpp
     src/simd_math/aa_sphere_ops_fast.h
+    src/simd_math/vector_ray_ops_fast.cpp
+    src/simd_math/vector_ray_ops_fast.h
     src/simd_math/plane_from_points_fast.cpp
     src/simd_math/plane_from_points_fast.h
     src/simd_math/matrix_adjugate_fast.cpp

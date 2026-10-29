@@ -335,6 +335,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "MatrixDeterminantFast", &Settings::OptMatrixDeterminantFast },
     { "Graphics_Sound", "RectOpsFast", &Settings::OptRectOpsFast },
     { "Graphics_Sound", "AaSphereOpsFast", &Settings::OptAaSphereOpsFast },
+    { "Graphics_Sound", "VectorRayOpsFast", &Settings::OptVectorRayOpsFast },
 };
 
 

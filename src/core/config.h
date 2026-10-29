@@ -818,6 +818,7 @@ namespace Config {
         bool OptMatrixDeterminantFast = false;
         bool OptRectOpsFast = false;
         bool OptAaSphereOpsFast = false;
+        bool OptVectorRayOpsFast = false;
     };
 
 
