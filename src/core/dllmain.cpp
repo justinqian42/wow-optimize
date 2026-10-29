@@ -160,6 +160,7 @@
 #include "simd_math/distance_fast.h"
 #include "simd_math/transform_direction_fast.h"
 #include "simd_math/m2_bone_blend_fast.h"
+#include "simd_math/trig_approx_fast.h"
 #include "simd_math/gx_blit_fast.h"
 #include "simd_math/inside_frustum_fast.h"
 #include "simd_math/aabox_ops_fast.h"
@@ -6267,6 +6268,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("DistanceFast::LogStats", DistanceFast::LogStats());
     STAT_TIME("TransformDirectionFast::LogStats", TransformDirectionFast::LogStats());
     STAT_TIME("M2BoneBlendFast::LogStats", M2BoneBlendFast::LogStats());
+    STAT_TIME("TrigApproxFast::LogStats", TrigApproxFast::LogStats());
     STAT_TIME("GxBlitFast::LogStats", GxBlitFast::LogStats());
     STAT_TIME("InsideFrustumFast::LogStats", InsideFrustumFast::LogStats());
     STAT_TIME("AaBoxOpsFast::LogStats", AaBoxOpsFast::LogStats());
@@ -9091,6 +9093,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     DistanceFast::Init();
     TransformDirectionFast::Init();
     M2BoneBlendFast::Init();
+    TrigApproxFast::Init();
     GxBlitFast::Init();
     InsideFrustumFast::Init();
     AaBoxOpsFast::Init();
@@ -12190,6 +12193,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             DistanceFast::Shutdown();
             TransformDirectionFast::Shutdown();
             M2BoneBlendFast::Shutdown();
+            TrigApproxFast::Shutdown();
             GxBlitFast::Shutdown();
             InsideFrustumFast::Shutdown();
             AaBoxOpsFast::Shutdown();
