@@ -155,6 +155,7 @@
 #include "hooks_subsystems/scene_query_cell_fast.h"
 #include "hooks_subsystems/m2_batch_dedupe_cmp.h"
 #include "simd_math/spline_interp_fast.h"
+#include "simd_math/spline_deriv_fast.h"
 #include "simd_math/plane_from_points_fast.h"
 #include "simd_math/matrix_adjugate_fast.h"
 #include "simd_math/spline_seg_length_fast.h"
@@ -6245,6 +6246,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("SceneQueryCellFast::LogStats", SceneQueryCellFast::LogStats());
     STAT_TIME("M2BatchDedupeCmp::LogStats", M2BatchDedupeCmp::LogStats());
     STAT_TIME("SplineInterpFast::LogStats", SplineInterpFast::LogStats());
+    STAT_TIME("SplineDerivFast::LogStats", SplineDerivFast::LogStats());
     STAT_TIME("PlaneFromPointsFast::LogStats", PlaneFromPointsFast::LogStats());
     STAT_TIME("MatrixAdjugateFast::LogStats", MatrixAdjugateFast::LogStats());
     STAT_TIME("SplineSegLengthFast::LogStats", SplineSegLengthFast::LogStats());
@@ -9052,6 +9054,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     SceneQueryCellFast::Init();
     M2BatchDedupeCmp::Init();
     SplineInterpFast::Init();
+    SplineDerivFast::Init();
     PlaneFromPointsFast::Init();
     MatrixAdjugateFast::Init();
     SplineSegLengthFast::Init();
@@ -12134,6 +12137,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             SceneQueryCellFast::Shutdown();
             M2BatchDedupeCmp::Shutdown();
             SplineInterpFast::Shutdown();
+            SplineDerivFast::Shutdown();
             PlaneFromPointsFast::Shutdown();
             MatrixAdjugateFast::Shutdown();
             SplineSegLengthFast::Shutdown();

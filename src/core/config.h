@@ -806,6 +806,7 @@ namespace Config {
         bool OptUIAnchorDependentsFast = false;
         bool OptM2ParticleEmitterMatrixFast = false;
         bool OptUIStrataOcclusionFast = false;
+        bool OptSplineDerivFast = false;
     };
 
 
