@@ -817,6 +817,7 @@ namespace Config {
         bool OptCameraNearestCornerFast = false;
         bool OptMatrixDeterminantFast = false;
         bool OptRectOpsFast = false;
+        bool OptAaSphereOpsFast = false;
     };
 
 
