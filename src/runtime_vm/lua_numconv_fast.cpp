@@ -21,12 +21,12 @@ extern "C" void Log(const char* fmt, ...);
 static inline bool IsTeardownState() {
     if (LoadingDefrag::IsLoadingActive()) return true;
     uintptr_t gL = *(uintptr_t*)0x00D3F78C;
-    return (gL < 0x10000 || gL > 0xFFFE0000);
+    return (gL < 0x10000 || gL > 0xFFFF0000);
 }
 
 // Pointer sanity: must be in usermode range
 static __forceinline bool IsValidPtr(uintptr_t p) {
-    return p > 0x10000 && p < 0xFFFE0000;
+    return p > 0x10000 && p < 0xFFFF0000;
 }
 
 // Read the type tag from a resolved TValue pointer.

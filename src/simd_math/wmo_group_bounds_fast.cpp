@@ -100,7 +100,7 @@ constexpr uint32_t kVerifyFirst = 20000;
 constexpr uint32_t kResampleMask = 127;
 
 static __forceinline bool IsValidUserPtr(const void* p) {
-    return (uintptr_t)p >= 0x10000 && (uintptr_t)p <= 0xFFFE0000;
+    return (uintptr_t)p >= 0x10000 && (uintptr_t)p <= 0xFFFF0000;
 }
 
 __declspec(safebuffers) static inline int FastEvaluate(

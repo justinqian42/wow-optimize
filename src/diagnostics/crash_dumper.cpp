@@ -173,7 +173,7 @@ static void WriteRawStackScan(HANDLE hFile, CONTEXT* ctx) {
 
         for (int i = 0; i < 64; i++) {
             DWORD val = stack[i]; // Safe inside __try
-            if (val < 0x00401000 || val >= 0xFFFE0000 || (val >= 0x7FFE0000 && val < 0x80000000)) continue;
+            if (val < 0x00401000 || val >= 0xFFFF0000 || (val >= 0x7FFE0000 && val < 0x80000000)) continue;
 
             HMODULE hMod = NULL;
             if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -1160,7 +1160,7 @@ static LONG WINAPI WowOpt_UnhandledExceptionFilter(EXCEPTION_POINTERS* ep) {
             for (int i = 0; i < 512; i++) {
                 DWORD val = stack[i]; // Safe inside __try
                 // Filter: only log values that look like code addresses
-                if (val < 0x00401000 || val >= 0xFFFE0000 || (val >= 0x7FFE0000 && val < 0x80000000)) continue;
+                if (val < 0x00401000 || val >= 0xFFFF0000 || (val >= 0x7FFE0000 && val < 0x80000000)) continue;
                 HMODULE hMod = NULL;
                 if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -1191,7 +1191,7 @@ static LONG WINAPI WowOpt_UnhandledExceptionFilter(EXCEPTION_POINTERS* ep) {
                 int printed = 0;
                 for (int depth = 0; depth < 24 && fp; ++depth) {
                     DWORD next = fp[0], ret = fp[1];
-                    if (ret >= 0x00401000 && ret < 0xFFFE0000 && !(ret >= 0x7FFE0000 && ret < 0x80000000)) {
+                    if (ret >= 0x00401000 && ret < 0xFFFF0000 && !(ret >= 0x7FFE0000 && ret < 0x80000000)) {
                         HMODULE hMod = NULL;
                         if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,

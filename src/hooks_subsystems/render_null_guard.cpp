@@ -100,14 +100,14 @@ static uintptr_t g_lastGoodDevice = 0;
 // Takes the CGxDevice the caller has already loaded rather than reading the
 // global a second time. It was read two lines above the call.
 static bool IsDeviceReady(uintptr_t pGxDevice) {
-    if (pGxDevice < 0x10000 || pGxDevice > 0xFFE00000) return false;
+    if (pGxDevice < 0x10000 || pGxDevice >= 0xFFFF0000) return false;
 
     const uintptr_t pD3d9Device = *(uintptr_t*)(pGxDevice + 0x397C);
-    if (pD3d9Device < 0x10000 || pD3d9Device > 0xFFE00000) return false;
+    if (pD3d9Device < 0x10000 || pD3d9Device >= 0xFFFF0000) return false;
     if (pD3d9Device == g_lastGoodDevice) return true;
 
     const uintptr_t pVtable = *(uintptr_t*)pD3d9Device;
-    if (pVtable < 0x10000 || pVtable > 0xFFE00000) return false;
+    if (pVtable < 0x10000 || pVtable >= 0xFFFF0000) return false;
 
     g_lastGoodDevice = pD3d9Device;
     return true;
@@ -152,7 +152,7 @@ static int __cdecl Hooked_873060(int a1, int a2)
 // crashing immediately with 0xC0000005 ACCESS_VIOLATION on the render thread.
 //
 // Guard:
-// If esi is invalid (< 0x10000 or >= 0xFFFE0000), or if [esi+0x40] is invalid,
+// If esi is invalid (< 0x10000 or >= 0xFFFF0000), or if [esi+0x40] is invalid,
 // we sanitize [esi+0x40] to nullptr, count the suppression, and return
 // immediately. This avoids the fatal dereference and allows TextureGetGxTex
 // to proceed safely to return the atlas/surface pointer.
@@ -171,9 +171,9 @@ static bool g_hasHighAddressSpace = false;
 
 static inline bool IsValidUserPointer(uintptr_t p) {
     if (p < 0x10000) return false;
-    if (p >= 0xFFFE0000) return false;
+    if (p >= 0xFFFF0000) return false;
     if (p < 0x7FFE0000) return true;
-    if (p < 0x80010000) return false;
+    if (p < 0x80000000) return false;
     if (!g_hasHighAddressSpace) return false;
     return true;
 }
@@ -182,11 +182,11 @@ __declspec(naked) static void Hooked_4B6550() {
     __asm {
         cmp esi, 0x10000
         jb skip_wait
-        cmp esi, 0xFFFE0000
+        cmp esi, 0xFFFF0000
         jae skip_wait
         cmp esi, 0x7FFE0000
         jb check_esi_content
-        cmp esi, 0x80010000
+        cmp esi, 0x80000000
         jb skip_wait
         cmp byte ptr [g_hasHighAddressSpace], 0
         je skip_wait
@@ -201,11 +201,11 @@ __declspec(naked) static void Hooked_4B6550() {
 
         cmp eax, 0x10000
         jb sanitize_and_skip
-        cmp eax, 0xFFFE0000
+        cmp eax, 0xFFFF0000
         jae sanitize_and_skip
         cmp eax, 0x7FFE0000
         jb check_s_waiting
-        cmp eax, 0x80010000
+        cmp eax, 0x80000000
         jb sanitize_and_skip
         cmp byte ptr [g_hasHighAddressSpace], 0
         je sanitize_and_skip
@@ -230,11 +230,11 @@ __declspec(naked) static void Hooked_4B6550() {
         jz check_gxtex
         cmp eax, 0x10000
         jb zero_atlas
-        cmp eax, 0xFFFE0000
+        cmp eax, 0xFFFF0000
         jae zero_atlas
         cmp eax, 0x7FFE0000
         jb check_gxtex
-        cmp eax, 0x80010000
+        cmp eax, 0x80000000
         jb zero_atlas
         cmp byte ptr [g_hasHighAddressSpace], 0
         je zero_atlas
@@ -248,11 +248,11 @@ __declspec(naked) static void Hooked_4B6550() {
         jz finish_sanitize
         cmp eax, 0x10000
         jb zero_gxtex
-        cmp eax, 0xFFFE0000
+        cmp eax, 0xFFFF0000
         jae zero_gxtex
         cmp eax, 0x7FFE0000
         jb finish_sanitize
-        cmp eax, 0x80010000
+        cmp eax, 0x80000000
         jb zero_gxtex
         cmp byte ptr [g_hasHighAddressSpace], 0
         je zero_gxtex
@@ -290,7 +290,7 @@ __declspec(naked) static void Hooked_4B6550() {
 // with ERROR #132 (0x85100084) Fatal Exception (ACCESS_VIOLATION at 0023:004B6D26).
 //
 // Guard:
-// - If texture is null or outside valid address space [0x10000, 0xFFFE0000), return nullptr.
+// - If texture is null or outside valid address space [0x10000, 0xFFFF0000), return nullptr.
 // - If texture is marked freed/dead (*(const uintptr_t*)texture == 0xFFFFFFFF), return nullptr.
 // - Sanitize wild/0xFFFFFFFF fields in m_asyncObject (+0x40), m_atlas (+0x5C), and
 //   m_gxTex (+0x44) to nullptr.
@@ -380,13 +380,11 @@ __declspec(safebuffers) static int __cdecl Hooked_4B7E80(void* texture) {
     }
 
     void* asyncObj = *(void**)((char*)texture + 0x40);
-    if (!asyncObj || !IsValidUserPointer((uintptr_t)asyncObj)) {
-        InterlockedIncrement(&g_textureAsyncNullSuppressed);
+    if (!asyncObj) {
         return 0;
     }
-
-    void* buffer = *(void**)((char*)asyncObj + 0x04);
-    if (!buffer || !IsValidUserPointer((uintptr_t)buffer)) {
+    if (!IsValidUserPointer((uintptr_t)asyncObj)) {
+        *(void**)((char*)texture + 0x40) = nullptr;
         InterlockedIncrement(&g_textureAsyncNullSuppressed);
         return 0;
     }
@@ -497,7 +495,7 @@ __declspec(safebuffers) static BOOL __fastcall Hooked_6A31E0(void* this_device, 
 // immediately terminating the process with ERROR #134 (0x85100086) Fatal Condition.
 //
 // Guard:
-// - If req is null or outside valid address space [0x10000, 0xFFFE0000), return 0.
+// - If req is null or outside valid address space [0x10000, 0xFFFF0000), return 0.
 // - If req is already completed (*((const uint8_t*)req + 0x21) != 0), return 1.
 // - If s_waiting != 0 (*(const uint32_t*)0x00B4A26C != 0), a wait is already active!
 //   Calling the client's sub_4BA060 would trigger the fatal Error #134 condition.
@@ -582,7 +580,7 @@ __declspec(safebuffers) static int __cdecl Hooked_4BA060(void* req) {
 // doubly-linked list (TSList / TSLink). ECX contains 'this' (the list head).
 // At 0x007B502D, it executes:
 //     mov eax, [ecx]
-// If ECX is wild (< 0x10000 or >= 0xFFFE0000, such as 0x51 when a corrupted or
+// If ECX is wild (< 0x10000 or >= 0xFFFF0000, such as 0x51 when a corrupted or
 // recycled object's [obj+0x18] (0x49) + 8 is passed), it immediately crashes with
 // ACCESS_VIOLATION reading from 0x00000051.
 // ----------------------------------------------------------------------------
@@ -600,11 +598,11 @@ __declspec(naked) static void Hooked_7B5020() {
     __asm {
         cmp ecx, 0x10000
         jb invalid_list
-        cmp ecx, 0xFFFE0000
+        cmp ecx, 0xFFFF0000
         jae invalid_list
         cmp ecx, 0x7FFE0000
         jb valid_list
-        cmp ecx, 0x80010000
+        cmp ecx, 0x80000000
         jb invalid_list
         cmp byte ptr [g_hasHighAddressSpace], 0
         je invalid_list
@@ -636,7 +634,7 @@ __declspec(naked) static void Hooked_7B5020() {
 //
 // Guard:
 // CGWorldFrame is a singleton instance whose canonical address is stored at
-// s_worldFrame (0x00B7436C). If ECX is wild (< 0x10000 or >= 0xFFFE0000) or does
+// s_worldFrame (0x00B7436C). If ECX is wild (< 0x10000 or >= 0xFFFF0000) or does
 // not match s_worldFrame, we restore ECX to s_worldFrame. If s_worldFrame is null,
 // we safely return 0 with ret 8. Pure naked ASM, zero /GS cookies, zero SEH.
 // ----------------------------------------------------------------------------
@@ -656,7 +654,7 @@ __declspec(naked) static void Hooked_4F5980() {
         // Validate ecx (this pointer to CGWorldFrame)
         cmp ecx, 0x10000
         jb recover_frame
-        cmp ecx, 0xFFFE0000
+        cmp ecx, 0xFFFF0000
         jae recover_frame
 
         // Check if ecx is already the canonical singleton s_worldFrame (0x00B7436C)
@@ -712,7 +710,7 @@ __declspec(naked) static void Hooked_4F5980() {
 // - Inspect the driver table at [face+0x60].
 // - If the outline renderer path will be taken, verify the outline callback [altTable+4].
 // - If the rasterizer path will be taken, verify the raster_render callback [rTable+0x50].
-// - If the selected callback is null or outside valid address space [0x10000, 0xFFFE0000),
+// - If the selected callback is null or outside valid address space [0x10000, 0xFFFF0000),
 //   increment g_nullGlyphRasterizerSuppressed and return 35 (FT_Err_Cannot_Render_Glyph /
 //   unsupported format error code in FreeType).
 // - Callers (sub_6C8C10, GxuLoadGlyph, etc.) receive non-zero error code and return
@@ -733,9 +731,9 @@ static bool g_guard992DA0Active = false;
 static inline bool IsValidCodePointer(const void* ptr) {
     if (!ptr) return false;
     uintptr_t fnAddr = (uintptr_t)ptr;
-    if (fnAddr < 0x10000 || fnAddr >= 0xFFFE0000) return false;
-    if (fnAddr >= 0x7FFE0000 && fnAddr < 0x80010000) return false;
-    if (fnAddr >= 0x80010000 && !g_hasHighAddressSpace) return false;
+    if (fnAddr < 0x10000 || fnAddr >= 0xFFFF0000) return false;
+    if (fnAddr >= 0x7FFE0000 && fnAddr < 0x80000000) return false;
+    if (fnAddr >= 0x80000000 && !g_hasHighAddressSpace) return false;
 
     // Fast path: wow.exe code section (.text) is always committed executable code:
     if (fnAddr >= 0x00401000 && fnAddr < 0x009DF000) {
@@ -793,10 +791,10 @@ static inline bool IsValidCodePointer(const void* ptr) {
 static inline bool IsValidReadablePointer(const void* ptr, size_t size) {
     if (!ptr) return false;
     uintptr_t addr = (uintptr_t)ptr;
-    if (addr < 0x10000 || addr >= 0xFFFE0000) return false;
-    if (addr + size < addr || addr + size >= 0xFFFE0000) return false;
-    if ((addr >= 0x7FFE0000 && addr < 0x80010000) || ((addr + size) > 0x7FFE0000 && (addr + size) <= 0x80010000)) return false;
-    if (addr >= 0x80010000 && !g_hasHighAddressSpace) return false;
+    if (addr < 0x10000 || addr >= 0xFFFF0000) return false;
+    if (addr + size < addr || addr + size >= 0xFFFF0000) return false;
+    if ((addr >= 0x7FFE0000 && addr < 0x80000000) || ((addr + size) > 0x7FFE0000 && (addr + size) <= 0x80000000)) return false;
+    if (addr >= 0x80000000 && !g_hasHighAddressSpace) return false;
 
     // Fast path: wow.exe static data / bss
     if (addr >= 0x00401000 && (addr + size) <= 0x00E00000) {
@@ -1098,11 +1096,11 @@ __declspec(naked) static void Hooked_6848A0() {
         mov eax, [esp+4]
         cmp eax, 0x10000
         jb invalid_viewport
-        cmp eax, 0xFFFE0000
+        cmp eax, 0xFFFF0000
         jae invalid_viewport
         cmp eax, 0x7FFE0000
         jb check_device
-        cmp eax, 0x80010000
+        cmp eax, 0x80000000
         jb invalid_viewport
         cmp byte ptr [g_hasHighAddressSpace], 0
         je invalid_viewport
@@ -1111,11 +1109,11 @@ __declspec(naked) static void Hooked_6848A0() {
         // ecx = this (CGxDevice)
         cmp ecx, 0x10000
         jb invalid_viewport
-        cmp ecx, 0xFFFE0000
+        cmp ecx, 0xFFFF0000
         jae invalid_viewport
         cmp ecx, 0x7FFE0000
         jb check_rect
-        cmp ecx, 0x80010000
+        cmp ecx, 0x80000000
         jb invalid_viewport
         cmp byte ptr [g_hasHighAddressSpace], 0
         je invalid_viewport
@@ -1125,11 +1123,11 @@ __declspec(naked) static void Hooked_6848A0() {
         mov edx, [esp+8]
         cmp edx, 0x10000
         jb invalid_viewport
-        cmp edx, 0xFFFE0000
+        cmp edx, 0xFFFF0000
         jae invalid_viewport
         cmp edx, 0x7FFE0000
         jb valid_viewport
-        cmp edx, 0x80010000
+        cmp edx, 0x80000000
         jb invalid_viewport
         cmp byte ptr [g_hasHighAddressSpace], 0
         je invalid_viewport
@@ -1194,11 +1192,11 @@ __declspec(naked) static void Hooked_683320() {
         mov eax, [esp+4]
         cmp eax, 0x10000
         jb invalid_target
-        cmp eax, 0xFFFE0000
+        cmp eax, 0xFFFF0000
         jae invalid_target
         cmp eax, 0x7FFE0000
         jb valid_target
-        cmp eax, 0x80010000
+        cmp eax, 0x80000000
         jb invalid_target
         cmp byte ptr [g_hasHighAddressSpace], 0
         je invalid_target
@@ -1274,6 +1272,40 @@ static void __fastcall Hooked_6844C0(void* self, void* dummyEdx, void* texture, 
     g_orig6844C0(self, dummyEdx, texture, params, count);
 }
 
+// ----------------------------------------------------------------------------
+// CGxDeviceD3d::Draw IndexedPrimitive guard (sub_6A3620 @ 0x006A3620)
+//
+// In stock 3.3.5a build 12340, sub_6A3620 issues IDirect3DDevice9::DrawPrimitive
+// or IDirect3DDevice9::DrawIndexedPrimitive calls. If a hooked Direct3D runtime
+// (e.g. DINPUT8.dll proxy) or stream state has a transient unallocated vertex buffer,
+// drawing can fault inside d3d9.dll (e.g. at 0x64DADFB8 test [ecx+24h], 1000h).
+//
+// Guard validates this_ptr, target batch a2, and wraps the call in SEH so that any
+// access violation inside Direct3D9 driver/proxy during draw is safely trapped
+// and counted rather than crashing with Error #132.
+// ----------------------------------------------------------------------------
+
+static constexpr uintptr_t kTarget6A3620 = 0x006A3620;
+static const unsigned char kExpectedPrologue6A3620[8] = {
+    0x55, 0x8B, 0xEC, 0x56, 0x8B, 0xF1, 0x83, 0xBE
+};
+
+typedef void (__fastcall* DeviceDraw_fn)(void* this_ptr, void* dummy_edx, void* a2, int a3);
+static DeviceDraw_fn g_orig6A3620 = nullptr;
+static volatile LONG g_deviceDrawFaultSuppressed = 0;
+static bool g_guard6A3620Active = false;
+
+static void __fastcall Hooked_6A3620(void* this_ptr, void* dummy_edx, void* a2, int a3) {
+    if (!this_ptr || !IsValidUserPointer((uintptr_t)this_ptr) || !a2 || !IsValidUserPointer((uintptr_t)a2)) {
+        return;
+    }
+    __try {
+        g_orig6A3620(this_ptr, dummy_edx, a2, a3);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        InterlockedIncrement(&g_deviceDrawFaultSuppressed);
+    }
+}
+
 bool InstallRenderNullGuard()
 {
     if (!Config::g_settings.OptRenderNullGuard) {
@@ -1283,7 +1315,7 @@ bool InstallRenderNullGuard()
 
     SYSTEM_INFO si = {};
     GetSystemInfo(&si);
-    g_hasHighAddressSpace = ((uintptr_t)si.lpMaximumApplicationAddress > 0x7FFE0000);
+    g_hasHighAddressSpace = ((uintptr_t)si.lpMaximumApplicationAddress > 0x80000000);
 
     void* target = (void*)0x00873060;
     unsigned char* p = (unsigned char*)target;
@@ -1506,7 +1538,22 @@ bool InstallRenderNullGuard()
         }
     }
 
-    return true;
+        void* target6A3620 = (void*)kTarget6A3620;
+    if (WowOpt_ClientPatchAllowed(target6A3620)) {
+        if (memcmp(target6A3620, kExpectedPrologue6A3620, sizeof(kExpectedPrologue6A3620)) == 0) {
+            if (MH_CreateHook(target6A3620, (void*)Hooked_6A3620, (void**)&g_orig6A3620) == MH_OK &&
+                MH_EnableHook(target6A3620) == MH_OK) {
+                g_guard6A3620Active = true;
+                Log("[RenderGuard] DeviceDraw guard ACTIVE on sub_6A3620 @ 0x%08X", (unsigned)kTarget6A3620);
+            } else {
+                Log("[RenderGuard] MH_CreateHook FAILED for 0x%08X", (unsigned)kTarget6A3620);
+            }
+        } else {
+            Log("[RenderGuard] BAD PROLOGUE at 0x%08X", (unsigned)kTarget6A3620);
+        }
+    }
+
+return true;
 }
 
 void RenderNullGuard_LogStats()
@@ -1603,6 +1650,11 @@ void RenderNullGuard_LogStats()
     if (g_invalidStageParamsSuppressed > 0) {
         Log("[RenderGuard] %ld invalid SetTextureStageParams calls SANITIZED on sub_6844C0 (Error #132 at 0x006844E8 prevented)",
             (long)g_invalidStageParamsSuppressed);
+    }
+
+        if (g_deviceDrawFaultSuppressed > 0) {
+        Log("[RenderGuard] %ld Direct3D DeviceDraw faults SUPPRESSED on sub_6A3620 (Error #132 prevented)",
+            (long)g_deviceDrawFaultSuppressed);
     }
 
     if (g_modelAnimNullSuppressed > 0) {

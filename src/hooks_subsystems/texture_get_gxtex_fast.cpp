@@ -153,24 +153,24 @@ bool RunStartupSelfTest() {
 
     // Fast path evaluation function matching Hooked_TextureGetGxTex logic
     auto TryFast = [](void* t, uint8_t streaming) -> void* {
-        if ((uintptr_t)t >= 0x10000 && (uintptr_t)t < 0xFFFE0000) {
+        if ((uintptr_t)t >= 0x10000 && (uintptr_t)t < 0xFFFF0000) {
             if (*(const uintptr_t*)t == 0xFFFFFFFF) {
                 return nullptr;
             }
 
             void* asyncObj = *(void**)((uintptr_t)t + 0x40);
-            if (asyncObj && ((uintptr_t)asyncObj < 0x10000 || (uintptr_t)asyncObj >= 0xFFFE0000)) {
+            if (asyncObj && ((uintptr_t)asyncObj < 0x10000 || (uintptr_t)asyncObj >= 0xFFFF0000)) {
                 *(void**)((uintptr_t)t + 0x40) = nullptr;
             }
 
             void* atlas = *(void**)((uintptr_t)t + 0x5C);
-            if (atlas && ((uintptr_t)atlas < 0x10000 || (uintptr_t)atlas >= 0xFFFE0000)) {
+            if (atlas && ((uintptr_t)atlas < 0x10000 || (uintptr_t)atlas >= 0xFFFF0000)) {
                 *(void**)((uintptr_t)t + 0x5C) = nullptr;
                 atlas = nullptr;
             }
 
             void* gxTex = *(void**)((uintptr_t)t + 0x44);
-            if (gxTex && ((uintptr_t)gxTex < 0x10000 || (uintptr_t)gxTex >= 0xFFFE0000)) {
+            if (gxTex && ((uintptr_t)gxTex < 0x10000 || (uintptr_t)gxTex >= 0xFFFF0000)) {
                 *(void**)((uintptr_t)t + 0x44) = nullptr;
                 gxTex = nullptr;
             }
@@ -219,25 +219,25 @@ __declspec(safebuffers) void* __cdecl Hooked_TextureGetGxTex(void* texture, int 
     void* candidate = nullptr;
     bool canFast = false;
 
-    if ((uintptr_t)texture >= 0x10000 && (uintptr_t)texture < 0xFFFE0000) {
+    if ((uintptr_t)texture >= 0x10000 && (uintptr_t)texture < 0xFFFF0000) {
         if (*(const uintptr_t*)texture == 0xFFFFFFFF) {
             return nullptr;
         }
 
         // Sanitize corrupted asyncObject if present (e.g. 0xFFFFFFFF)
         void* asyncObj = *(void**)((uintptr_t)texture + 0x40);
-        if (asyncObj && ((uintptr_t)asyncObj < 0x10000 || (uintptr_t)asyncObj >= 0xFFFE0000)) {
+        if (asyncObj && ((uintptr_t)asyncObj < 0x10000 || (uintptr_t)asyncObj >= 0xFFFF0000)) {
             *(void**)((uintptr_t)texture + 0x40) = nullptr;
         }
 
         void* atlas = *(void**)((uintptr_t)texture + 0x5C);
-        if (atlas && ((uintptr_t)atlas < 0x10000 || (uintptr_t)atlas >= 0xFFFE0000)) {
+        if (atlas && ((uintptr_t)atlas < 0x10000 || (uintptr_t)atlas >= 0xFFFF0000)) {
             *(void**)((uintptr_t)texture + 0x5C) = nullptr;
             atlas = nullptr;
         }
 
         void* gxTex = *(void**)((uintptr_t)texture + 0x44);
-        if (gxTex && ((uintptr_t)gxTex < 0x10000 || (uintptr_t)gxTex >= 0xFFFE0000)) {
+        if (gxTex && ((uintptr_t)gxTex < 0x10000 || (uintptr_t)gxTex >= 0xFFFF0000)) {
             *(void**)((uintptr_t)texture + 0x44) = nullptr;
             gxTex = nullptr;
         }

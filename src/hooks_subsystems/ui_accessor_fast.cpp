@@ -15,11 +15,11 @@ static bool g_inLuaShutdown = false;
 static inline bool IsTeardownState() {
     if (g_inLuaShutdown) return true;
     uintptr_t gL = *(uintptr_t*)0x00D3F78C;
-    return (gL < 0x10000 || gL > 0xFFFE0000);
+    return (gL < 0x10000 || gL > 0xFFFF0000);
 }
 
 static __forceinline bool IsValidPtr(uintptr_t p) {
-    return p > 0x10000 && p < 0xFFFE0000;
+    return p > 0x10000 && p < 0xFFFF0000;
 }
 
 static __forceinline bool IsWowCodePtr(uintptr_t p) {
