@@ -326,6 +326,7 @@ static const BoolSetting kBoolSettings[] = {
     { "UI_Lua", "UIStrataOcclusionFast", &Settings::OptUIStrataOcclusionFast },
     { "Graphics_Sound", "M2SkinningFast", &Settings::OptM2SkinningFast },
     { "Graphics_Sound", "DistanceFast", &Settings::OptDistanceFast },
+    { "Graphics_Sound", "TransformDirectionFast", &Settings::OptTransformDirectionFast },
 };
 
 
