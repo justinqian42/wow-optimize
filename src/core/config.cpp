@@ -320,6 +320,7 @@ static const BoolSetting kBoolSettings[] = {
     { "Graphics_Sound", "TerrainChunkAlphaFade", &Settings::OptTerrainChunkAlphaFade },
     { "UI_Lua", "UIAnchorDependentsFast", &Settings::OptUIAnchorDependentsFast },
     { "Graphics_Sound", "M2ParticleEmitterMatrixFast", &Settings::OptM2ParticleEmitterMatrixFast },
+    { "UI_Lua", "UIStrataOcclusionFast", &Settings::OptUIStrataOcclusionFast },
 };
 
 
@@ -1036,6 +1037,7 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         g_settings.OptTerrainChunkAlphaFade = GetPrivateProfileIntA("Graphics_Sound", "TerrainChunkAlphaFade", 0, iniPath.c_str()) != 0;
         g_settings.OptUIAnchorDependentsFast = GetPrivateProfileIntA("UI_Lua", "UIAnchorDependentsFast", 0, iniPath.c_str()) != 0;
         g_settings.OptM2ParticleEmitterMatrixFast = GetPrivateProfileIntA("Graphics_Sound", "M2ParticleEmitterMatrixFast", 0, iniPath.c_str()) != 0;
+        g_settings.OptUIStrataOcclusionFast = GetPrivateProfileIntA("UI_Lua", "UIStrataOcclusionFast", 0, iniPath.c_str()) != 0;
     }
 
 }

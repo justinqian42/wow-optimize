@@ -370,6 +370,8 @@ add_library(wow_optimize SHARED
     src/hooks_subsystems/world_vis_traverse_sse2.h
     src/hooks_subsystems/ui_strata_opt.cpp
     src/hooks_subsystems/ui_strata_opt.h
+    src/hooks_subsystems/ui_strata_occlusion_sse2.cpp
+    src/hooks_subsystems/ui_strata_occlusion_sse2.h
     src/hooks_subsystems/ui_frame_level_fast.cpp
     src/hooks_subsystems/ui_frame_level_fast.h
     src/hooks_subsystems/async_time_fast.cpp
