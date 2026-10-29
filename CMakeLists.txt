@@ -749,6 +749,8 @@ add_library(wow_optimize SHARED
     src/simd_math/spline_interp_fast.h
     src/simd_math/spline_deriv_fast.cpp
     src/simd_math/spline_deriv_fast.h
+    src/simd_math/m2_skinning_fast.cpp
+    src/simd_math/m2_skinning_fast.h
     src/simd_math/plane_from_points_fast.cpp
     src/simd_math/plane_from_points_fast.h
     src/simd_math/matrix_adjugate_fast.cpp

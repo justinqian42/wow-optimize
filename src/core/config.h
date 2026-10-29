@@ -807,6 +807,7 @@ namespace Config {
         bool OptM2ParticleEmitterMatrixFast = false;
         bool OptUIStrataOcclusionFast = false;
         bool OptSplineDerivFast = false;
+        bool OptM2SkinningFast = false;
     };
 
 
