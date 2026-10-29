@@ -349,6 +349,10 @@ add_library(wow_optimize SHARED
     src/simd_math/wmo_group_bounds_fast.h
     src/simd_math/map_obj_query_fast.cpp
     src/simd_math/map_obj_query_fast.h
+    src/simd_math/angle_normalize_fast.cpp
+    src/simd_math/angle_normalize_fast.h
+    src/simd_math/ray_bounding_box_fast.cpp
+    src/simd_math/ray_bounding_box_fast.h
 
     src/runtime_vm/lua_hget_dispatch.cpp
     src/runtime_vm/lua_pool_fast.cpp

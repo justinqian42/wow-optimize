@@ -171,6 +171,8 @@ static const BoolSetting kBoolSettings[] = {
     { "General", "HighPlacementHeapGrowth", &Settings::OptHighPlacementHeapGrowth },
     { "General", "ClientWriteBatch", &Settings::OptClientWriteBatch },
     { "Graphics_Sound", "AabbOverlap", &Settings::OptAabbOverlap },
+    { "SimdMath", "AngleNormalizeFast", &Settings::OptAngleNormalizeFast },
+    { "SimdMath", "RayBoundingBoxFast", &Settings::OptRayBoundingBoxFast },
     { "Graphics_Sound", "AabbTransform", &Settings::OptAabbTransform },
     { "Graphics_Sound", "ColorUnpack", &Settings::OptColorUnpack },
     { "Graphics_Sound", "AnimQuatUnpack", &Settings::OptAnimQuatUnpack },
@@ -867,6 +869,8 @@ static const int kBoolSettingCount = (int)(sizeof(kBoolSettings) / sizeof(kBoolS
         if (g_settings.HighPlacementMinKB < 64)    g_settings.HighPlacementMinKB = 64;
         if (g_settings.HighPlacementMinKB > 65536) g_settings.HighPlacementMinKB = 65536;
         g_settings.OptAabbOverlap         = GetPrivateProfileIntA("Graphics_Sound", "AabbOverlap", 0, iniPath.c_str()) != 0;
+        g_settings.OptAngleNormalizeFast  = GetPrivateProfileIntA("SimdMath", "AngleNormalizeFast", 1, iniPath.c_str()) != 0;
+        g_settings.OptRayBoundingBoxFast  = GetPrivateProfileIntA("SimdMath", "RayBoundingBoxFast", 1, iniPath.c_str()) != 0;
         g_settings.OptAabbTransform       = GetPrivateProfileIntA("Graphics_Sound", "AabbTransform", 1, iniPath.c_str()) != 0;
         g_settings.OptColorUnpack         = GetPrivateProfileIntA("Graphics_Sound", "ColorUnpack", 0, iniPath.c_str()) != 0;
         g_settings.OptAnimQuatUnpack      = GetPrivateProfileIntA("Graphics_Sound", "AnimQuatUnpack", 1, iniPath.c_str()) != 0;

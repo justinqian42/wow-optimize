@@ -163,6 +163,8 @@
 #include "runtime_vm/lua_gc_sweeplist_fast.h"
 #include "hooks_subsystems/ui_frame_level_fast.h"
 #include "hooks_subsystems/ui_strata_occlusion_sse2.h"
+#include "simd_math/angle_normalize_fast.h"
+#include "simd_math/ray_bounding_box_fast.h"
 #include "hooks_subsystems/async_time_fast.h"
 #include "hooks_subsystems/ui_anim_update_fast.h"
 #include "hooks_subsystems/gx_device_texture_fast.h"
@@ -6266,6 +6268,8 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("UIAnchorDependentsFast::LogStats", UIAnchorDependentsFast::LogStats());
     STAT_TIME("M2ParticleEmitterMatrixFast::LogStats", M2ParticleEmitterMatrixFast::LogStats());
     STAT_TIME("UIStrataOcclusionFast::LogStats", UIStrataOcclusionFast::LogStats());
+    STAT_TIME("AngleNormalizeFast::LogStats", AngleNormalizeFast::LogStats());
+    STAT_TIME("RayBoundingBoxFast::LogStats", RayBoundingBoxFast::LogStats());
 
     STAT_TIME("LuaHGetDispatch::LogStats", LuaHGetDispatch::LogStats());
     STAT_TIME("LuaPoolFast::LogStats", LuaPoolFast::LogStats());
@@ -9071,6 +9075,8 @@ static DWORD WINAPI MainThread(LPVOID param) {
     UIAnchorDependentsFast::Init();
     M2ParticleEmitterMatrixFast::Init();
     UIStrataOcclusionFast::Init();
+    AngleNormalizeFast::Init();
+    RayBoundingBoxFast::Init();
 
     LuaHGetDispatch::Init();
     LuaPoolFast::Init();
@@ -12151,6 +12157,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             UIAnchorDependentsFast::Shutdown();
             M2ParticleEmitterMatrixFast::Shutdown();
             UIStrataOcclusionFast::Shutdown();
+            AngleNormalizeFast::Shutdown();
+            RayBoundingBoxFast::Shutdown();
 
             SkyTextureReuse::Shutdown();
             WorldVisTraverse::Shutdown();

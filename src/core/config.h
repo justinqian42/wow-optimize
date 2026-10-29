@@ -495,6 +495,8 @@ namespace Config {
         // all, so bit-exact rather than close. Opt-in, and it checks itself
         // against the client before it stops calling it.
         bool OptAabbOverlap = false;
+        bool OptAngleNormalizeFast = true;
+        bool OptRayBoundingBoxFast = true;
         // Bounding box transformation (sub_7F9430 and sub_7F93D0), evaluated
         // across 22 callers during scene graph visibility traversal and culling.
         // Replaces 18 serialized x87 status-word transfers (fnstsw ax) and 9
