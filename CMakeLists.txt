@@ -761,6 +761,10 @@ add_library(wow_optimize SHARED
     src/simd_math/inside_frustum_fast.h
     src/simd_math/aabox_ops_fast.cpp
     src/simd_math/aabox_ops_fast.h
+    src/simd_math/m2_lighting_match_fast.cpp
+    src/simd_math/m2_lighting_match_fast.h
+    src/simd_math/camera_nearest_corner_fast.cpp
+    src/simd_math/camera_nearest_corner_fast.h
     src/simd_math/plane_from_points_fast.cpp
     src/simd_math/plane_from_points_fast.h
     src/simd_math/matrix_adjugate_fast.cpp

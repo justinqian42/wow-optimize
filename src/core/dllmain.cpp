@@ -162,6 +162,8 @@
 #include "simd_math/gx_blit_fast.h"
 #include "simd_math/inside_frustum_fast.h"
 #include "simd_math/aabox_ops_fast.h"
+#include "simd_math/m2_lighting_match_fast.h"
+#include "simd_math/camera_nearest_corner_fast.h"
 #include "simd_math/plane_from_points_fast.h"
 #include "simd_math/matrix_adjugate_fast.h"
 #include "simd_math/spline_seg_length_fast.h"
@@ -6259,6 +6261,8 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("GxBlitFast::LogStats", GxBlitFast::LogStats());
     STAT_TIME("InsideFrustumFast::LogStats", InsideFrustumFast::LogStats());
     STAT_TIME("AaBoxOpsFast::LogStats", AaBoxOpsFast::LogStats());
+    STAT_TIME("M2LightingMatchFast::LogStats", M2LightingMatchFast::LogStats());
+    STAT_TIME("CameraNearestCornerFast::LogStats", CameraNearestCornerFast::LogStats());
     STAT_TIME("PlaneFromPointsFast::LogStats", PlaneFromPointsFast::LogStats());
     STAT_TIME("MatrixAdjugateFast::LogStats", MatrixAdjugateFast::LogStats());
     STAT_TIME("SplineSegLengthFast::LogStats", SplineSegLengthFast::LogStats());
@@ -9073,6 +9077,8 @@ static DWORD WINAPI MainThread(LPVOID param) {
     GxBlitFast::Init();
     InsideFrustumFast::Init();
     AaBoxOpsFast::Init();
+    M2LightingMatchFast::Init();
+    CameraNearestCornerFast::Init();
     PlaneFromPointsFast::Init();
     MatrixAdjugateFast::Init();
     SplineSegLengthFast::Init();
@@ -12162,6 +12168,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             GxBlitFast::Shutdown();
             InsideFrustumFast::Shutdown();
             AaBoxOpsFast::Shutdown();
+            M2LightingMatchFast::Shutdown();
+            CameraNearestCornerFast::Shutdown();
             PlaneFromPointsFast::Shutdown();
             MatrixAdjugateFast::Shutdown();
             SplineSegLengthFast::Shutdown();

@@ -813,6 +813,8 @@ namespace Config {
         bool OptGxBlitFast = false;
         bool OptInsideFrustumFast = false;
         bool OptAaBoxOpsFast = false;
+        bool OptM2LightingMatchFast = false;
+        bool OptCameraNearestCornerFast = false;
     };
 
 
