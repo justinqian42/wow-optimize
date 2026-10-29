@@ -157,6 +157,7 @@
 #include "simd_math/spline_interp_fast.h"
 #include "simd_math/spline_deriv_fast.h"
 #include "simd_math/m2_skinning_fast.h"
+#include "simd_math/distance_fast.h"
 #include "simd_math/plane_from_points_fast.h"
 #include "simd_math/matrix_adjugate_fast.h"
 #include "simd_math/spline_seg_length_fast.h"
@@ -6249,6 +6250,7 @@ static void DumpPeriodicStats(const char* why, bool atProcessExit) {
     STAT_TIME("SplineInterpFast::LogStats", SplineInterpFast::LogStats());
     STAT_TIME("SplineDerivFast::LogStats", SplineDerivFast::LogStats());
     STAT_TIME("M2SkinningFast::LogStats", M2SkinningFast::LogStats());
+    STAT_TIME("DistanceFast::LogStats", DistanceFast::LogStats());
     STAT_TIME("PlaneFromPointsFast::LogStats", PlaneFromPointsFast::LogStats());
     STAT_TIME("MatrixAdjugateFast::LogStats", MatrixAdjugateFast::LogStats());
     STAT_TIME("SplineSegLengthFast::LogStats", SplineSegLengthFast::LogStats());
@@ -9058,6 +9060,7 @@ static DWORD WINAPI MainThread(LPVOID param) {
     SplineInterpFast::Init();
     SplineDerivFast::Init();
     M2SkinningFast::Init();
+    DistanceFast::Init();
     PlaneFromPointsFast::Init();
     MatrixAdjugateFast::Init();
     SplineSegLengthFast::Init();
@@ -12142,6 +12145,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             SplineInterpFast::Shutdown();
             SplineDerivFast::Shutdown();
             M2SkinningFast::Shutdown();
+            DistanceFast::Shutdown();
             PlaneFromPointsFast::Shutdown();
             MatrixAdjugateFast::Shutdown();
             SplineSegLengthFast::Shutdown();

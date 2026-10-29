@@ -808,6 +808,7 @@ namespace Config {
         bool OptUIStrataOcclusionFast = false;
         bool OptSplineDerivFast = false;
         bool OptM2SkinningFast = false;
+        bool OptDistanceFast = false;
     };
 
 
