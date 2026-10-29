@@ -811,6 +811,8 @@ namespace Config {
         bool OptDistanceFast = false;
         bool OptTransformDirectionFast = false;
         bool OptGxBlitFast = false;
+        bool OptInsideFrustumFast = false;
+        bool OptAaBoxOpsFast = false;
     };
 
 
